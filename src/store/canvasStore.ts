@@ -780,6 +780,11 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   },
 }));
 
+if (typeof window !== 'undefined') {
+  (window as unknown as { __STUDYBOARD_STORE__: typeof useCanvasStore }).__STUDYBOARD_STORE__ =
+    useCanvasStore;
+}
+
 function readFileAsDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

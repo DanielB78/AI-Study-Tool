@@ -255,17 +255,18 @@ textarea {
 .ctx-pill {
   pointer-events: auto;
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  max-width: min(92vw, 720px);
-  padding: 8px 12px;
+  gap: 6px;
+  max-width: min(98vw, 980px);
+  padding: 6px 10px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface) 94%, white);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
   backdrop-filter: blur(10px);
+  overflow-x: auto;
 }
 
 .ctx-field {
