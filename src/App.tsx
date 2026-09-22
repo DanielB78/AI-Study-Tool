@@ -1,12 +1,12 @@
 import { InfiniteCanvas } from './canvas/InfiniteCanvas';
-import { Toolbar } from './components/Toolbar';
+import { EditorChrome } from './components/toolbar/EditorChrome';
 
 export default function App() {
   return (
     <div className="app-shell">
-      <Toolbar />
       <main className="app-main">
         <InfiniteCanvas />
+        <EditorChrome />
       </main>
     </div>
   );

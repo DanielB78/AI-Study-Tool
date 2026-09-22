@@ -178,13 +178,64 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
 
   select: (ids, additive = false) => {
     set((s) => {
-      if (!additive) return { selectedIds: ids, editingTextId: null };
-      const next = new Set(s.selectedIds);
-      for (const id of ids) {
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
+      let selectedIds: string[];
+      if (!additive) {
+        selectedIds = ids;
+      } else {
+        const next = new Set(s.selectedIds);
+        for (const id of ids) {
+          if (next.has(id)) next.delete(id);
+          else next.add(id);
+        }
+        selectedIds = [...next];
       }
-      return { selectedIds: [...next], editingTextId: null };
+
+      const primary =
+        selectedIds.length === 1
+          ? s.document.elements.find((el) => el.id === selectedIds[0])
+          : undefined;
+
+      let style = s.style;
+      if (primary) {
+        switch (primary.type) {
+          case 'text':
+            style = {
+              ...style,
+              textColor: primary.color,
+              fontSize: primary.fontSize,
+              fontBold: primary.fontStyle === 'bold',
+              fontFamily: primary.fontFamily,
+              textAlignment: primary.alignment,
+            };
+            break;
+          case 'shape':
+            style = {
+              ...style,
+              fillColor: primary.fill,
+              strokeColor: primary.stroke,
+              strokeWidth: primary.strokeWidth,
+            };
+            break;
+          case 'drawing':
+            style = {
+              ...style,
+              strokeColor: primary.color,
+              strokeWidth: primary.strokeWidth,
+            };
+            break;
+          case 'connector':
+            style = {
+              ...style,
+              strokeColor: primary.stroke,
+              strokeWidth: primary.strokeWidth,
+            };
+            break;
+          default:
+            break;
+        }
+      }
+
+      return { selectedIds, editingTextId: null, style };
     });
   },
 

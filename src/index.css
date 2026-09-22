@@ -1,14 +1,12 @@
 :root {
   --bg: #e8e4db;
-  --surface: #f7f5f0;
+  --surface: #fbfaf7;
   --ink: #1c1917;
   --muted: #78716c;
   --accent: #0f766e;
   --accent-soft: #ccfbf1;
-  --border: #d6d3d1;
-  --danger: #b91c1c;
-  --shadow: 0 1px 2px rgba(28, 25, 23, 0.06), 0 8px 24px rgba(28, 25, 23, 0.06);
-  --radius: 10px;
+  --border: rgba(28, 25, 23, 0.12);
+  --shadow: 0 1px 2px rgba(28, 25, 23, 0.06), 0 10px 28px rgba(28, 25, 23, 0.1);
   --font-ui: "Segoe UI", "IBM Plex Sans", "Helvetica Neue", sans-serif;
   color: var(--ink);
   font-family: var(--font-ui);
@@ -31,10 +29,7 @@ body,
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background:
-    radial-gradient(1200px 600px at 10% -10%, #f0ebe1 0%, transparent 55%),
-    radial-gradient(900px 500px at 100% 0%, #dde8e4 0%, transparent 50%),
-    var(--bg);
+  background: var(--bg);
 }
 
 button,
@@ -45,14 +40,14 @@ textarea {
 }
 
 .app-shell {
-  display: grid;
-  grid-template-rows: auto 1fr;
   height: 100%;
   width: 100%;
 }
 
 .app-main {
   position: relative;
+  height: 100%;
+  width: 100%;
   min-height: 0;
 }
 
@@ -63,116 +58,270 @@ textarea {
   background: #f3f1ec;
 }
 
-.toolbar {
+/* —— Left floating tool palette —— */
+
+.ftb-edge-zone {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 40;
+  pointer-events: auto;
+}
+
+.ftb-root {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  z-index: 45;
   display: flex;
-  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+  transform: translate(-110%, -50%);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 160ms ease;
+}
+
+.ftb-root.visible {
+  transform: translate(0, -50%);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ftb-pill {
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.65rem 0.85rem;
-  padding: 0.55rem 0.85rem;
-  background: color-mix(in srgb, var(--surface) 92%, white);
-  border-bottom: 1px solid var(--border);
+  gap: 4px;
+  padding: 8px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 94%, white);
+  border: 1px solid var(--border);
   box-shadow: var(--shadow);
-  z-index: 20;
+  backdrop-filter: blur(10px);
 }
 
-.toolbar-brand {
-  margin-right: 0.35rem;
-}
-
-.brand-mark {
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  font-size: 1rem;
-  color: var(--accent);
-}
-
-.toolbar-group {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.2rem;
-  border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.55);
-  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
-}
-
-.toolbar-group.contextual {
-  flex: 1 1 auto;
-  min-width: 12rem;
-}
-
-.tool-btn {
+.ftb-btn {
   appearance: none;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid transparent;
+  border-radius: 999px;
   background: transparent;
   color: var(--ink);
-  border-radius: 8px;
-  padding: 0.35rem 0.6rem;
-  font-size: 0.82rem;
-  font-weight: 600;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
 }
 
-.tool-btn:hover:not(:disabled) {
+.ftb-btn:hover:not(:disabled) {
   background: rgba(15, 118, 110, 0.08);
 }
 
-.tool-btn.active {
+.ftb-btn.active {
   background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 35%, white);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
   color: #115e59;
 }
 
-.tool-btn:disabled {
-  opacity: 0.4;
+.ftb-btn:disabled {
+  opacity: 0.35;
   cursor: not-allowed;
 }
 
-.style-field {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.75rem;
-  color: var(--muted);
-  font-weight: 600;
-  padding: 0 0.25rem;
+.ftb-divider {
+  width: 18px;
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
 }
 
-.style-field input[type='color'] {
-  width: 1.6rem;
-  height: 1.6rem;
+/* —— Shapes popover —— */
+
+.shapes-popover {
+  margin-top: 0;
+  padding: 10px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface) 94%, white);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+  animation: pop-in 140ms ease;
+}
+
+.shapes-popover-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(72px, 1fr));
+  gap: 8px;
+}
+
+.shapes-popover-btn {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 72px;
+  min-height: 64px;
+  padding: 10px 8px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.shapes-popover-btn:hover {
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.shapes-popover-btn.active {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: #115e59;
+}
+
+.shapes-popover-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.shapes-popover-btn.active .shapes-popover-label {
+  color: #115e59;
+}
+
+/* —— Contextual top bar —— */
+
+.ctx-bar {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  z-index: 42;
+  transform: translateX(-50%);
+  pointer-events: none;
+  animation: pop-in 150ms ease;
+}
+
+.ctx-pill {
+  pointer-events: auto;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  max-width: min(92vw, 720px);
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 94%, white);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+.ctx-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.ctx-field-label {
+  white-space: nowrap;
+}
+
+.ctx-field input[type='color'] {
+  width: 1.55rem;
+  height: 1.55rem;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 999px;
   background: white;
   cursor: pointer;
 }
 
-.style-field input[type='number'] {
-  width: 3.4rem;
+.ctx-number {
+  width: 3.2rem;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.2rem 0.35rem;
+  border-radius: 999px;
+  padding: 0.25rem 0.45rem;
   background: white;
 }
 
-.style-field input[type='range'] {
-  width: 5rem;
-}
-
-.align-select {
+.ctx-select {
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.25rem 0.4rem;
+  border-radius: 999px;
+  padding: 0.28rem 0.55rem;
   background: white;
+  color: var(--ink);
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 
-.layer-controls {
+.ctx-chip {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: white;
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ctx-chip.active {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: #115e59;
+}
+
+.ctx-icon-btn {
+  appearance: none;
+  width: 30px;
+  height: 30px;
   display: inline-flex;
-  gap: 0.2rem;
-  margin-left: 0.25rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.ctx-icon-btn:hover {
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.ctx-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 2px;
+}
+
+.ctx-range-value {
+  min-width: 1.1rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.ctx-field input[type='range'] {
+  width: 4.5rem;
 }
 
 .text-editor-overlay {
@@ -187,18 +336,28 @@ textarea {
   outline: none;
 }
 
-@media (max-width: 720px) {
-  .toolbar {
-    gap: 0.45rem;
-    padding: 0.45rem 0.55rem;
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
   }
-
-  .tool-btn {
-    padding: 0.3rem 0.45rem;
-    font-size: 0.75rem;
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
+}
 
-  .brand-mark {
-    font-size: 0.9rem;
+.ctx-bar {
+  animation: ctx-in 150ms ease;
+}
+
+@keyframes ctx-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
   }
 }
