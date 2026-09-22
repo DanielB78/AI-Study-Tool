@@ -1,0 +1,204 @@
+:root {
+  --bg: #e8e4db;
+  --surface: #f7f5f0;
+  --ink: #1c1917;
+  --muted: #78716c;
+  --accent: #0f766e;
+  --accent-soft: #ccfbf1;
+  --border: #d6d3d1;
+  --danger: #b91c1c;
+  --shadow: 0 1px 2px rgba(28, 25, 23, 0.06), 0 8px 24px rgba(28, 25, 23, 0.06);
+  --radius: 10px;
+  --font-ui: "Segoe UI", "IBM Plex Sans", "Helvetica Neue", sans-serif;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #f0ebe1 0%, transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, #dde8e4 0%, transparent 50%),
+    var(--bg);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100%;
+  width: 100%;
+}
+
+.app-main {
+  position: relative;
+  min-height: 0;
+}
+
+.canvas-viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #f3f1ec;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 0.85rem;
+  padding: 0.55rem 0.85rem;
+  background: color-mix(in srgb, var(--surface) 92%, white);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  z-index: 20;
+}
+
+.toolbar-brand {
+  margin-right: 0.35rem;
+}
+
+.brand-mark {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-size: 1rem;
+  color: var(--accent);
+}
+
+.toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.toolbar-group.contextual {
+  flex: 1 1 auto;
+  min-width: 12rem;
+}
+
+.tool-btn {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.tool-btn:hover:not(:disabled) {
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.tool-btn.active {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 35%, white);
+  color: #115e59;
+}
+
+.tool-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.style-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 0 0.25rem;
+}
+
+.style-field input[type='color'] {
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: white;
+  cursor: pointer;
+}
+
+.style-field input[type='number'] {
+  width: 3.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.2rem 0.35rem;
+  background: white;
+}
+
+.style-field input[type='range'] {
+  width: 5rem;
+}
+
+.align-select {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.25rem 0.4rem;
+  background: white;
+}
+
+.layer-controls {
+  display: inline-flex;
+  gap: 0.2rem;
+  margin-left: 0.25rem;
+}
+
+.text-editor-overlay {
+  margin: 0;
+  border: 1.5px solid #2563eb;
+  border-radius: 4px;
+  padding: 4px;
+  resize: none;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+  outline: none;
+}
+
+@media (max-width: 720px) {
+  .toolbar {
+    gap: 0.45rem;
+    padding: 0.45rem 0.55rem;
+  }
+
+  .tool-btn {
+    padding: 0.3rem 0.45rem;
+    font-size: 0.75rem;
+  }
+
+  .brand-mark {
+    font-size: 0.9rem;
+  }
+}
