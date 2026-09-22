@@ -107,6 +107,19 @@ export function InfiniteCanvas() {
   const isSelectMode = activeTool === 'select' && !isSpacePanning;
   const canInteractWithObjects = isSelectMode;
 
+  const getWorldPointer = useCallback((): { x: number; y: number } | null => {
+    const stage = stageRef.current;
+    if (!stage) return null;
+    const pointer = stage.getPointerPosition();
+    if (!pointer) return null;
+    const layer = stage.findOne('Layer');
+    if (layer) {
+      const rel = layer.getRelativePointerPosition();
+      if (rel) return { x: rel.x, y: rel.y };
+    }
+    return screenToWorld(pointer, useCanvasStore.getState().document.camera);
+  }, []);
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -154,7 +167,8 @@ export function InfiniteCanvas() {
 
     const tool = useCanvasStore.getState().activeTool;
     const spacePan = useCanvasStore.getState().isSpacePanning;
-    const world = screenToWorld(pointer, useCanvasStore.getState().document.camera);
+    const world = getWorldPointer();
+    if (!world) return;
     const clickedEmpty = e.target === stage || e.target.name() === 'board-bg';
 
     if (spacePan || tool === 'pan' || e.evt.button === 1) {
@@ -226,7 +240,8 @@ export function InfiniteCanvas() {
     const pointer = stage.getPointerPosition();
     if (!pointer) return;
     const cam = useCanvasStore.getState().document.camera;
-    const world = screenToWorld(pointer, cam);
+    const world = getWorldPointer();
+    if (!world) return;
 
     if (panState.current?.active) {
       const dx = pointer.x - panState.current.lastX;
