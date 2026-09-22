@@ -76,7 +76,7 @@ textarea {
   z-index: 45;
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 0;
   /* Almost hidden — tiny peek so the left dock is discoverable */
   transform: translate(calc(-100% + 8px), -50%);
   opacity: 0.4;
@@ -103,6 +103,7 @@ textarea {
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
   backdrop-filter: blur(10px);
+  overflow: visible;
 }
 
 .ftb-btn {
@@ -185,6 +186,7 @@ textarea {
 
 .shapes-popover {
   margin-top: 0;
+  margin-left: 10px;
   padding: 10px;
   border-radius: 18px;
   background: color-mix(in srgb, var(--surface) 94%, white);
