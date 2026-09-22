@@ -11,7 +11,10 @@ export function now(): number {
 
 export function createBaseFields(
   partial: Partial<
-    Pick<BaseElement, 'x' | 'y' | 'width' | 'height' | 'rotation' | 'metadata'>
+    Pick<
+      BaseElement,
+      'x' | 'y' | 'width' | 'height' | 'rotation' | 'metadata' | 'opacity' | 'locked'
+    >
   > & { zIndex: number },
 ): BaseElement {
   const t = now();
@@ -23,6 +26,8 @@ export function createBaseFields(
     height: partial.height ?? 0,
     rotation: partial.rotation ?? 0,
     zIndex: partial.zIndex,
+    opacity: partial.opacity ?? 1,
+    locked: partial.locked ?? false,
     createdAt: t,
     updatedAt: t,
     metadata: partial.metadata ?? {},

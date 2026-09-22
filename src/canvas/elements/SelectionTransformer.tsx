@@ -17,6 +17,7 @@ export function SelectionTransformer({ selectedIds, elements, enabled }: Props) 
   const updateElement = useCanvasStore((s) => s.updateElement);
   const persist = useCanvasStore((s) => s.persist);
   const setEditingTextId = useCanvasStore((s) => s.setEditingTextId);
+  const setEditingShapeLabelId = useCanvasStore((s) => s.setEditingShapeLabelId);
   const pushHistory = useCanvasStore((s) => s.pushHistory);
 
   useEffect(() => {
@@ -64,9 +65,12 @@ export function SelectionTransformer({ selectedIds, elements, enabled }: Props) 
       }}
       onTransformStart={() => beginInteraction()}
       onDblClick={() => {
-        if (single?.type === 'text') {
+        if (single?.type === 'text' && !single.locked) {
           pushHistory();
           setEditingTextId(single.id);
+        } else if (single?.type === 'shape' && !single.locked) {
+          pushHistory();
+          setEditingShapeLabelId(single.id);
         }
       }}
       onTransformEnd={() => {
@@ -75,26 +79,14 @@ export function SelectionTransformer({ selectedIds, elements, enabled }: Props) 
         for (const node of tr.nodes()) {
           const id = node.id();
           const el = elements.find((e) => e.id === id);
-          if (!el) continue;
+          if (!el || el.locked) continue;
 
           const scaleX = node.scaleX();
           const scaleY = node.scaleY();
           node.scaleX(1);
           node.scaleY(1);
 
-          if (el.type === 'shape' && el.shapeType === 'ellipse') {
-            const width = Math.max(8, Math.abs(node.width() * scaleX));
-            const height = Math.max(8, Math.abs(node.height() * scaleY));
-            // Ellipse node is centered
-            updateElement(id, (prev) => ({
-              ...prev,
-              x: node.x() - width / 2,
-              y: node.y() - height / 2,
-              width,
-              height,
-              rotation: node.rotation(),
-            }));
-          } else if (el.type === 'connector' || el.type === 'drawing') {
+          if (el.type === 'connector' || el.type === 'drawing') {
             updateElement(id, (prev) => ({
               ...prev,
               x: node.x(),
@@ -102,7 +94,6 @@ export function SelectionTransformer({ selectedIds, elements, enabled }: Props) 
               rotation: node.rotation(),
             }));
           } else {
-            // Prefer stored geometry — Groups (text) may report width()/height() as 0.
             const width = Math.max(8, Math.abs(el.width * scaleX));
             const height = Math.max(8, Math.abs(el.height * scaleY));
             updateElement(id, (prev) => ({

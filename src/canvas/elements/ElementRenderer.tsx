@@ -8,25 +8,25 @@ import { TextNode } from './TextNode';
 interface Props {
   element: CanvasElement;
   listening: boolean;
-  draggable?: boolean;
   isEditingText: boolean;
   onSelect: (id: string, additive: boolean) => void;
   onDragStart: (id: string) => void;
   onDragMove: (id: string, x: number, y: number) => void;
   onDragEnd: (id: string, x: number, y: number) => void;
   onEditText: (id: string) => void;
+  onEditShapeLabel: (id: string) => void;
 }
 
 export function ElementRenderer({
   element,
   listening,
-  draggable = listening,
   isEditingText,
   onSelect,
   onDragStart,
   onDragMove,
   onDragEnd,
   onEditText,
+  onEditShapeLabel,
 }: Props) {
   switch (element.type) {
     case 'text':
@@ -34,7 +34,6 @@ export function ElementRenderer({
         <TextNode
           element={element}
           listening={listening}
-          draggable={draggable}
           isEditing={isEditingText}
           onSelect={onSelect}
           onDragStart={onDragStart}
@@ -52,6 +51,7 @@ export function ElementRenderer({
           onDragStart={onDragStart}
           onDragMove={onDragMove}
           onDragEnd={onDragEnd}
+          onDblClick={onEditShapeLabel}
         />
       );
     case 'drawing':

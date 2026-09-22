@@ -7,11 +7,16 @@ import type {
   DrawingElement,
   ImageElement,
   ShapeElement,
+  ShapeType,
   StyleDefaults,
   TextElement,
   ToolType,
 } from '../types/canvas';
-import { DEFAULT_STYLE, createEmptyDocument } from '../types/canvas';
+import {
+  DEFAULT_STYLE,
+  createEmptyDocument,
+  isShapeTool,
+} from '../types/canvas';
 import { cloneElement, createBaseFields, createId, touch } from '../utils/ids';
 import { boundsFromPoints, rebasePoints } from '../utils/coordinates';
 import {
@@ -19,19 +24,24 @@ import {
   loadOrCreateDocument,
   type PersistenceService,
 } from '../persistence/storage';
+import { styleFromElement } from '../persistence/migrate';
 
 const MAX_HISTORY = 80;
 const persistence: PersistenceService = createLocalStoragePersistence();
+
+export type DraftShapeKind = ShapeType | 'line' | 'arrow';
 
 export interface TransientUI {
   selectedIds: string[];
   activeTool: ToolType;
   editingTextId: string | null;
+  /** Shape id currently editing its label. */
+  editingShapeLabelId: string | null;
   isSpacePanning: boolean;
   marquee: { x: number; y: number; width: number; height: number } | null;
   draftPoints: number[] | null;
   draftShape: {
-    kind: 'rectangle' | 'ellipse' | 'line' | 'arrow';
+    kind: DraftShapeKind;
     x: number;
     y: number;
     width: number;
@@ -40,12 +50,13 @@ export interface TransientUI {
     y2?: number;
   } | null;
   clipboard: CanvasElement[];
+  /** Transient snap guides in world coords. */
+  snapGuides: { orientation: 'h' | 'v'; position: number }[];
 }
 
 interface HistorySlice {
   past: CanvasDocument[];
   future: CanvasDocument[];
-  /** When true, mutations skip pushing history (mid-drag frames). */
   historySuspended: boolean;
 }
 
@@ -60,12 +71,13 @@ export interface CanvasStore extends TransientUI, HistorySlice {
   setMarquee: (marquee: TransientUI['marquee']) => void;
   setDraftPoints: (points: number[] | null) => void;
   setDraftShape: (draft: TransientUI['draftShape']) => void;
+  setSnapGuides: (guides: TransientUI['snapGuides']) => void;
 
   select: (ids: string[], additive?: boolean) => void;
   clearSelection: () => void;
   setEditingTextId: (id: string | null) => void;
+  setEditingShapeLabelId: (id: string | null) => void;
 
-  /** Snapshot document into history before a meaningful change. */
   pushHistory: () => void;
   beginInteraction: () => void;
   endInteraction: () => void;
@@ -90,8 +102,21 @@ export interface CanvasStore extends TransientUI, HistorySlice {
   copySelected: () => void;
   pasteClipboard: () => void;
   duplicateSelected: () => void;
+  toggleLockSelected: () => void;
 
-  createTextAt: (worldX: number, worldY: number) => string;
+  alignSelected: (
+    mode:
+      | 'left'
+      | 'centerX'
+      | 'right'
+      | 'top'
+      | 'centerY'
+      | 'bottom'
+      | 'distributeX'
+      | 'distributeY',
+  ) => void;
+
+  createTextAt: (worldX: number, worldY: number, width?: number) => string;
   commitDrawing: (absolutePoints: number[]) => void;
   commitShape: (draft: NonNullable<TransientUI['draftShape']>) => void;
   addImageFromFile: (file: File, worldX: number, worldY: number) => Promise<void>;
@@ -103,7 +128,7 @@ export interface CanvasStore extends TransientUI, HistorySlice {
     worldY: number,
   ) => void;
 
-  applyStyleToSelection: () => void;
+  applyStyleToSelection: (partial?: Partial<StyleDefaults>) => void;
   persist: () => void;
   hydrate: () => void;
 }
@@ -123,24 +148,37 @@ function withUpdatedElements(
   return { ...doc, elements: sortByZ(elements) };
 }
 
+function reindex(elements: CanvasElement[]): CanvasElement[] {
+  return elements.map((el, index) =>
+    el.zIndex === index + 1 ? el : touch({ ...el, zIndex: index + 1 }),
+  );
+}
+
 export const useCanvasStore = create<CanvasStore>((set, get) => ({
   document: createEmptyDocument(),
   style: { ...DEFAULT_STYLE },
   selectedIds: [],
   activeTool: 'select',
   editingTextId: null,
+  editingShapeLabelId: null,
   isSpacePanning: false,
   marquee: null,
   draftPoints: null,
   draftShape: null,
   clipboard: [],
+  snapGuides: [],
   past: [],
   future: [],
   historySuspended: false,
 
   hydrate: () => {
     const doc = loadOrCreateDocument(persistence);
-    set({ document: doc, selectedIds: [], editingTextId: null });
+    set({
+      document: doc,
+      selectedIds: [],
+      editingTextId: null,
+      editingShapeLabelId: null,
+    });
   },
 
   persist: () => {
@@ -151,6 +189,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     set({
       activeTool: tool,
       editingTextId: null,
+      editingShapeLabelId: null,
       draftPoints: null,
       draftShape: null,
       marquee: null,
@@ -174,14 +213,16 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   setMarquee: (marquee) => set({ marquee }),
   setDraftPoints: (points) => set({ draftPoints: points }),
   setDraftShape: (draft) => set({ draftShape: draft }),
-  setEditingTextId: (id) => set({ editingTextId: id }),
+  setSnapGuides: (guides) => set({ snapGuides: guides }),
+  setEditingTextId: (id) => set({ editingTextId: id, editingShapeLabelId: null }),
+  setEditingShapeLabelId: (id) =>
+    set({ editingShapeLabelId: id, editingTextId: null }),
 
   select: (ids, additive = false) => {
     set((s) => {
       let selectedIds: string[];
-      if (!additive) {
-        selectedIds = ids;
-      } else {
+      if (!additive) selectedIds = ids;
+      else {
         const next = new Set(s.selectedIds);
         for (const id of ids) {
           if (next.has(id)) next.delete(id);
@@ -195,57 +236,25 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
           ? s.document.elements.find((el) => el.id === selectedIds[0])
           : undefined;
 
-      let style = s.style;
-      if (primary) {
-        switch (primary.type) {
-          case 'text':
-            style = {
-              ...style,
-              textColor: primary.color,
-              fontSize: primary.fontSize,
-              fontBold: primary.fontStyle === 'bold',
-              fontFamily: primary.fontFamily,
-              textAlignment: primary.alignment,
-            };
-            break;
-          case 'shape':
-            style = {
-              ...style,
-              fillColor: primary.fill,
-              strokeColor: primary.stroke,
-              strokeWidth: primary.strokeWidth,
-            };
-            break;
-          case 'drawing':
-            style = {
-              ...style,
-              strokeColor: primary.color,
-              strokeWidth: primary.strokeWidth,
-            };
-            break;
-          case 'connector':
-            style = {
-              ...style,
-              strokeColor: primary.stroke,
-              strokeWidth: primary.strokeWidth,
-            };
-            break;
-          default:
-            break;
-        }
-      }
-
-      return { selectedIds, editingTextId: null, style };
+      return {
+        selectedIds,
+        editingTextId: null,
+        editingShapeLabelId: null,
+        style: primary ? styleFromElement(primary, s.style) : s.style,
+      };
     });
   },
 
-  clearSelection: () => set({ selectedIds: [], editingTextId: null }),
+  clearSelection: () =>
+    set({ selectedIds: [], editingTextId: null, editingShapeLabelId: null }),
 
   pushHistory: () => {
     const { document, past, historySuspended } = get();
     if (historySuspended) return;
-    const nextPast = [...past, snapshotDoc(document)].slice(-MAX_HISTORY);
-    set({ past: nextPast, future: [] });
+    set({
+      past: [...past, snapshotDoc(document)].slice(-MAX_HISTORY),
+      future: [],
+    });
   },
 
   beginInteraction: () => {
@@ -254,7 +263,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   },
 
   endInteraction: () => {
-    set({ historySuspended: false });
+    set({ historySuspended: false, snapGuides: [] });
     get().persist();
   },
 
@@ -268,6 +277,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       document: previous,
       selectedIds: [],
       editingTextId: null,
+      editingShapeLabelId: null,
     });
     get().persist();
   },
@@ -282,6 +292,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       document: next,
       selectedIds: [],
       editingTextId: null,
+      editingShapeLabelId: null,
     });
     get().persist();
   },
@@ -323,23 +334,28 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   deleteSelected: () => {
     const { selectedIds, document } = get();
     if (selectedIds.length === 0) return;
-    get().pushHistory();
     const idSet = new Set(selectedIds);
+    const locked = document.elements.some((el) => idSet.has(el.id) && el.locked);
+    if (locked && selectedIds.every((id) => document.elements.find((e) => e.id === id)?.locked)) {
+      return;
+    }
+    get().pushHistory();
     set({
       document: withUpdatedElements(
         document,
-        document.elements.filter((el) => !idSet.has(el.id)),
+        document.elements.filter((el) => !idSet.has(el.id) || el.locked),
       ),
-      selectedIds: [],
+      selectedIds: selectedIds.filter(
+        (id) => document.elements.find((e) => e.id === id)?.locked,
+      ),
       editingTextId: null,
+      editingShapeLabelId: null,
     });
     get().persist();
   },
 
   replaceElements: (elements) => {
-    set((s) => ({
-      document: withUpdatedElements(s.document, elements),
-    }));
+    set((s) => ({ document: withUpdatedElements(s.document, elements) }));
   },
 
   bringForward: () => {
@@ -356,10 +372,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
         next[i + 1] = tmp;
       }
     }
-    const reindexed = next.map((el, index) =>
-      el.zIndex === index + 1 ? el : touch({ ...el, zIndex: index + 1 }),
-    );
-    set({ document: withUpdatedElements(document, reindexed) });
+    set({ document: withUpdatedElements(document, reindex(next)) });
     get().persist();
   },
 
@@ -377,10 +390,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
         next[i - 1] = tmp;
       }
     }
-    const reindexed = next.map((el, index) =>
-      el.zIndex === index + 1 ? el : touch({ ...el, zIndex: index + 1 }),
-    );
-    set({ document: withUpdatedElements(document, reindexed) });
+    set({ document: withUpdatedElements(document, reindex(next)) });
     get().persist();
   },
 
@@ -391,10 +401,12 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     const idSet = new Set(selectedIds);
     const rest = document.elements.filter((el) => !idSet.has(el.id));
     const selected = document.elements.filter((el) => idSet.has(el.id));
-    const merged = [...sortByZ(rest), ...sortByZ(selected)].map((el, index) =>
-      touch({ ...el, zIndex: index + 1 }),
-    );
-    set({ document: withUpdatedElements(document, merged) });
+    set({
+      document: withUpdatedElements(
+        document,
+        reindex([...sortByZ(rest), ...sortByZ(selected)]),
+      ),
+    });
     get().persist();
   },
 
@@ -405,18 +417,23 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     const idSet = new Set(selectedIds);
     const rest = document.elements.filter((el) => !idSet.has(el.id));
     const selected = document.elements.filter((el) => idSet.has(el.id));
-    const merged = [...sortByZ(selected), ...sortByZ(rest)].map((el, index) =>
-      touch({ ...el, zIndex: index + 1 }),
-    );
-    set({ document: withUpdatedElements(document, merged) });
+    set({
+      document: withUpdatedElements(
+        document,
+        reindex([...sortByZ(selected), ...sortByZ(rest)]),
+      ),
+    });
     get().persist();
   },
 
   copySelected: () => {
     const { selectedIds, document } = get();
     const idSet = new Set(selectedIds);
-    const copied = document.elements.filter((el) => idSet.has(el.id)).map((el) => structuredClone(el));
-    set({ clipboard: copied });
+    set({
+      clipboard: document.elements
+        .filter((el) => idSet.has(el.id))
+        .map((el) => structuredClone(el)),
+    });
   },
 
   pasteClipboard: () => {
@@ -427,6 +444,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     const pasted = clipboard.map((el) => {
       const clone = cloneElement(el, 24);
       clone.zIndex = z++;
+      clone.locked = false;
       return clone;
     });
     set((s) => ({
@@ -442,25 +460,115 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     get().pasteClipboard();
   },
 
-  createTextAt: (worldX, worldY) => {
+  toggleLockSelected: () => {
+    const { selectedIds } = get();
+    if (selectedIds.length === 0) return;
+    get().pushHistory();
+    const idSet = new Set(selectedIds);
+    const selected = get().document.elements.filter((el) => idSet.has(el.id));
+    const shouldLock = selected.some((el) => !el.locked);
+    get().updateElements(selectedIds, (el) => ({ ...el, locked: shouldLock }));
+    get().persist();
+  },
+
+  alignSelected: (mode) => {
+    const { selectedIds, document } = get();
+    if (selectedIds.length < 2) return;
+    get().pushHistory();
+    const idSet = new Set(selectedIds);
+    const selected = document.elements.filter((el) => idSet.has(el.id) && !el.locked);
+    if (selected.length < 2) return;
+
+    const minX = Math.min(...selected.map((e) => e.x));
+    const maxX = Math.max(...selected.map((e) => e.x + e.width));
+    const minY = Math.min(...selected.map((e) => e.y));
+    const maxY = Math.max(...selected.map((e) => e.y + e.height));
+    const midX = (minX + maxX) / 2;
+    const midY = (minY + maxY) / 2;
+
+    let updates: CanvasElement[] = selected;
+
+    if (mode === 'distributeX' || mode === 'distributeY') {
+      if (selected.length < 3) return;
+      const sorted =
+        mode === 'distributeX'
+          ? [...selected].sort((a, b) => a.x - b.x)
+          : [...selected].sort((a, b) => a.y - b.y);
+      if (mode === 'distributeX') {
+        const first = sorted[0]!;
+        const last = sorted[sorted.length - 1]!;
+        const span = last.x - first.x;
+        const step = span / (sorted.length - 1);
+        updates = sorted.map((el, i) =>
+          touch({ ...el, x: first.x + step * i }),
+        );
+      } else {
+        const first = sorted[0]!;
+        const last = sorted[sorted.length - 1]!;
+        const span = last.y - first.y;
+        const step = span / (sorted.length - 1);
+        updates = sorted.map((el, i) =>
+          touch({ ...el, y: first.y + step * i }),
+        );
+      }
+    } else {
+      updates = selected.map((el) => {
+        switch (mode) {
+          case 'left':
+            return touch({ ...el, x: minX });
+          case 'centerX':
+            return touch({ ...el, x: midX - el.width / 2 });
+          case 'right':
+            return touch({ ...el, x: maxX - el.width });
+          case 'top':
+            return touch({ ...el, y: minY });
+          case 'centerY':
+            return touch({ ...el, y: midY - el.height / 2 });
+          case 'bottom':
+            return touch({ ...el, y: maxY - el.height });
+          default:
+            return el;
+        }
+      });
+    }
+
+    const byId = new Map(updates.map((el) => [el.id, el]));
+    set({
+      document: withUpdatedElements(
+        document,
+        document.elements.map((el) => byId.get(el.id) ?? el),
+      ),
+    });
+    get().persist();
+  },
+
+  createTextAt: (worldX, worldY, width = 220) => {
     const { style } = get();
     const id = createId();
     const element: TextElement = {
       ...createBaseFields({
         x: worldX,
         y: worldY,
-        width: 220,
-        height: 40,
+        width,
+        height: Math.max(40, style.fontSize * style.lineHeight + style.textPadding * 2),
         zIndex: get().nextZIndex(),
+        opacity: style.opacity,
       }),
       id,
       type: 'text',
       text: 'Text',
       fontSize: style.fontSize,
       fontFamily: style.fontFamily,
-      fontStyle: style.fontBold ? 'bold' : 'normal',
+      fontWeight: style.fontWeight,
+      fontItalic: style.fontItalic,
+      underline: style.underline,
+      strikethrough: style.strikethrough,
       color: style.textColor,
       alignment: style.textAlignment,
+      lineHeight: style.lineHeight,
+      backgroundColor: style.textBackgroundColor,
+      padding: style.textPadding,
+      cornerRadius: style.textCornerRadius,
     };
     get().addElement(element, true);
     set({ editingTextId: id, activeTool: 'select' });
@@ -485,11 +593,13 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
         width: Math.max(bounds.width + pad * 2, 1),
         height: Math.max(bounds.height + pad * 2, 1),
         zIndex: get().nextZIndex(),
+        opacity: style.opacity,
       }),
       type: 'drawing',
       points,
-      color: style.strokeColor,
+      color: style.strokeColor ?? '#1a1a1a',
       strokeWidth: style.strokeWidth,
+      strokeStyle: style.strokeStyle,
     };
     set({ draftPoints: null });
     get().addElement(element, true);
@@ -514,12 +624,20 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
           width: Math.max(Math.abs(x2 - x1), 1),
           height: Math.max(Math.abs(y2 - y1), 1),
           zIndex: get().nextZIndex(),
+          opacity: style.opacity,
         }),
         type: 'connector',
         connectorType: draft.kind,
         points: [x1 - minX, y1 - minY, x2 - minX, y2 - minY],
-        stroke: style.strokeColor,
+        stroke: style.strokeColor ?? '#1a1a1a',
         strokeWidth: style.strokeWidth,
+        strokeStyle: style.strokeStyle,
+        arrowHeads:
+          draft.kind === 'arrow'
+            ? style.arrowHeads === 'none'
+              ? 'end'
+              : style.arrowHeads
+            : 'none',
         startBindingId: null,
         endBindingId: null,
       };
@@ -528,6 +646,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     }
 
     if (draft.width < 3 && draft.height < 3) return;
+    const shapeType = draft.kind;
     const element: ShapeElement = {
       ...createBaseFields({
         x: draft.x,
@@ -535,12 +654,24 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
         width: Math.max(draft.width, 1),
         height: Math.max(draft.height, 1),
         zIndex: get().nextZIndex(),
+        opacity: style.opacity,
       }),
       type: 'shape',
-      shapeType: draft.kind,
+      shapeType,
       fill: style.fillColor,
       stroke: style.strokeColor,
       strokeWidth: style.strokeWidth,
+      strokeStyle: style.strokeStyle,
+      cornerRadius:
+        shapeType === 'roundedRect' ? Math.max(style.cornerRadius, 8) : 0,
+      starPoints: 5,
+      starInnerRatio: 0.45,
+      label: '',
+      labelFontSize: style.fontSize,
+      labelFontFamily: style.fontFamily,
+      labelFontWeight: style.fontWeight,
+      labelFontItalic: style.fontItalic,
+      labelColor: style.textColor,
     };
     get().addElement(element, true);
   },
@@ -557,6 +688,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
         width,
         height,
         zIndex: get().nextZIndex(),
+        opacity: get().style.opacity,
       }),
       type: 'image',
       src,
@@ -574,22 +706,32 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     get().addImageFromSrc(src, width, height, worldX, worldY);
   },
 
-  applyStyleToSelection: () => {
-    const { selectedIds, style, document } = get();
+  applyStyleToSelection: (partial) => {
+    const { selectedIds, style: currentStyle, document } = get();
     if (selectedIds.length === 0) return;
+    if (partial) get().setStyle(partial);
+    const style = { ...currentStyle, ...partial };
     get().pushHistory();
     const idSet = new Set(selectedIds);
     const elements = document.elements.map((el) => {
-      if (!idSet.has(el.id)) return el;
+      if (!idSet.has(el.id) || el.locked) return el;
       switch (el.type) {
         case 'text':
           return touch({
             ...el,
             color: style.textColor,
             fontSize: style.fontSize,
-            fontStyle: style.fontBold ? 'bold' : 'normal',
+            fontWeight: style.fontWeight,
+            fontItalic: style.fontItalic,
+            underline: style.underline,
+            strikethrough: style.strikethrough,
             alignment: style.textAlignment,
             fontFamily: style.fontFamily,
+            lineHeight: style.lineHeight,
+            backgroundColor: style.textBackgroundColor,
+            padding: style.textPadding,
+            cornerRadius: style.textCornerRadius,
+            opacity: style.opacity,
           });
         case 'shape':
           return touch({
@@ -597,24 +739,41 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
             fill: style.fillColor,
             stroke: style.strokeColor,
             strokeWidth: style.strokeWidth,
+            strokeStyle: style.strokeStyle,
+            cornerRadius:
+              el.shapeType === 'roundedRect' ? style.cornerRadius : el.cornerRadius,
+            opacity: style.opacity,
+            labelFontSize: style.fontSize,
+            labelFontFamily: style.fontFamily,
+            labelFontWeight: style.fontWeight,
+            labelFontItalic: style.fontItalic,
+            labelColor: style.textColor,
           });
         case 'drawing':
           return touch({
             ...el,
-            color: style.strokeColor,
+            color: style.strokeColor ?? el.color,
             strokeWidth: style.strokeWidth,
+            strokeStyle: style.strokeStyle,
+            opacity: style.opacity,
           });
         case 'connector':
           return touch({
             ...el,
-            stroke: style.strokeColor,
+            stroke: style.strokeColor ?? el.stroke,
             strokeWidth: style.strokeWidth,
+            strokeStyle: style.strokeStyle,
+            opacity: style.opacity,
+            arrowHeads:
+              el.connectorType === 'arrow' ? style.arrowHeads : el.arrowHeads,
           });
+        case 'image':
+          return touch({ ...el, opacity: style.opacity });
         default:
           return el;
       }
     });
-    set({ document: withUpdatedElements(document, elements) });
+    set({ document: withUpdatedElements(document, elements), style });
     get().persist();
   },
 }));
@@ -637,15 +796,6 @@ function loadImageSize(src: string): Promise<{ width: number; height: number }> 
   });
 }
 
-/** Convenience selectors for future AI/query layers. */
-export function getElementsByType<T extends CanvasElement['type']>(
-  type: T,
-): Extract<CanvasElement, { type: T }>[] {
-  return useCanvasStore
-    .getState()
-    .document.elements.filter((el): el is Extract<CanvasElement, { type: T }> => el.type === type);
-}
-
 export function getElementById(id: string): CanvasElement | undefined {
   return useCanvasStore.getState().document.elements.find((el) => el.id === id);
 }
@@ -653,3 +803,5 @@ export function getElementById(id: string): CanvasElement | undefined {
 export function getDocumentSnapshot(): CanvasDocument {
   return snapshotDoc(useCanvasStore.getState().document);
 }
+
+export { isShapeTool };

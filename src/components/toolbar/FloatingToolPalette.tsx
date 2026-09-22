@@ -12,16 +12,13 @@ import {
   Minus,
 } from 'lucide-react';
 import type { ShapeType, ToolType } from '../../types/canvas';
+import { isShapeTool } from '../../types/canvas';
 import { useCanvasStore } from '../../store/canvasStore';
 import { ToolButton } from './ToolButton';
 import { ShapesPopover } from './ShapesPopover';
 
 const HIDE_DELAY_MS = 280;
 const EDGE_ZONE_PX = 18;
-
-function isShapeTool(tool: ToolType): tool is 'rectangle' | 'ellipse' {
-  return tool === 'rectangle' || tool === 'ellipse';
-}
 
 interface FloatingToolPaletteProps {
   fileInputRef: RefObject<HTMLInputElement | null>;

@@ -1,5 +1,6 @@
 import { Arrow, Line } from 'react-konva';
 import type { ConnectorElement } from '../../types/canvas';
+import { strokeDashFor } from '../../types/canvas';
 
 interface Props {
   element: ConnectorElement;
@@ -18,6 +19,8 @@ export function ConnectorNode({
   onDragMove,
   onDragEnd,
 }: Props) {
+  const dash = strokeDashFor(element.strokeStyle, element.strokeWidth);
+  const canDrag = listening && !element.locked;
   const shared = {
     id: element.id,
     name: 'canvas-element',
@@ -26,8 +29,10 @@ export function ConnectorNode({
     points: element.points as number[],
     stroke: element.stroke,
     strokeWidth: element.strokeWidth,
+    dash,
+    opacity: element.opacity,
     rotation: element.rotation,
-    draggable: listening,
+    draggable: canDrag,
     listening,
     hitStrokeWidth: Math.max(14, element.strokeWidth + 10),
     lineCap: 'round' as const,
@@ -49,13 +54,19 @@ export function ConnectorNode({
     },
   };
 
-  if (element.connectorType === 'arrow') {
+  const heads = element.arrowHeads;
+  const showArrow =
+    element.connectorType === 'arrow' || heads === 'end' || heads === 'both';
+
+  if (showArrow && heads !== 'none') {
     return (
       <Arrow
         {...shared}
         pointerLength={12}
         pointerWidth={12}
         fill={element.stroke}
+        pointerAtBeginning={heads === 'both'}
+        pointerAtEnding={heads === 'end' || heads === 'both'}
       />
     );
   }

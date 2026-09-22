@@ -33,7 +33,7 @@ export function useKeyboardShortcuts(fileInputRef: React.RefObject<HTMLInputElem
         return;
       }
 
-      if (isTypingTarget(e.target) || store.editingTextId) {
+      if (isTypingTarget(e.target) || store.editingTextId || store.editingShapeLabelId) {
         return;
       }
 
@@ -65,6 +65,11 @@ export function useKeyboardShortcuts(fileInputRef: React.RefObject<HTMLInputElem
         store.duplicateSelected();
         return;
       }
+      if (meta && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        store.toggleLockSelected();
+        return;
+      }
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
@@ -87,6 +92,7 @@ export function useKeyboardShortcuts(fileInputRef: React.RefObject<HTMLInputElem
         store.setDraftPoints(null);
         store.setDraftShape(null);
         store.setEditingTextId(null);
+        store.setEditingShapeLabelId(null);
         store.setTool('select');
         return;
       }

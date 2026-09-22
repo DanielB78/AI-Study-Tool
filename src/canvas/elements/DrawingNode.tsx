@@ -1,5 +1,6 @@
 import { Line } from 'react-konva';
 import type { DrawingElement } from '../../types/canvas';
+import { strokeDashFor } from '../../types/canvas';
 
 interface Props {
   element: DrawingElement;
@@ -18,6 +19,7 @@ export function DrawingNode({
   onDragMove,
   onDragEnd,
 }: Props) {
+  const canDrag = listening && !element.locked;
   return (
     <Line
       id={element.id}
@@ -27,11 +29,13 @@ export function DrawingNode({
       points={element.points}
       stroke={element.color}
       strokeWidth={element.strokeWidth}
+      dash={strokeDashFor(element.strokeStyle, element.strokeWidth)}
+      opacity={element.opacity}
       tension={0.35}
       lineCap="round"
       lineJoin="round"
       rotation={element.rotation}
-      draggable={listening}
+      draggable={canDrag}
       listening={listening}
       hitStrokeWidth={Math.max(12, element.strokeWidth + 8)}
       onClick={(e) => {

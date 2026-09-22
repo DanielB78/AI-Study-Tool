@@ -5,19 +5,21 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Stage, Layer, Rect, Line, Ellipse, Arrow } from 'react-konva';
+import { Stage, Layer, Rect, Line } from 'react-konva';
 import type Konva from 'konva';
-import { useCanvasStore } from '../store/canvasStore';
+import { useCanvasStore, type DraftShapeKind } from '../store/canvasStore';
 import { ElementRenderer } from './elements/ElementRenderer';
 import { SelectionTransformer } from './elements/SelectionTransformer';
 import { TextEditorOverlay } from './TextEditorOverlay';
+import { DraftShapePreview } from './DraftShapePreview';
 import {
   normalizeRect,
   rectsIntersect,
   screenToWorld,
   zoomAtPoint,
 } from '../utils/coordinates';
-import { ZOOM_STEP } from '../types/canvas';
+import { snapPosition } from '../utils/snap';
+import { ZOOM_STEP, isShapeTool } from '../types/canvas';
 
 function getCursor(
   tool: string,
@@ -27,19 +29,16 @@ function getCursor(
   if (isSpacePanning || tool === 'pan' || isPanning) {
     return isPanning ? 'grabbing' : 'grab';
   }
-  switch (tool) {
-    case 'text':
-      return 'text';
-    case 'pen':
-      return 'crosshair';
-    case 'rectangle':
-    case 'ellipse':
-    case 'line':
-    case 'arrow':
-      return 'crosshair';
-    default:
-      return 'default';
+  if (tool === 'text') return 'text';
+  if (
+    tool === 'pen' ||
+    tool === 'line' ||
+    tool === 'arrow' ||
+    isShapeTool(tool as never)
+  ) {
+    return 'crosshair';
   }
+  return 'default';
 }
 
 export function InfiniteCanvas() {
@@ -56,7 +55,7 @@ export function InfiniteCanvas() {
   const shapeState = useRef<{
     startX: number;
     startY: number;
-    kind: 'rectangle' | 'ellipse' | 'line' | 'arrow';
+    kind: DraftShapeKind;
   } | null>(null);
   const pendingTextCreate = useRef<{ x: number; y: number } | null>(null);
   const pendingTextEdit = useRef<string | null>(null);
@@ -77,19 +76,23 @@ export function InfiniteCanvas() {
   const selectedIds = useCanvasStore((s) => s.selectedIds);
   const activeTool = useCanvasStore((s) => s.activeTool);
   const editingTextId = useCanvasStore((s) => s.editingTextId);
+  const editingShapeLabelId = useCanvasStore((s) => s.editingShapeLabelId);
   const isSpacePanning = useCanvasStore((s) => s.isSpacePanning);
   const marquee = useCanvasStore((s) => s.marquee);
   const draftPoints = useCanvasStore((s) => s.draftPoints);
   const draftShape = useCanvasStore((s) => s.draftShape);
+  const snapGuides = useCanvasStore((s) => s.snapGuides);
   const style = useCanvasStore((s) => s.style);
 
   const setCamera = useCanvasStore((s) => s.setCamera);
   const select = useCanvasStore((s) => s.select);
   const clearSelection = useCanvasStore((s) => s.clearSelection);
   const setEditingTextId = useCanvasStore((s) => s.setEditingTextId);
+  const setEditingShapeLabelId = useCanvasStore((s) => s.setEditingShapeLabelId);
   const setMarquee = useCanvasStore((s) => s.setMarquee);
   const setDraftPoints = useCanvasStore((s) => s.setDraftPoints);
   const setDraftShape = useCanvasStore((s) => s.setDraftShape);
+  const setSnapGuides = useCanvasStore((s) => s.setSnapGuides);
   const beginInteraction = useCanvasStore((s) => s.beginInteraction);
   const endInteraction = useCanvasStore((s) => s.endInteraction);
   const updateElement = useCanvasStore((s) => s.updateElement);
@@ -184,7 +187,7 @@ export function InfiniteCanvas() {
       return;
     }
 
-    if (tool === 'rectangle' || tool === 'ellipse' || tool === 'line' || tool === 'arrow') {
+    if (isShapeTool(tool) || tool === 'line' || tool === 'arrow') {
       shapeState.current = { startX: world.x, startY: world.y, kind: tool };
       setDraftShape({
         kind: tool,
@@ -373,8 +376,10 @@ export function InfiniteCanvas() {
 
   const onDragStartElement = useCallback(
     (id: string) => {
-      beginInteraction();
       const state = useCanvasStore.getState();
+      const target = state.document.elements.find((el) => el.id === id);
+      if (target?.locked) return;
+      beginInteraction();
       let ids = state.selectedIds;
       if (!ids.includes(id)) {
         ids = [id];
@@ -382,7 +387,9 @@ export function InfiniteCanvas() {
       }
       const origin = new Map<string, { x: number; y: number }>();
       for (const el of state.document.elements) {
-        if (ids.includes(el.id)) origin.set(el.id, { x: el.x, y: el.y });
+        if (ids.includes(el.id) && !el.locked) {
+          origin.set(el.id, { x: el.x, y: el.y });
+        }
       }
       const primary = state.document.elements.find((el) => el.id === id);
       multiDrag.current = {
@@ -399,9 +406,20 @@ export function InfiniteCanvas() {
     (id: string, x: number, y: number) => {
       const drag = multiDrag.current;
       if (!drag || drag.primaryId !== id) return;
-      const dx = x - drag.startX;
-      const dy = y - drag.startY;
-      // Update siblings only — primary position is owned by Konva while dragging.
+      const primary = useCanvasStore
+        .getState()
+        .document.elements.find((el) => el.id === id);
+      if (!primary) return;
+      const others = useCanvasStore
+        .getState()
+        .document.elements.filter((el) => !drag.origin.has(el.id));
+      const snapped = snapPosition(
+        { x, y, width: primary.width, height: primary.height },
+        others,
+      );
+      setSnapGuides(snapped.guides);
+      const dx = snapped.x - drag.startX;
+      const dy = snapped.y - drag.startY;
       const ids = [...drag.origin.keys()].filter((sid) => sid !== id);
       if (ids.length === 0) return;
       updateElements(ids, (el) => {
@@ -410,15 +428,27 @@ export function InfiniteCanvas() {
         return { ...el, x: o.x + dx, y: o.y + dy };
       });
     },
-    [updateElements],
+    [updateElements, setSnapGuides],
   );
 
   const onDragEndElement = useCallback(
     (id: string, x: number, y: number) => {
       const drag = multiDrag.current;
       if (drag && drag.primaryId === id) {
-        const dx = x - drag.startX;
-        const dy = y - drag.startY;
+        const primary = useCanvasStore
+          .getState()
+          .document.elements.find((el) => el.id === id);
+        const others = useCanvasStore
+          .getState()
+          .document.elements.filter((el) => !drag.origin.has(el.id));
+        const snapped = primary
+          ? snapPosition(
+              { x, y, width: primary.width, height: primary.height },
+              others,
+            )
+          : { x, y, guides: [] };
+        const dx = snapped.x - drag.startX;
+        const dy = snapped.y - drag.startY;
         const ids = [...drag.origin.keys()];
         updateElements(ids, (el) => {
           const o = drag.origin.get(el.id);
@@ -429,13 +459,16 @@ export function InfiniteCanvas() {
         updateElement(id, (el) => ({ ...el, x, y }));
       }
       multiDrag.current = null;
+      setSnapGuides([]);
       endInteraction();
     },
-    [updateElement, updateElements, endInteraction],
+    [updateElement, updateElements, endInteraction, setSnapGuides],
   );
 
   const onEditText = useCallback(
     (id: string) => {
+      const el = useCanvasStore.getState().document.elements.find((e) => e.id === id);
+      if (el?.locked) return;
       select([id]);
       pushHistory();
       setEditingTextId(id);
@@ -443,16 +476,34 @@ export function InfiniteCanvas() {
     [select, setEditingTextId, pushHistory],
   );
 
-  const editingElement = useMemo(
-    () =>
-      editingTextId
-        ? elements.find(
-            (el): el is Extract<typeof el, { type: 'text' }> =>
-              el.id === editingTextId && el.type === 'text',
-          )
-        : undefined,
-    [editingTextId, elements],
+  const onEditShapeLabel = useCallback(
+    (id: string) => {
+      const el = useCanvasStore.getState().document.elements.find((e) => e.id === id);
+      if (!el || el.type !== 'shape' || el.locked) return;
+      select([id]);
+      pushHistory();
+      setEditingShapeLabelId(id);
+    },
+    [select, setEditingShapeLabelId, pushHistory],
   );
+
+  const editingTarget = useMemo(() => {
+    if (editingTextId) {
+      const el = elements.find(
+        (item): item is Extract<typeof item, { type: 'text' }> =>
+          item.id === editingTextId && item.type === 'text',
+      );
+      return el ? ({ kind: 'text' as const, element: el }) : null;
+    }
+    if (editingShapeLabelId) {
+      const el = elements.find(
+        (item): item is Extract<typeof item, { type: 'shape' }> =>
+          item.id === editingShapeLabelId && item.type === 'shape',
+      );
+      return el ? ({ kind: 'shapeLabel' as const, element: el }) : null;
+    }
+    return null;
+  }, [editingTextId, editingShapeLabelId, elements]);
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
@@ -508,20 +559,20 @@ export function InfiniteCanvas() {
                 canInteractWithObjects ||
                 (activeTool === 'text' && el.type === 'text')
               }
-              draggable={canInteractWithObjects}
               isEditingText={editingTextId === el.id}
               onSelect={onSelectElement}
               onDragStart={onDragStartElement}
               onDragMove={onDragMoveElement}
               onDragEnd={onDragEndElement}
               onEditText={onEditText}
+              onEditShapeLabel={onEditShapeLabel}
             />
           ))}
 
           {draftPoints && draftPoints.length >= 4 && (
             <Line
               points={draftPoints}
-              stroke={style.strokeColor}
+              stroke={style.strokeColor ?? '#1a1a1a'}
               strokeWidth={style.strokeWidth}
               tension={0.35}
               lineCap="round"
@@ -530,59 +581,29 @@ export function InfiniteCanvas() {
             />
           )}
 
-          {draftShape &&
-            (draftShape.kind === 'rectangle' ? (
-              <Rect
-                x={draftShape.x}
-                y={draftShape.y}
-                width={draftShape.width}
-                height={draftShape.height}
-                fill={style.fillColor}
-                stroke={style.strokeColor}
-                strokeWidth={style.strokeWidth}
-                opacity={0.85}
-                listening={false}
-              />
-            ) : draftShape.kind === 'ellipse' ? (
-              <Ellipse
-                x={draftShape.x + draftShape.width / 2}
-                y={draftShape.y + draftShape.height / 2}
-                radiusX={Math.max(draftShape.width / 2, 0.5)}
-                radiusY={Math.max(draftShape.height / 2, 0.5)}
-                fill={style.fillColor}
-                stroke={style.strokeColor}
-                strokeWidth={style.strokeWidth}
-                opacity={0.85}
-                listening={false}
-              />
-            ) : draftShape.kind === 'arrow' ? (
-              <Arrow
-                points={[
-                  draftShape.x,
-                  draftShape.y,
-                  draftShape.x2 ?? draftShape.x,
-                  draftShape.y2 ?? draftShape.y,
-                ]}
-                stroke={style.strokeColor}
-                strokeWidth={style.strokeWidth}
-                fill={style.strokeColor}
-                pointerLength={12}
-                pointerWidth={12}
+          {draftShape && <DraftShapePreview draft={draftShape} style={style} />}
+
+          {snapGuides.map((g, i) =>
+            g.orientation === 'v' ? (
+              <Line
+                key={`vg-${i}`}
+                points={[g.position, -50000, g.position, 50000]}
+                stroke="#38bdf8"
+                strokeWidth={1 / camera.zoom}
+                dash={[4 / camera.zoom, 4 / camera.zoom]}
                 listening={false}
               />
             ) : (
               <Line
-                points={[
-                  draftShape.x,
-                  draftShape.y,
-                  draftShape.x2 ?? draftShape.x,
-                  draftShape.y2 ?? draftShape.y,
-                ]}
-                stroke={style.strokeColor}
-                strokeWidth={style.strokeWidth}
+                key={`hg-${i}`}
+                points={[-50000, g.position, 50000, g.position]}
+                stroke="#38bdf8"
+                strokeWidth={1 / camera.zoom}
+                dash={[4 / camera.zoom, 4 / camera.zoom]}
                 listening={false}
               />
-            ))}
+            ),
+          )}
 
           {marquee && (
             <Rect
@@ -599,25 +620,36 @@ export function InfiniteCanvas() {
           )}
 
           <SelectionTransformer
-            selectedIds={selectedIds}
+            selectedIds={selectedIds.filter((id) => {
+              const el = elements.find((e) => e.id === id);
+              return el && !el.locked;
+            })}
             elements={elements}
-            enabled={canInteractWithObjects && !editingTextId}
+            enabled={
+              canInteractWithObjects && !editingTextId && !editingShapeLabelId
+            }
           />
         </Layer>
       </Stage>
 
-      {editingElement && (
+      {editingTarget && (
         <TextEditorOverlay
-          element={editingElement}
+          target={editingTarget}
           camera={camera}
           containerRect={containerRect}
-          onChange={(text, width, height) => {
-            updateElement(editingElement.id, (el) =>
+          onChangeText={(text, width, height) => {
+            updateElement(editingTarget.element.id, (el) =>
               el.type === 'text' ? { ...el, text, width, height } : el,
+            );
+          }}
+          onChangeLabel={(label) => {
+            updateElement(editingTarget.element.id, (el) =>
+              el.type === 'shape' ? { ...el, label } : el,
             );
           }}
           onClose={() => {
             setEditingTextId(null);
+            setEditingShapeLabelId(null);
             persist();
           }}
         />

@@ -1,24 +1,31 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
-import type { Camera, TextElement } from '../types/canvas';
+import type { Camera, ShapeElement, TextElement } from '../types/canvas';
 import { worldToScreen } from '../utils/coordinates';
 
+type Editable =
+  | { kind: 'text'; element: TextElement }
+  | { kind: 'shapeLabel'; element: ShapeElement };
+
 interface Props {
-  element: TextElement;
+  target: Editable;
   camera: Camera;
   containerRect: DOMRect | null;
-  onChange: (text: string, width: number, height: number) => void;
+  onChangeText: (text: string, width: number, height: number) => void;
+  onChangeLabel: (label: string) => void;
   onClose: () => void;
 }
 
 export function TextEditorOverlay({
-  element,
+  target,
   camera,
   containerRect,
-  onChange,
+  onChangeText,
+  onChangeLabel,
   onClose,
 }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const ignoreBlurUntil = useRef(0);
+  const id = target.element.id;
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -26,56 +33,91 @@ export function TextEditorOverlay({
     ignoreBlurUntil.current = Date.now() + 300;
     el.focus();
     el.select();
-  }, [element.id]);
+  }, [id]);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.max(element.height * camera.zoom, el.scrollHeight)}px`;
-  }, [element.text, element.height, element.fontSize, camera.zoom]);
+    el.style.height = `${Math.max(
+      target.element.height * camera.zoom,
+      el.scrollHeight,
+    )}px`;
+  }, [target, camera.zoom]);
 
   if (!containerRect) return null;
 
-  const screen = worldToScreen({ x: element.x, y: element.y }, camera);
+  const el = target.element;
+  const screen = worldToScreen({ x: el.x, y: el.y }, camera);
   const left = containerRect.left + screen.x;
   const top = containerRect.top + screen.y;
-  const width = Math.max(element.width * camera.zoom, 40);
+  const width = Math.max(el.width * camera.zoom, 40);
+
+  const isText = target.kind === 'text';
+  const textEl = isText ? target.element : null;
+  const shapeEl = !isText ? target.element : null;
+
+  const value = isText ? textEl!.text : shapeEl!.label;
+  const fontSize = (isText ? textEl!.fontSize : shapeEl!.labelFontSize) * camera.zoom;
+  const fontFamily = isText ? textEl!.fontFamily : shapeEl!.labelFontFamily;
+  const fontWeight = isText ? textEl!.fontWeight : shapeEl!.labelFontWeight;
+  const fontItalic = isText ? textEl!.fontItalic : shapeEl!.labelFontItalic;
+  const color = isText ? textEl!.color : shapeEl!.labelColor;
+  const align = isText ? textEl!.alignment : 'center';
+  const bg = isText ? textEl!.backgroundColor : null;
+  const padding = isText ? textEl!.padding * camera.zoom : 8 * camera.zoom;
+  const lineHeight = isText ? textEl!.lineHeight : 1.3;
+  const radius = isText ? textEl!.cornerRadius * camera.zoom : 0;
 
   return (
     <textarea
       ref={ref}
       className="text-editor-overlay"
-      value={element.text}
+      value={value}
       style={{
         position: 'fixed',
         left,
         top,
         width,
-        minHeight: Math.max(element.height * camera.zoom, element.fontSize * camera.zoom * 1.4),
-        fontSize: element.fontSize * camera.zoom,
-        fontFamily: element.fontFamily,
-        fontWeight: element.fontStyle === 'bold' ? 700 : 400,
-        color: element.color,
-        textAlign: element.alignment,
-        lineHeight: 1.25,
-        transform: `rotate(${element.rotation}deg)`,
+        minHeight: Math.max(el.height * camera.zoom, fontSize * 1.4),
+        fontSize,
+        fontFamily,
+        fontWeight: fontWeight === 'bold' ? 700 : 400,
+        fontStyle: fontItalic ? 'italic' : 'normal',
+        textDecoration: isText
+          ? [
+              textEl!.underline ? 'underline' : '',
+              textEl!.strikethrough ? 'line-through' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')
+          : 'none',
+        color,
+        textAlign: align,
+        lineHeight,
+        padding,
+        background: bg ?? 'rgba(255,255,255,0.96)',
+        borderRadius: radius,
+        transform: `rotate(${el.rotation}deg)`,
         transformOrigin: 'top left',
         zIndex: 40,
       }}
       onChange={(e) => {
         const next = e.target.value;
-        const measuredHeight = Math.max(
-          element.fontSize * 1.4 + 8,
-          e.target.scrollHeight / camera.zoom,
-        );
-        onChange(next, element.width, measuredHeight);
+        if (isText) {
+          const measuredHeight = Math.max(
+            textEl!.fontSize * textEl!.lineHeight + textEl!.padding * 2,
+            e.target.scrollHeight / camera.zoom,
+          );
+          onChangeText(next, textEl!.width, measuredHeight);
+        } else {
+          onChangeLabel(next);
+        }
       }}
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
       onBlur={() => {
         if (Date.now() < ignoreBlurUntil.current) {
-          // Re-focus if the creating click / transient focus steal blurred us.
           requestAnimationFrame(() => ref.current?.focus());
           return;
         }

@@ -1,37 +1,35 @@
-import {
-  BringToFront,
-  SendToBack,
-  ArrowUpToLine,
-  ArrowDownToLine,
-} from 'lucide-react';
 import { useCanvasStore } from '../../store/canvasStore';
-import { TextOptions } from './TextOptions';
-import { ShapeOptions } from './ShapeOptions';
-import { StrokeOptions } from './StrokeOptions';
+import { isShapeTool } from '../../types/canvas';
+import { ArrangePopover } from './ArrangePopover';
+import {
+  TextFormattingControls,
+  ShapeFormattingControls,
+  StrokeFormattingControls,
+} from './FormattingControls';
+import { OpacityControl } from './CtxPopover';
 
-type ContextMode = 'text' | 'shape' | 'stroke' | null;
+type ContextMode = 'text' | 'shape' | 'stroke' | 'image' | 'multi' | null;
 
-function resolveContextMode(
+function resolveMode(
   activeTool: string,
   selectedTypes: string[],
+  count: number,
 ): ContextMode {
-  const hasText = selectedTypes.includes('text');
-  const hasShape = selectedTypes.includes('shape');
-  const hasStrokeObject =
-    selectedTypes.includes('drawing') || selectedTypes.includes('connector');
-
-  if (activeTool === 'text' || hasText) return 'text';
-  if (activeTool === 'rectangle' || activeTool === 'ellipse' || hasShape) {
+  if (count > 1) return 'multi';
+  if (activeTool === 'text' || selectedTypes.includes('text')) return 'text';
+  if (isShapeTool(activeTool as never) || selectedTypes.includes('shape')) {
     return 'shape';
   }
   if (
     activeTool === 'pen' ||
     activeTool === 'line' ||
     activeTool === 'arrow' ||
-    hasStrokeObject
+    selectedTypes.includes('drawing') ||
+    selectedTypes.includes('connector')
   ) {
     return 'stroke';
   }
+  if (selectedTypes.includes('image')) return 'image';
   return null;
 }
 
@@ -46,86 +44,140 @@ export function ContextualToolbar() {
   const sendBackward = useCanvasStore((s) => s.sendBackward);
   const bringToFront = useCanvasStore((s) => s.bringToFront);
   const sendToBack = useCanvasStore((s) => s.sendToBack);
+  const duplicateSelected = useCanvasStore((s) => s.duplicateSelected);
+  const toggleLockSelected = useCanvasStore((s) => s.toggleLockSelected);
+  const alignSelected = useCanvasStore((s) => s.alignSelected);
 
   const selected = elements.filter((el) => selectedIds.includes(el.id));
   const selectedTypes = [...new Set(selected.map((el) => el.type))];
-  const mode = resolveContextMode(activeTool, selectedTypes);
+  const mode = resolveMode(activeTool, selectedTypes, selected.length);
   const hasSelection = selected.length > 0;
-  const showLayerControls = hasSelection;
+  const anyLocked = selected.some((el) => el.locked);
+  const showCorner =
+    activeTool === 'roundedRect' ||
+    selected.some((el) => el.type === 'shape' && el.shapeType === 'roundedRect');
+  const showArrowHeads =
+    activeTool === 'arrow' ||
+    selected.some((el) => el.type === 'connector' && el.connectorType === 'arrow');
 
-  if (!mode && !showLayerControls) return null;
+  if (!mode && !hasSelection) return null;
 
-  const onStyleChange = (partial: Parameters<typeof setStyle>[0]) => {
+  const onLive = (partial: Parameters<typeof setStyle>[0]) => {
     setStyle(partial);
+    // Live preview on selection without history spam
     if (hasSelection) {
-      queueMicrotask(() => applyStyleToSelection());
+      const idSet = new Set(selectedIds);
+      useCanvasStore.setState((s) => ({
+        document: {
+          ...s.document,
+          elements: s.document.elements.map((el) => {
+            if (!idSet.has(el.id) || el.locked) return el;
+            // lightweight live opacity/stroke width preview via apply path is heavy;
+            // rely on style store + applyStyleToSelection on commit for most fields.
+            return el;
+          }),
+        },
+      }));
+      // Immediately apply non-history live visual for opacity/stroke via updateElements without history
+      useCanvasStore.getState().updateElements([...idSet], (el) => {
+        if (el.locked) return el;
+        if (partial.opacity !== undefined) return { ...el, opacity: partial.opacity };
+        if (partial.strokeWidth !== undefined) {
+          if (el.type === 'shape' || el.type === 'connector') {
+            return { ...el, strokeWidth: partial.strokeWidth };
+          }
+          if (el.type === 'drawing') return { ...el, strokeWidth: partial.strokeWidth };
+        }
+        if (partial.cornerRadius !== undefined && el.type === 'shape') {
+          return { ...el, cornerRadius: partial.cornerRadius };
+        }
+        if (partial.lineHeight !== undefined && el.type === 'text') {
+          return { ...el, lineHeight: partial.lineHeight };
+        }
+        if (partial.textPadding !== undefined && el.type === 'text') {
+          return { ...el, padding: partial.textPadding };
+        }
+        if (partial.textCornerRadius !== undefined && el.type === 'text') {
+          return { ...el, cornerRadius: partial.textCornerRadius };
+        }
+        return el;
+      });
     }
+  };
+
+  const onCommit = (partial: Parameters<typeof setStyle>[0]) => {
+    setStyle(partial);
+    if (hasSelection) applyStyleToSelection(partial);
   };
 
   const onEditText = () => {
     const text = selected.find((el) => el.type === 'text');
-    if (!text) return;
+    if (!text || text.locked) return;
     useCanvasStore.getState().pushHistory();
     useCanvasStore.getState().setEditingTextId(text.id);
   };
 
   return (
-    <div
-      className="ctx-bar"
-      role="toolbar"
-      aria-label="Formatting options"
-    >
+    <div className="ctx-bar" role="toolbar" aria-label="Formatting options">
       <div className="ctx-pill">
         {mode === 'text' && (
-          <TextOptions
+          <TextFormattingControls
             style={style}
-            onChange={onStyleChange}
-            showEditButton={selected.some((el) => el.type === 'text')}
-            onEditText={onEditText}
+            onLive={onLive}
+            onCommit={onCommit}
+            showEdit={selected.some((el) => el.type === 'text')}
+            onEdit={onEditText}
           />
         )}
         {mode === 'shape' && (
-          <ShapeOptions style={style} onChange={onStyleChange} />
+          <ShapeFormattingControls
+            style={style}
+            onLive={onLive}
+            onCommit={onCommit}
+            showCornerRadius={showCorner}
+          />
         )}
         {mode === 'stroke' && (
-          <StrokeOptions style={style} onChange={onStyleChange} />
+          <StrokeFormattingControls
+            style={style}
+            onLive={onLive}
+            onCommit={onCommit}
+            showArrowHeads={showArrowHeads}
+          />
+        )}
+        {mode === 'image' && (
+          <OpacityControl
+            value={style.opacity}
+            onChange={(v) => onLive({ opacity: v })}
+            onCommit={(v) => onCommit({ opacity: v })}
+          />
+        )}
+        {mode === 'multi' && (
+          <OpacityControl
+            value={style.opacity}
+            onChange={(v) => onLive({ opacity: v })}
+            onCommit={(v) => onCommit({ opacity: v })}
+          />
         )}
 
-        {showLayerControls && (
+        {hasSelection && (
           <>
-            {mode && <div className="ctx-divider" aria-hidden />}
-            <button
-              type="button"
-              className="ctx-icon-btn"
-              title="Send to back"
-              onClick={() => sendToBack()}
-            >
-              <SendToBack size={16} strokeWidth={1.85} />
-            </button>
-            <button
-              type="button"
-              className="ctx-icon-btn"
-              title="Send backward"
-              onClick={() => sendBackward()}
-            >
-              <ArrowDownToLine size={16} strokeWidth={1.85} />
-            </button>
-            <button
-              type="button"
-              className="ctx-icon-btn"
-              title="Bring forward"
-              onClick={() => bringForward()}
-            >
-              <ArrowUpToLine size={16} strokeWidth={1.85} />
-            </button>
-            <button
-              type="button"
-              className="ctx-icon-btn"
-              title="Bring to front"
-              onClick={() => bringToFront()}
-            >
-              <BringToFront size={16} strokeWidth={1.85} />
-            </button>
+            {(mode === 'text' ||
+              mode === 'shape' ||
+              mode === 'stroke' ||
+              mode === 'image' ||
+              mode === 'multi') && <div className="ctx-divider" aria-hidden />}
+            <ArrangePopover
+              count={selected.length}
+              locked={anyLocked}
+              onAlign={alignSelected}
+              onBringForward={bringForward}
+              onSendBackward={sendBackward}
+              onBringToFront={bringToFront}
+              onSendToBack={sendToBack}
+              onDuplicate={duplicateSelected}
+              onToggleLock={toggleLockSelected}
+            />
           </>
         )}
       </div>

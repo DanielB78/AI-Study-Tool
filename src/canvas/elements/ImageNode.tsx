@@ -33,6 +33,8 @@ export function ImageNode({
     };
   }, [element.src]);
 
+  const canDrag = listening && !element.locked;
+
   return (
     <KonvaImage
       id={element.id}
@@ -43,7 +45,8 @@ export function ImageNode({
       width={element.width}
       height={element.height}
       rotation={element.rotation}
-      draggable={listening}
+      opacity={element.opacity}
+      draggable={canDrag}
       listening={listening}
       onClick={(e) => {
         e.cancelBubble = true;

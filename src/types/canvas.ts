@@ -1,28 +1,40 @@
 /** Canonical canvas document model — source of truth for the board. */
 
-export const DOCUMENT_VERSION = 1 as const;
+export const DOCUMENT_VERSION = 2 as const;
+
+export type ShapeType =
+  | 'rectangle'
+  | 'roundedRect'
+  | 'ellipse'
+  | 'triangle'
+  | 'diamond'
+  | 'pentagon'
+  | 'hexagon'
+  | 'star'
+  | 'callout'
+  | 'parallelogram';
 
 export type ToolType =
   | 'select'
   | 'pan'
   | 'text'
   | 'pen'
-  | 'rectangle'
-  | 'ellipse'
   | 'line'
   | 'arrow'
-  | 'image';
+  | 'image'
+  | ShapeType;
+
+export type ConnectorType = 'line' | 'arrow';
+export type ArrowHeads = 'none' | 'end' | 'both';
+export type StrokeStyle = 'solid' | 'dashed' | 'dotted';
+export type TextAlignment = 'left' | 'center' | 'right';
+export type FontWeight = 'normal' | 'bold';
 
 export interface Camera {
   x: number;
   y: number;
   zoom: number;
 }
-
-export type TextAlignment = 'left' | 'center' | 'right';
-export type FontStyle = 'normal' | 'bold';
-export type ShapeType = 'rectangle' | 'ellipse';
-export type ConnectorType = 'line' | 'arrow';
 
 /** Shared geometry + identity for every canvas object. */
 export interface BaseElement {
@@ -33,6 +45,8 @@ export interface BaseElement {
   height: number;
   rotation: number;
   zIndex: number;
+  opacity: number;
+  locked: boolean;
   createdAt: number;
   updatedAt: number;
   /** Extensible bag for future AI/RAG annotations without schema churn. */
@@ -44,48 +58,65 @@ export interface TextElement extends BaseElement {
   text: string;
   fontSize: number;
   fontFamily: string;
-  fontStyle: FontStyle;
+  fontWeight: FontWeight;
+  fontItalic: boolean;
+  underline: boolean;
+  strikethrough: boolean;
   color: string;
   alignment: TextAlignment;
+  lineHeight: number;
+  /** null / empty = transparent */
+  backgroundColor: string | null;
+  padding: number;
+  cornerRadius: number;
 }
 
 export interface ShapeElement extends BaseElement {
   type: 'shape';
   shapeType: ShapeType;
-  fill: string;
-  stroke: string;
+  /** null = no fill */
+  fill: string | null;
+  /** null = no stroke */
+  stroke: string | null;
   strokeWidth: number;
+  strokeStyle: StrokeStyle;
+  cornerRadius: number;
+  /** Star points (default 5). */
+  starPoints: number;
+  /** Inner radius ratio for star (0–1). */
+  starInnerRatio: number;
+  /** Label text rendered inside the shape (semantic, not rasterized). */
+  label: string;
+  labelFontSize: number;
+  labelFontFamily: string;
+  labelFontWeight: FontWeight;
+  labelFontItalic: boolean;
+  labelColor: string;
 }
 
-/**
- * Freehand stroke. `points` are relative to (x, y) as [x0,y0,x1,y1,...].
- * Bounding box (width/height) encloses the stroke for hit-testing / selection.
- */
 export interface DrawingElement extends BaseElement {
   type: 'drawing';
   points: number[];
   color: string;
   strokeWidth: number;
+  strokeStyle: StrokeStyle;
 }
 
 export interface ImageElement extends BaseElement {
   type: 'image';
-  /** Data URL or other durable source reference. */
   src: string;
   naturalWidth: number;
   naturalHeight: number;
 }
 
-/**
- * Line or arrow. `points` are [x1,y1,x2,y2] in world space relative to (x,y)
- * (i.e. local coordinates). Optional bindings reserved for future RAG graph edges.
- */
 export interface ConnectorElement extends BaseElement {
   type: 'connector';
   connectorType: ConnectorType;
   points: [number, number, number, number];
   stroke: string;
   strokeWidth: number;
+  strokeStyle: StrokeStyle;
+  arrowHeads: ArrowHeads;
   startBindingId?: string | null;
   endBindingId?: string | null;
 }
@@ -106,14 +137,25 @@ export interface CanvasDocument {
 }
 
 export interface StyleDefaults {
-  strokeColor: string;
-  fillColor: string;
+  strokeColor: string | null;
+  fillColor: string | null;
   strokeWidth: number;
+  strokeStyle: StrokeStyle;
+  opacity: number;
+  cornerRadius: number;
   fontSize: number;
-  fontBold: boolean;
+  fontWeight: FontWeight;
+  fontItalic: boolean;
+  underline: boolean;
+  strikethrough: boolean;
   fontFamily: string;
   textColor: string;
   textAlignment: TextAlignment;
+  lineHeight: number;
+  textBackgroundColor: string | null;
+  textPadding: number;
+  textCornerRadius: number;
+  arrowHeads: ArrowHeads;
 }
 
 export const DEFAULT_CAMERA: Camera = { x: 0, y: 0, zoom: 1 };
@@ -122,16 +164,29 @@ export const DEFAULT_STYLE: StyleDefaults = {
   strokeColor: '#1a1a1a',
   fillColor: '#ffffff',
   strokeWidth: 2,
+  strokeStyle: 'solid',
+  opacity: 1,
+  cornerRadius: 12,
   fontSize: 18,
-  fontBold: false,
-  fontFamily: 'Inter, system-ui, sans-serif',
+  fontWeight: 'normal',
+  fontItalic: false,
+  underline: false,
+  strikethrough: false,
+  fontFamily: 'Arial, Helvetica, sans-serif',
   textColor: '#1a1a1a',
   textAlignment: 'left',
+  lineHeight: 1.35,
+  textBackgroundColor: null,
+  textPadding: 8,
+  textCornerRadius: 8,
+  arrowHeads: 'end',
 };
 
 export const MIN_ZOOM = 0.15;
 export const MAX_ZOOM = 4;
 export const ZOOM_STEP = 1.08;
+
+export const TRANSPARENT = null;
 
 export function createEmptyDocument(): CanvasDocument {
   return {
@@ -139,4 +194,33 @@ export function createEmptyDocument(): CanvasDocument {
     elements: [],
     camera: { ...DEFAULT_CAMERA },
   };
+}
+
+export function isShapeTool(tool: ToolType): tool is ShapeType {
+  return (
+    tool === 'rectangle' ||
+    tool === 'roundedRect' ||
+    tool === 'ellipse' ||
+    tool === 'triangle' ||
+    tool === 'diamond' ||
+    tool === 'pentagon' ||
+    tool === 'hexagon' ||
+    tool === 'star' ||
+    tool === 'callout' ||
+    tool === 'parallelogram'
+  );
+}
+
+export function strokeDashFor(
+  style: StrokeStyle,
+  strokeWidth: number,
+): number[] | undefined {
+  switch (style) {
+    case 'dashed':
+      return [Math.max(8, strokeWidth * 4), Math.max(6, strokeWidth * 3)];
+    case 'dotted':
+      return [Math.max(2, strokeWidth), Math.max(4, strokeWidth * 2)];
+    default:
+      return undefined;
+  }
 }
