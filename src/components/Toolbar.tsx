@@ -206,6 +206,22 @@ export function Toolbar() {
           </>
         )}
 
+        {hasSelection && selected.some((el) => el.type === 'text') && (
+          <button
+            type="button"
+            className="tool-btn"
+            title="Edit text (Enter)"
+            onClick={() => {
+              const text = selected.find((el) => el.type === 'text');
+              if (!text) return;
+              useCanvasStore.getState().pushHistory();
+              useCanvasStore.getState().setEditingTextId(text.id);
+            }}
+          >
+            Edit text
+          </button>
+        )}
+
         {hasSelection && (
           <div className="layer-controls">
             <button type="button" className="tool-btn" onClick={() => sendToBack()} title="Send to back">

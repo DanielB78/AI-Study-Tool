@@ -59,6 +59,7 @@ export function InfiniteCanvas() {
     kind: 'rectangle' | 'ellipse' | 'line' | 'arrow';
   } | null>(null);
   const pendingTextCreate = useRef<{ x: number; y: number } | null>(null);
+  const pendingTextEdit = useRef<string | null>(null);
   const marqueeState = useRef<{
     startX: number;
     startY: number;
@@ -188,20 +189,22 @@ export function InfiniteCanvas() {
       // Prefer document hit-testing so we edit existing text even if Konva misses.
       const hitText = [...useCanvasStore.getState().document.elements]
         .reverse()
-        .find(
-          (el) =>
-            el.type === 'text' &&
-            world.x >= el.x &&
-            world.x <= el.x + Math.max(el.width, 24) &&
-            world.y >= el.y &&
-            world.y <= el.y + Math.max(el.height, el.fontSize * 1.4),
-        );
+        .find((el) => {
+          if (el.type !== 'text') return false;
+          const pad = 12;
+          return (
+            world.x >= el.x - pad &&
+            world.x <= el.x + Math.max(el.width, 24) + pad &&
+            world.y >= el.y - pad &&
+            world.y <= el.y + Math.max(el.height, el.fontSize * 1.4) + pad
+          );
+        });
       if (hitText) {
-        select([hitText.id]);
-        pushHistory();
-        setEditingTextId(hitText.id);
+        pendingTextEdit.current = hitText.id;
+        pendingTextCreate.current = null;
         return;
       }
+      pendingTextEdit.current = null;
       pendingTextCreate.current = { x: world.x, y: world.y };
       return;
     }
@@ -281,6 +284,18 @@ export function InfiniteCanvas() {
       persist();
     }
 
+    if (pendingTextEdit.current) {
+      const id = pendingTextEdit.current;
+      pendingTextEdit.current = null;
+      pendingTextCreate.current = null;
+      window.setTimeout(() => {
+        select([id]);
+        pushHistory();
+        setEditingTextId(id);
+      }, 0);
+      return;
+    }
+
     if (pendingTextCreate.current) {
       const { x, y } = pendingTextCreate.current;
       pendingTextCreate.current = null;
@@ -331,16 +346,6 @@ export function InfiniteCanvas() {
 
   const onSelectElement = useCallback(
     (id: string, additive: boolean) => {
-      const tool = useCanvasStore.getState().activeTool;
-      if (tool === 'text') {
-        const el = useCanvasStore.getState().document.elements.find((item) => item.id === id);
-        if (el?.type === 'text') {
-          select([id]);
-          pushHistory();
-          setEditingTextId(id);
-          return;
-        }
-      }
       if (!canInteractWithObjects) return;
       const current = useCanvasStore.getState().selectedIds;
       if (!additive && current.includes(id) && current.length > 1) {
@@ -348,7 +353,7 @@ export function InfiniteCanvas() {
       }
       select([id], additive);
     },
-    [canInteractWithObjects, select, pushHistory, setEditingTextId],
+    [canInteractWithObjects, select],
   );
 
   const onDragStartElement = useCallback(
