@@ -314,6 +314,16 @@ export function InfiniteCanvas() {
 
   const onSelectElement = useCallback(
     (id: string, additive: boolean) => {
+      const tool = useCanvasStore.getState().activeTool;
+      if (tool === 'text') {
+        const el = useCanvasStore.getState().document.elements.find((item) => item.id === id);
+        if (el?.type === 'text') {
+          select([id]);
+          pushHistory();
+          setEditingTextId(id);
+          return;
+        }
+      }
       if (!canInteractWithObjects) return;
       const current = useCanvasStore.getState().selectedIds;
       if (!additive && current.includes(id) && current.length > 1) {
@@ -321,7 +331,7 @@ export function InfiniteCanvas() {
       }
       select([id], additive);
     },
-    [canInteractWithObjects, select],
+    [canInteractWithObjects, select, pushHistory, setEditingTextId],
   );
 
   const onDragStartElement = useCallback(
@@ -457,7 +467,11 @@ export function InfiniteCanvas() {
             <ElementRenderer
               key={el.id}
               element={el}
-              listening={canInteractWithObjects}
+              listening={
+                canInteractWithObjects ||
+                (activeTool === 'text' && el.type === 'text')
+              }
+              draggable={canInteractWithObjects}
               isEditingText={editingTextId === el.id}
               onSelect={onSelectElement}
               onDragStart={onDragStartElement}

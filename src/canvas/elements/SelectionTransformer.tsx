@@ -102,8 +102,9 @@ export function SelectionTransformer({ selectedIds, elements, enabled }: Props) 
               rotation: node.rotation(),
             }));
           } else {
-            const width = Math.max(8, Math.abs((node.width?.() ?? el.width) * scaleX));
-            const height = Math.max(8, Math.abs((node.height?.() ?? el.height) * scaleY));
+            // Prefer stored geometry — Groups (text) may report width()/height() as 0.
+            const width = Math.max(8, Math.abs(el.width * scaleX));
+            const height = Math.max(8, Math.abs(el.height * scaleY));
             updateElement(id, (prev) => ({
               ...prev,
               x: node.x(),

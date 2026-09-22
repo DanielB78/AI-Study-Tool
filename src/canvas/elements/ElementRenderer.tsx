@@ -8,6 +8,7 @@ import { TextNode } from './TextNode';
 interface Props {
   element: CanvasElement;
   listening: boolean;
+  draggable?: boolean;
   isEditingText: boolean;
   onSelect: (id: string, additive: boolean) => void;
   onDragStart: (id: string) => void;
@@ -19,6 +20,7 @@ interface Props {
 export function ElementRenderer({
   element,
   listening,
+  draggable = listening,
   isEditingText,
   onSelect,
   onDragStart,
@@ -32,6 +34,7 @@ export function ElementRenderer({
         <TextNode
           element={element}
           listening={listening}
+          draggable={draggable}
           isEditing={isEditingText}
           onSelect={onSelect}
           onDragStart={onDragStart}
