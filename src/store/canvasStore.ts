@@ -21,7 +21,6 @@ import { cloneElement, createBaseFields, createId, touch } from '../utils/ids';
 import { boundsFromPoints, rebasePoints } from '../utils/coordinates';
 import {
   createLocalStoragePersistence,
-  loadOrCreateDocument,
   type PersistenceService,
 } from '../persistence/storage';
 import { styleFromElement } from '../persistence/migrate';
