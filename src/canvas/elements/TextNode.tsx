@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { Text } from 'react-konva';
 import type { TextElement } from '../../types/canvas';
 
@@ -22,6 +23,20 @@ export function TextNode({
   onDragEnd,
   onDblClick,
 }: Props) {
+  const lastClickAt = useRef(0);
+
+  const handleClick = (shiftKey: boolean) => {
+    const now = Date.now();
+    // Custom double-click: Transformer often steals the 2nd native click after selection.
+    if (now - lastClickAt.current < 350) {
+      lastClickAt.current = 0;
+      onDblClick(element.id);
+      return;
+    }
+    lastClickAt.current = now;
+    onSelect(element.id, shiftKey);
+  };
+
   return (
     <Text
       id={element.id}
@@ -44,11 +59,11 @@ export function TextNode({
       listening={listening}
       onClick={(e) => {
         e.cancelBubble = true;
-        onSelect(element.id, e.evt.shiftKey);
+        handleClick(e.evt.shiftKey);
       }}
       onTap={(e) => {
         e.cancelBubble = true;
-        onSelect(element.id, false);
+        handleClick(false);
       }}
       onDblClick={(e) => {
         e.cancelBubble = true;

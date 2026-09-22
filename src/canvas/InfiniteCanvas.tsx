@@ -58,6 +58,7 @@ export function InfiniteCanvas() {
     startY: number;
     kind: 'rectangle' | 'ellipse' | 'line' | 'arrow';
   } | null>(null);
+  const pendingTextCreate = useRef<{ x: number; y: number } | null>(null);
   const marqueeState = useRef<{
     startX: number;
     startY: number;
@@ -184,7 +185,7 @@ export function InfiniteCanvas() {
     }
 
     if (tool === 'text' && clickedEmpty) {
-      createTextAt(world.x, world.y);
+      pendingTextCreate.current = { x: world.x, y: world.y };
       return;
     }
 
@@ -261,6 +262,14 @@ export function InfiniteCanvas() {
       panState.current = null;
       setIsPanning(false);
       persist();
+    }
+
+    if (pendingTextCreate.current) {
+      const { x, y } = pendingTextCreate.current;
+      pendingTextCreate.current = null;
+      // Defer so the creating pointerup cannot immediately blur the overlay.
+      window.setTimeout(() => createTextAt(x, y), 0);
+      return;
     }
 
     if (drawState.current?.drawing) {

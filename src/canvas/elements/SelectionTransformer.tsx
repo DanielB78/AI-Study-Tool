@@ -16,6 +16,8 @@ export function SelectionTransformer({ selectedIds, elements, enabled }: Props) 
   const endInteraction = useCanvasStore((s) => s.endInteraction);
   const updateElement = useCanvasStore((s) => s.updateElement);
   const persist = useCanvasStore((s) => s.persist);
+  const setEditingTextId = useCanvasStore((s) => s.setEditingTextId);
+  const pushHistory = useCanvasStore((s) => s.pushHistory);
 
   useEffect(() => {
     const tr = transformerRef.current;
@@ -61,6 +63,12 @@ export function SelectionTransformer({ selectedIds, elements, enabled }: Props) 
         return newBox;
       }}
       onTransformStart={() => beginInteraction()}
+      onDblClick={() => {
+        if (single?.type === 'text') {
+          pushHistory();
+          setEditingTextId(single.id);
+        }
+      }}
       onTransformEnd={() => {
         const tr = transformerRef.current;
         if (!tr) return;

@@ -18,10 +18,12 @@ export function TextEditorOverlay({
   onClose,
 }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const ignoreBlurUntil = useRef(0);
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    ignoreBlurUntil.current = Date.now() + 300;
     el.focus();
     el.select();
   }, [element.id]);
@@ -30,8 +32,8 @@ export function TextEditorOverlay({
     const el = ref.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.max(element.height, el.scrollHeight)}px`;
-  }, [element.text, element.height, element.fontSize]);
+    el.style.height = `${Math.max(element.height * camera.zoom, el.scrollHeight)}px`;
+  }, [element.text, element.height, element.fontSize, camera.zoom]);
 
   if (!containerRect) return null;
 
@@ -50,7 +52,7 @@ export function TextEditorOverlay({
         left,
         top,
         width,
-        minHeight: element.height * camera.zoom,
+        minHeight: Math.max(element.height * camera.zoom, element.fontSize * camera.zoom * 1.4),
         fontSize: element.fontSize * camera.zoom,
         fontFamily: element.fontFamily,
         fontWeight: element.fontStyle === 'bold' ? 700 : 400,
@@ -69,7 +71,16 @@ export function TextEditorOverlay({
         );
         onChange(next, element.width, measuredHeight);
       }}
-      onBlur={() => onClose()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onBlur={() => {
+        if (Date.now() < ignoreBlurUntil.current) {
+          // Re-focus if the creating click / transient focus steal blurred us.
+          requestAnimationFrame(() => ref.current?.focus());
+          return;
+        }
+        onClose();
+      }}
       onKeyDown={(e) => {
         e.stopPropagation();
         if (e.key === 'Escape') {

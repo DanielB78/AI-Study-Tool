@@ -72,6 +72,16 @@ export function useKeyboardShortcuts(fileInputRef: React.RefObject<HTMLInputElem
         return;
       }
 
+      if (e.key === 'Enter' && store.selectedIds.length === 1) {
+        const el = store.document.elements.find((item) => item.id === store.selectedIds[0]);
+        if (el?.type === 'text') {
+          e.preventDefault();
+          store.pushHistory();
+          store.setEditingTextId(el.id);
+          return;
+        }
+      }
+
       if (e.key === 'Escape') {
         store.clearSelection();
         store.setDraftPoints(null);
