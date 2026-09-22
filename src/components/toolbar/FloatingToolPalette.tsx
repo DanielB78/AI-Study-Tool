@@ -88,14 +88,21 @@ export function FloatingToolPalette({ fileInputRef }: FloatingToolPaletteProps) 
 
   useEffect(() => {
     if (!shapesOpen) return;
-    const onPointerDown = (e: PointerEvent) => {
-      const root = rootRef.current;
-      if (!root) return;
-      if (root.contains(e.target as Node)) return;
-      closeShapes();
+    let remove: (() => void) | undefined;
+    const frame = window.requestAnimationFrame(() => {
+      const onPointerDown = (e: PointerEvent) => {
+        const root = rootRef.current;
+        if (!root) return;
+        if (root.contains(e.target as Node)) return;
+        closeShapes();
+      };
+      window.addEventListener('pointerdown', onPointerDown, true);
+      remove = () => window.removeEventListener('pointerdown', onPointerDown, true);
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      remove?.();
     };
-    window.addEventListener('pointerdown', onPointerDown, true);
-    return () => window.removeEventListener('pointerdown', onPointerDown, true);
   }, [shapesOpen, closeShapes]);
 
   useEffect(() => {
@@ -176,7 +183,11 @@ export function FloatingToolPalette({ fileInputRef }: FloatingToolPaletteProps) 
             active={shapesActive || shapesOpen}
             aria-expanded={shapesOpen}
             aria-haspopup="menu"
-            onClick={() => setShapesOpen((open) => !open)}
+            onClick={() => {
+              clearHideTimer();
+              setRevealed(true);
+              setShapesOpen((open) => !open);
+            }}
           />
           <ToolButton
             label="Line"
