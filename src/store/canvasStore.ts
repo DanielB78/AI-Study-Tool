@@ -172,7 +172,10 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   historySuspended: false,
 
   hydrate: () => {
-    const doc = loadOrCreateDocument(persistence);
+    const loaded = persistence.load();
+    const doc = loaded ?? createEmptyDocument();
+    // Rewrite upgraded documents so v1 boards become durable v2 on disk.
+    if (loaded) persistence.save(doc);
     set({
       document: doc,
       selectedIds: [],
