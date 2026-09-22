@@ -184,7 +184,24 @@ export function InfiniteCanvas() {
       return;
     }
 
-    if (tool === 'text' && clickedEmpty) {
+    if (tool === 'text') {
+      // Prefer document hit-testing so we edit existing text even if Konva misses.
+      const hitText = [...useCanvasStore.getState().document.elements]
+        .reverse()
+        .find(
+          (el) =>
+            el.type === 'text' &&
+            world.x >= el.x &&
+            world.x <= el.x + Math.max(el.width, 24) &&
+            world.y >= el.y &&
+            world.y <= el.y + Math.max(el.height, el.fontSize * 1.4),
+        );
+      if (hitText) {
+        select([hitText.id]);
+        pushHistory();
+        setEditingTextId(hitText.id);
+        return;
+      }
       pendingTextCreate.current = { x: world.x, y: world.y };
       return;
     }
