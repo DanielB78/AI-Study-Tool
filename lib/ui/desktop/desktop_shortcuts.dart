@@ -6,13 +6,26 @@ import '../../editor/controller/editor_controller.dart';
 import '../../editor/state/editor_tool.dart';
 
 /// Desktop keyboard shortcuts — thin adapter over [EditorController].
-class DesktopShortcuts extends ConsumerWidget {
+class DesktopShortcuts extends ConsumerStatefulWidget {
   const DesktopShortcuts({super.key, required this.child});
 
   final Widget child;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DesktopShortcuts> createState() => _DesktopShortcutsState();
+}
+
+class _DesktopShortcutsState extends ConsumerState<DesktopShortcuts> {
+  final FocusNode _focusNode = FocusNode(debugLabel: 'desktop-shortcuts');
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final editor = ref.read(editorControllerProvider.notifier);
 
     return Shortcuts(
@@ -80,8 +93,9 @@ class DesktopShortcuts extends ConsumerWidget {
           ),
         },
         child: Focus(
+          focusNode: _focusNode,
           autofocus: true,
-          child: child,
+          child: widget.child,
         ),
       ),
     );

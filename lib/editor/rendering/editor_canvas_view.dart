@@ -4,14 +4,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/canvas/geometry/point.dart';
-import '../../core/canvas/models/camera_state.dart';
 import '../controller/editor_controller.dart';
 import '../interaction/canvas_interactor.dart';
 import '../state/editor_tool.dart';
 import '../state/interaction_state.dart';
 import 'canvas_renderer.dart';
 
-/// Infinite canvas surface — pointer events → [CanvasInteractor] → commands.
+/// Infinite canvas surface — raw pointer events → [CanvasInteractor] → commands.
 class EditorCanvasView extends ConsumerStatefulWidget {
   const EditorCanvasView({super.key});
 
@@ -21,13 +20,20 @@ class EditorCanvasView extends ConsumerStatefulWidget {
 
 class _EditorCanvasViewState extends ConsumerState<EditorCanvasView> {
   CanvasInteractor? _interactor;
-  double? _pinchStartZoom;
+  final FocusNode _focusNode = FocusNode(debugLabel: 'editor-canvas');
+  int? _activePointer;
 
   CanvasInteractor get interactor {
     return _interactor ??= CanvasInteractor(
       editor: ref.read(editorControllerProvider.notifier),
       interaction: ref.read(interactionControllerProvider.notifier),
     );
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
   }
 
   Point _toPoint(Offset offset) => Point(offset.dx, offset.dy);
@@ -45,18 +51,20 @@ class _EditorCanvasViewState extends ConsumerState<EditorCanvasView> {
       _ => SystemMouseCursors.basic,
     };
 
-    return MouseRegion(
-      cursor: cursor,
-      onHover: (event) {
-        interactor.onPointerHover(_toPoint(event.localPosition));
-      },
-      child: Listener(
-        onPointerSignal: _onPointerSignal,
-        child: GestureDetector(
+    return Focus(
+      focusNode: _focusNode,
+      child: MouseRegion(
+        cursor: cursor,
+        onHover: (event) {
+          interactor.onPointerHover(_toPoint(event.localPosition));
+        },
+        child: Listener(
           behavior: HitTestBehavior.opaque,
-          onScaleStart: _onScaleStart,
-          onScaleUpdate: _onScaleUpdate,
-          onScaleEnd: _onScaleEnd,
+          onPointerDown: _onPointerDown,
+          onPointerMove: _onPointerMove,
+          onPointerUp: _onPointerUp,
+          onPointerCancel: _onPointerCancel,
+          onPointerSignal: _onPointerSignal,
           child: RepaintBoundary(
             child: CustomPaint(
               painter: CanvasPainter(
@@ -64,12 +72,49 @@ class _EditorCanvasViewState extends ConsumerState<EditorCanvasView> {
                 selectedIds: editorState.selectedIds,
                 gesture: interaction.gesture,
               ),
+              isComplex: true,
+              willChange: true,
               child: const SizedBox.expand(),
             ),
           ),
         ),
       ),
     );
+  }
+
+  void _onPointerDown(PointerDownEvent event) {
+    _focusNode.requestFocus();
+
+    // Accept primary mouse / touch / stylus. Some desktop embeds report
+    // buttons==0 on down; still treat mouse downs as primary.
+    final isPrimaryMouse = event.kind == PointerDeviceKind.mouse &&
+        (event.buttons == 0 || (event.buttons & kPrimaryButton) != 0);
+    final isTouchLike = event.kind == PointerDeviceKind.touch ||
+        event.kind == PointerDeviceKind.stylus ||
+        event.kind == PointerDeviceKind.unknown;
+    if (!isPrimaryMouse && !isTouchLike) {
+      return;
+    }
+
+    _activePointer = event.pointer;
+    interactor.onPointerDown(_toPoint(event.localPosition));
+  }
+
+  void _onPointerMove(PointerMoveEvent event) {
+    if (_activePointer == null || event.pointer != _activePointer) return;
+    interactor.onPointerMove(_toPoint(event.localPosition));
+  }
+
+  void _onPointerUp(PointerUpEvent event) {
+    if (_activePointer != null && event.pointer != _activePointer) return;
+    interactor.onPointerUp(_toPoint(event.localPosition));
+    _activePointer = null;
+  }
+
+  void _onPointerCancel(PointerCancelEvent event) {
+    if (_activePointer != null && event.pointer != _activePointer) return;
+    interactor.onPointerCancel();
+    _activePointer = null;
   }
 
   void _onPointerSignal(PointerSignalEvent signal) {
@@ -79,55 +124,14 @@ class _EditorCanvasViewState extends ConsumerState<EditorCanvasView> {
     final wantsZoom = HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed;
 
-    if (wantsZoom) {
+    if (wantsZoom || signal.kind == PointerDeviceKind.mouse) {
       interactor.onScrollZoom(position, signal.scrollDelta.dy);
       return;
     }
 
-    // Mouse wheel → zoom around pointer (desktop convention).
-    if (signal.kind == PointerDeviceKind.mouse) {
-      interactor.onScrollZoom(position, signal.scrollDelta.dy);
-      return;
-    }
-
-    // Trackpad two-finger scroll → pan.
     interactor.panByScreenDelta(
       -signal.scrollDelta.dx,
       -signal.scrollDelta.dy,
     );
-  }
-
-  void _onScaleStart(ScaleStartDetails details) {
-    if (details.pointerCount > 1) {
-      _pinchStartZoom =
-          ref.read(editorControllerProvider).document.camera.zoom;
-      return;
-    }
-    interactor.onPointerDown(_toPoint(details.localFocalPoint));
-  }
-
-  void _onScaleUpdate(ScaleUpdateDetails details) {
-    if (details.pointerCount > 1) {
-      final startZoom = _pinchStartZoom ??
-          ref.read(editorControllerProvider).document.camera.zoom;
-      final camera = ref.read(editorControllerProvider).document.camera;
-      final focal = _toPoint(details.localFocalPoint);
-      final next = zoomAtPoint(
-        camera.copyWith(zoom: startZoom),
-        focal,
-        startZoom * details.scale,
-      );
-      ref.read(editorControllerProvider.notifier).setCamera(next);
-      return;
-    }
-    interactor.onPointerMove(_toPoint(details.localFocalPoint));
-  }
-
-  void _onScaleEnd(ScaleEndDetails details) {
-    _pinchStartZoom = null;
-    // Use last known pointer from interaction state when available.
-    final pointer =
-        ref.read(interactionControllerProvider).pointerScreen ?? Point.zero;
-    interactor.onPointerUp(pointer);
   }
 }
