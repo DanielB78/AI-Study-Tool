@@ -1,8 +1,11 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 
 import '../../core/canvas/models/camera_state.dart';
 import '../../core/canvas/models/canvas_document.dart';
 import '../../core/canvas/models/canvas_element.dart';
+import '../geometry/transform_handles.dart';
 import '../state/interaction_state.dart';
 import 'element_renderers.dart';
 
@@ -10,16 +13,19 @@ import 'element_renderers.dart';
 class CanvasRenderer {
   CanvasRenderer({
     Map<CanvasElementType, ElementRenderer>? renderers,
+    this.imageCache,
   }) : renderers = renderers ??
             {
               CanvasElementType.shape: const ShapeElementRenderer(),
               CanvasElementType.text: const TextElementRenderer(),
               CanvasElementType.drawing: const DrawingElementRenderer(),
-              CanvasElementType.image: const ImageElementRenderer(),
+              CanvasElementType.image: ImageElementRenderer(imageCache: imageCache),
               CanvasElementType.connector: const ConnectorElementRenderer(),
             };
 
   final Map<CanvasElementType, ElementRenderer> renderers;
+  final Map<String, ui.Image>? imageCache;
+  final _handles = const TransformHandleHitTester();
 
   void paint(
     Canvas canvas,
@@ -27,6 +33,8 @@ class CanvasRenderer {
     required CanvasDocument document,
     required Set<String> selectedIds,
     GestureState gesture = const GestureIdle(),
+    List<AlignmentGuide> guides = const [],
+    String? editingTextId,
   }) {
     _paintBackground(canvas, size);
     _paintGrid(canvas, size, document.camera);
@@ -39,6 +47,8 @@ class CanvasRenderer {
     final liveOffsets = _liveOffsets(gesture);
 
     for (final element in document.elementsInZOrder) {
+      // Hide committed text while overlay edits it.
+      if (editingTextId != null && element.id == editingTextId) continue;
       final offset = liveOffsets[element.id] ?? Offset.zero;
       renderElement(
         canvas,
@@ -48,12 +58,69 @@ class CanvasRenderer {
       );
     }
 
-    // Selection outlines above content.
+    // Live creation previews
+    _paintCreationPreview(canvas, gesture);
+
+    // Selection outlines + handles
     for (final id in selectedIds) {
+      if (editingTextId == id) continue;
       final element = document.getElementById(id);
       if (element == null) continue;
       final offset = liveOffsets[id] ?? Offset.zero;
-      _paintSelectionBounds(canvas, element, offset);
+      final liveBounds = element.bounds.translate(offset.dx, offset.dy);
+      // Apply live transform preview
+      final paintBounds = gesture is GestureTransforming &&
+              gesture.elementId == id &&
+              gesture.handle != TransformHandle.rotate
+          ? applyResize(
+              origin: gesture.originBounds,
+              handle: gesture.handle,
+              current: gesture.currentWorld,
+              keepAspect: element is ImageElement,
+            )
+          : liveBounds;
+      _paintSelectionBounds(
+        canvas,
+        paintBounds,
+        showHandles: selectedIds.length == 1 && element is! DrawingElement,
+        zoom: camera.zoom,
+      );
+    }
+
+    // Marquee
+    if (gesture is GestureMarqueeSelect) {
+      final r = gesture.rect;
+      canvas.drawRect(
+        Rect.fromLTWH(r.x, r.y, r.width, r.height),
+        Paint()..color = const Color(0x333B82F6),
+      );
+      canvas.drawRect(
+        Rect.fromLTWH(r.x, r.y, r.width, r.height),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1 / camera.zoom
+          ..color = const Color(0xFF3B82F6),
+      );
+    }
+
+    // Alignment guides
+    for (final g in guides) {
+      final paint = Paint()
+        ..color = const Color(0xFFE11D48)
+        ..strokeWidth = 1 / camera.zoom;
+      if (g.orientation == GuideOrientation.vertical) {
+        canvas.drawLine(
+          Offset(g.position, -100000),
+          Offset(g.position, 100000),
+          paint,
+        );
+      } else {
+        canvas.drawLine(
+          Offset(-100000, g.position),
+          Offset(100000, g.position),
+          paint,
+        );
+      }
     }
 
     canvas.restore();
@@ -65,7 +132,11 @@ class CanvasRenderer {
     required bool selected,
     Offset liveOffset = Offset.zero,
   }) {
+    // Keep image renderer cache in sync
     final renderer = renderers[element.type];
+    if (element.type == CanvasElementType.image && imageCache != null) {
+      (renderer as ImageElementRenderer);
+    }
     renderer?.paint(
       canvas,
       element,
@@ -76,11 +147,46 @@ class CanvasRenderer {
 
   Map<String, Offset> _liveOffsets(GestureState gesture) {
     if (gesture is! GestureDraggingElements) return const {};
-    final dx = gesture.dx;
-    final dy = gesture.dy;
     return {
-      for (final id in gesture.elementIds) id: Offset(dx, dy),
+      for (final id in gesture.elementIds) id: Offset(gesture.dx, gesture.dy),
     };
+  }
+
+  void _paintCreationPreview(Canvas canvas, GestureState gesture) {
+    if (gesture is GestureCreatingShape) {
+      final r = gesture.rect;
+      final preview = ShapeElement.create(
+        x: r.x,
+        y: r.y,
+        width: r.width.clamp(1, 100000),
+        height: r.height.clamp(1, 100000),
+        shapeKind: gesture.kind,
+      );
+      const ShapeElementRenderer().paint(
+        canvas,
+        preview.copyWithBase(opacity: 0.7),
+        selected: false,
+      );
+    } else if (gesture is GestureCreatingConnector) {
+      final isArrow = gesture.kind == ConnectorKind.arrow;
+      final preview = ConnectorElement.create(
+        startX: gesture.startWorld.x,
+        startY: gesture.startWorld.y,
+        endX: gesture.currentWorld.x,
+        endY: gesture.currentWorld.y,
+        connectorKind: gesture.kind,
+        arrowHeads: isArrow ? ArrowHeads.end : ArrowHeads.none,
+      );
+      const ConnectorElementRenderer()
+          .paint(canvas, preview, selected: false);
+    } else if (gesture is GestureDrawingStroke && gesture.points.length >= 4) {
+      final preview = DrawingElement.fromPoints(
+        absolutePoints: gesture.points,
+        color: '#1A1A1A',
+        strokeWidth: 3,
+      );
+      const DrawingElementRenderer().paint(canvas, preview, selected: false);
+    }
   }
 
   void _paintBackground(Canvas canvas, Size size) {
@@ -112,48 +218,80 @@ class CanvasRenderer {
 
   void _paintSelectionBounds(
     Canvas canvas,
-    CanvasElement element,
-    Offset liveOffset,
-  ) {
+    dynamic bounds, {
+    required bool showHandles,
+    required double zoom,
+  }) {
     final rect = Rect.fromLTWH(
-      element.x + liveOffset.dx,
-      element.y + liveOffset.dy,
-      element.width,
-      element.height,
-    ).inflate(2);
+      bounds.x as double,
+      bounds.y as double,
+      bounds.width as double,
+      bounds.height as double,
+    ).inflate(2 / zoom);
 
     final stroke = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5
+      ..strokeWidth = 1.5 / zoom
       ..color = const Color(0xFF3B82F6);
     canvas.drawRect(rect, stroke);
 
-    const handle = 6.0;
+    if (!showHandles) return;
+
+    final handleRects = _handles.handleRects(
+      // ignore: unnecessary_cast
+      bounds,
+      zoom: zoom,
+    );
     final fillPaint = Paint()..color = const Color(0xFFFFFFFF);
     final handleStroke = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.25
+      ..strokeWidth = 1.25 / zoom
       ..color = const Color(0xFF3B82F6);
-    for (final c in [rect.topLeft, rect.topRight, rect.bottomLeft, rect.bottomRight]) {
-      final hr = Rect.fromCenter(center: c, width: handle, height: handle);
-      canvas.drawRect(hr, fillPaint);
-      canvas.drawRect(hr, handleStroke);
+
+    for (final entry in handleRects.entries) {
+      if (entry.key == TransformHandle.rotate) {
+        // Rotation stem
+        canvas.drawLine(
+          Offset(rect.center.dx, rect.top),
+          Offset(rect.center.dx, entry.value.center.y),
+          stroke,
+        );
+      }
+      final hr = Rect.fromLTWH(
+        entry.value.x,
+        entry.value.y,
+        entry.value.width,
+        entry.value.height,
+      );
+      if (entry.key == TransformHandle.rotate) {
+        canvas.drawCircle(hr.center, hr.width / 2, fillPaint);
+        canvas.drawCircle(hr.center, hr.width / 2, handleStroke);
+      } else {
+        canvas.drawRect(hr, fillPaint);
+        canvas.drawRect(hr, handleStroke);
+      }
     }
   }
 }
 
-/// [CustomPainter] bridge — holds no application state of its own.
 class CanvasPainter extends CustomPainter {
   CanvasPainter({
     required this.document,
     required this.selectedIds,
     required this.gesture,
+    this.guides = const [],
+    this.editingTextId,
+    this.imageCache,
     CanvasRenderer? renderer,
-  }) : renderer = renderer ?? CanvasRenderer();
+  }) : renderer = renderer ??
+            CanvasRenderer(imageCache: imageCache);
 
   final CanvasDocument document;
   final Set<String> selectedIds;
   final GestureState gesture;
+  final List<AlignmentGuide> guides;
+  final String? editingTextId;
+  final Map<String, ui.Image>? imageCache;
   final CanvasRenderer renderer;
 
   @override
@@ -164,6 +302,8 @@ class CanvasPainter extends CustomPainter {
       document: document,
       selectedIds: selectedIds,
       gesture: gesture,
+      guides: guides,
+      editingTextId: editingTextId,
     );
   }
 
@@ -171,7 +311,10 @@ class CanvasPainter extends CustomPainter {
   bool shouldRepaint(covariant CanvasPainter oldDelegate) {
     return document != oldDelegate.document ||
         !_setEq(selectedIds, oldDelegate.selectedIds) ||
-        gesture != oldDelegate.gesture;
+        gesture != oldDelegate.gesture ||
+        guides != oldDelegate.guides ||
+        editingTextId != oldDelegate.editingTextId ||
+        imageCache != oldDelegate.imageCache;
   }
 
   bool _setEq(Set<String> a, Set<String> b) {

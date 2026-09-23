@@ -3,9 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../editor/controller/editor_controller.dart';
+import '../../editor/interaction/canvas_interactor.dart';
 import '../../editor/state/editor_tool.dart';
 
-/// Desktop keyboard shortcuts — thin adapter over [EditorController].
+/// Desktop keyboard shortcuts — thin adapter over editor commands.
 class DesktopShortcuts extends ConsumerStatefulWidget {
   const DesktopShortcuts({super.key, required this.child});
 
@@ -24,6 +25,9 @@ class _DesktopShortcutsState extends ConsumerState<DesktopShortcuts> {
     super.dispose();
   }
 
+  bool get _editing =>
+      ref.read(interactionControllerProvider).isEditingText;
+
   @override
   Widget build(BuildContext context) {
     final editor = ref.read(editorControllerProvider.notifier);
@@ -31,11 +35,11 @@ class _DesktopShortcutsState extends ConsumerState<DesktopShortcuts> {
     return Shortcuts(
       shortcuts: <ShortcutActivator, Intent>{
         const SingleActivator(LogicalKeyboardKey.delete):
-            const _DeleteSelectionIntent(),
+            const _DeleteIntent(),
         const SingleActivator(LogicalKeyboardKey.backspace):
-            const _DeleteSelectionIntent(),
+            const _DeleteIntent(),
         const SingleActivator(LogicalKeyboardKey.escape):
-            const _ClearSelectionIntent(),
+            const _EscapeIntent(),
         const SingleActivator(LogicalKeyboardKey.keyZ, control: true):
             const _UndoIntent(),
         const SingleActivator(LogicalKeyboardKey.keyZ, meta: true):
@@ -54,39 +58,94 @@ class _DesktopShortcutsState extends ConsumerState<DesktopShortcuts> {
             const _RedoIntent(),
         const SingleActivator(LogicalKeyboardKey.keyY, meta: true):
             const _RedoIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyC, control: true):
+            const _CopyIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyC, meta: true):
+            const _CopyIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyV, control: true):
+            const _PasteIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyV, meta: true):
+            const _PasteIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyD, control: true):
+            const _DuplicateIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyD, meta: true):
+            const _DuplicateIntent(),
         const SingleActivator(LogicalKeyboardKey.keyV):
             const _SetToolIntent(EditorTool.select),
         const SingleActivator(LogicalKeyboardKey.keyH):
             const _SetToolIntent(EditorTool.pan),
+        const SingleActivator(LogicalKeyboardKey.keyT):
+            const _SetToolIntent(EditorTool.text),
+        const SingleActivator(LogicalKeyboardKey.keyP):
+            const _SetToolIntent(EditorTool.pen),
+        const SingleActivator(LogicalKeyboardKey.keyS):
+            const _SetToolIntent(EditorTool.shape),
+        const SingleActivator(LogicalKeyboardKey.keyL):
+            const _SetToolIntent(EditorTool.line),
+        const SingleActivator(LogicalKeyboardKey.keyA):
+            const _SetToolIntent(EditorTool.arrow),
+        const SingleActivator(LogicalKeyboardKey.keyI):
+            const _SetToolIntent(EditorTool.image),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
-          _DeleteSelectionIntent: CallbackAction<_DeleteSelectionIntent>(
+          _DeleteIntent: CallbackAction<_DeleteIntent>(
             onInvoke: (_) {
+              if (_editing) return null;
               editor.deleteSelection();
               return null;
             },
           ),
-          _ClearSelectionIntent: CallbackAction<_ClearSelectionIntent>(
+          _EscapeIntent: CallbackAction<_EscapeIntent>(
             onInvoke: (_) {
-              editor.clearSelection();
+              CanvasInteractor(
+                editor: editor,
+                interaction:
+                    ref.read(interactionControllerProvider.notifier),
+              ).cancelOrEscape();
               return null;
             },
           ),
           _UndoIntent: CallbackAction<_UndoIntent>(
             onInvoke: (_) {
+              if (_editing) return null;
               editor.undo();
               return null;
             },
           ),
           _RedoIntent: CallbackAction<_RedoIntent>(
             onInvoke: (_) {
+              if (_editing) return null;
               editor.redo();
+              return null;
+            },
+          ),
+          _CopyIntent: CallbackAction<_CopyIntent>(
+            onInvoke: (_) {
+              if (_editing) return null;
+              editor.copySelection();
+              return null;
+            },
+          ),
+          _PasteIntent: CallbackAction<_PasteIntent>(
+            onInvoke: (_) {
+              if (_editing) return null;
+              editor.pasteClipboard();
+              return null;
+            },
+          ),
+          _DuplicateIntent: CallbackAction<_DuplicateIntent>(
+            onInvoke: (_) {
+              if (_editing) return null;
+              editor.duplicateSelection();
               return null;
             },
           ),
           _SetToolIntent: CallbackAction<_SetToolIntent>(
             onInvoke: (intent) {
+              if (_editing) return null;
+              // Avoid conflict: Ctrl+V is paste (handled above with control).
+              // Bare V is select — but also used while typing. Guard editing.
               editor.setTool(intent.tool);
               return null;
             },
@@ -102,12 +161,12 @@ class _DesktopShortcutsState extends ConsumerState<DesktopShortcuts> {
   }
 }
 
-class _DeleteSelectionIntent extends Intent {
-  const _DeleteSelectionIntent();
+class _DeleteIntent extends Intent {
+  const _DeleteIntent();
 }
 
-class _ClearSelectionIntent extends Intent {
-  const _ClearSelectionIntent();
+class _EscapeIntent extends Intent {
+  const _EscapeIntent();
 }
 
 class _UndoIntent extends Intent {
@@ -116,6 +175,18 @@ class _UndoIntent extends Intent {
 
 class _RedoIntent extends Intent {
   const _RedoIntent();
+}
+
+class _CopyIntent extends Intent {
+  const _CopyIntent();
+}
+
+class _PasteIntent extends Intent {
+  const _PasteIntent();
+}
+
+class _DuplicateIntent extends Intent {
+  const _DuplicateIntent();
 }
 
 class _SetToolIntent extends Intent {

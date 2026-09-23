@@ -2,6 +2,9 @@ import 'package:equatable/equatable.dart';
 
 import '../geometry/rect.dart';
 import 'ids.dart';
+import 'style_enums.dart';
+
+export 'style_enums.dart';
 
 /// Element type discriminant for serialization and queries.
 enum CanvasElementType {
@@ -21,10 +24,30 @@ enum CanvasElementType {
   }
 }
 
-/// Common geometry and identity for every canvas object.
-///
-/// Elements exist in **world coordinates**. The renderer + camera convert
-/// to screen space; element positions are never viewport-relative.
+/// Shape kinds for [ShapeElement].
+enum ShapeKind {
+  rectangle,
+  roundedRect,
+  ellipse,
+  triangle,
+  diamond,
+  pentagon,
+  hexagon,
+  star,
+  parallelogram,
+  callout;
+
+  String get wireName => name;
+
+  static ShapeKind fromWire(String value) {
+    return ShapeKind.values.firstWhere(
+      (e) => e.name == value,
+      orElse: () => ShapeKind.rectangle,
+    );
+  }
+}
+
+/// Common geometry and identity for every canvas object (world coordinates).
 sealed class CanvasElement extends Equatable {
   const CanvasElement({
     required this.id,
@@ -52,8 +75,6 @@ sealed class CanvasElement extends Equatable {
   final bool locked;
   final DateTime createdAt;
   final DateTime updatedAt;
-
-  /// Extensible bag for future AI/RAG annotations without schema churn.
   final Map<String, Object?> metadata;
 
   CanvasElementType get type;
@@ -72,6 +93,9 @@ sealed class CanvasElement extends Equatable {
     DateTime? updatedAt,
     Map<String, Object?>? metadata,
   });
+
+  /// Duplicate with a fresh stable ID (and optional offset).
+  CanvasElement duplicate({required String newId, double dx = 0, double dy = 0});
 
   Map<String, dynamic> toJson();
 
@@ -152,7 +176,7 @@ sealed class CanvasElement extends Equatable {
       ];
 }
 
-/// Placeholder text element — rendering/editing comes later.
+/// Structured text — never rasterized.
 final class TextElement extends CanvasElement {
   const TextElement({
     required super.id,
@@ -168,13 +192,33 @@ final class TextElement extends CanvasElement {
     required super.updatedAt,
     super.metadata,
     this.text = '',
-    this.fontSize = 16,
-    this.color = '#1A1A1A',
+    this.fontFamily = 'Roboto',
+    this.fontSize = 18,
+    this.fontWeight = FontWeightKind.normal,
+    this.italic = false,
+    this.underline = false,
+    this.strikethrough = false,
+    this.textColor = '#1A1A1A',
+    this.backgroundColor,
+    this.textAlign = TextAlignment.left,
+    this.lineHeight = 1.35,
+    this.padding = 8,
+    this.borderRadius = 0,
   });
 
   final String text;
+  final String fontFamily;
   final double fontSize;
-  final String color;
+  final FontWeightKind fontWeight;
+  final bool italic;
+  final bool underline;
+  final bool strikethrough;
+  final String textColor;
+  final String? backgroundColor;
+  final TextAlignment textAlign;
+  final double lineHeight;
+  final double padding;
+  final double borderRadius;
 
   @override
   CanvasElementType get type => CanvasElementType.text;
@@ -182,14 +226,24 @@ final class TextElement extends CanvasElement {
   factory TextElement.create({
     required double x,
     required double y,
-    double width = 200,
-    double height = 40,
+    double width = 220,
+    double height = 48,
     String text = '',
     int zIndex = 0,
+    String? id,
+    String fontFamily = 'Roboto',
+    double fontSize = 18,
+    FontWeightKind fontWeight = FontWeightKind.normal,
+    bool italic = false,
+    bool underline = false,
+    bool strikethrough = false,
+    String textColor = '#1A1A1A',
+    String? backgroundColor,
+    TextAlignment textAlign = TextAlignment.left,
   }) {
     final now = DateTime.now().toUtc();
     return TextElement(
-      id: generateId(),
+      id: id ?? generateId(),
       x: x,
       y: y,
       width: width,
@@ -198,6 +252,15 @@ final class TextElement extends CanvasElement {
       createdAt: now,
       updatedAt: now,
       text: text,
+      fontFamily: fontFamily,
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      italic: italic,
+      underline: underline,
+      strikethrough: strikethrough,
+      textColor: textColor,
+      backgroundColor: backgroundColor,
+      textAlign: textAlign,
     );
   }
 
@@ -214,8 +277,19 @@ final class TextElement extends CanvasElement {
     DateTime? updatedAt,
     Map<String, Object?>? metadata,
     String? text,
+    String? fontFamily,
     double? fontSize,
-    String? color,
+    FontWeightKind? fontWeight,
+    bool? italic,
+    bool? underline,
+    bool? strikethrough,
+    String? textColor,
+    String? backgroundColor,
+    bool clearBackground = false,
+    TextAlignment? textAlign,
+    double? lineHeight,
+    double? padding,
+    double? borderRadius,
   }) {
     return TextElement(
       id: id,
@@ -231,8 +305,55 @@ final class TextElement extends CanvasElement {
       updatedAt: updatedAt ?? this.updatedAt,
       metadata: metadata ?? this.metadata,
       text: text ?? this.text,
+      fontFamily: fontFamily ?? this.fontFamily,
       fontSize: fontSize ?? this.fontSize,
-      color: color ?? this.color,
+      fontWeight: fontWeight ?? this.fontWeight,
+      italic: italic ?? this.italic,
+      underline: underline ?? this.underline,
+      strikethrough: strikethrough ?? this.strikethrough,
+      textColor: textColor ?? this.textColor,
+      backgroundColor:
+          clearBackground ? null : (backgroundColor ?? this.backgroundColor),
+      textAlign: textAlign ?? this.textAlign,
+      lineHeight: lineHeight ?? this.lineHeight,
+      padding: padding ?? this.padding,
+      borderRadius: borderRadius ?? this.borderRadius,
+    );
+  }
+
+  @override
+  TextElement duplicate({required String newId, double dx = 0, double dy = 0}) {
+    final now = DateTime.now().toUtc();
+    return copyWithBase(x: x + dx, y: y + dy, updatedAt: now).copyWithId(newId);
+  }
+
+  TextElement copyWithId(String newId) {
+    return TextElement(
+      id: newId,
+      x: x,
+      y: y,
+      width: width,
+      height: height,
+      rotation: rotation,
+      zIndex: zIndex,
+      opacity: opacity,
+      locked: locked,
+      createdAt: DateTime.now().toUtc(),
+      updatedAt: DateTime.now().toUtc(),
+      metadata: metadata,
+      text: text,
+      fontFamily: fontFamily,
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      italic: italic,
+      underline: underline,
+      strikethrough: strikethrough,
+      textColor: textColor,
+      backgroundColor: backgroundColor,
+      textAlign: textAlign,
+      lineHeight: lineHeight,
+      padding: padding,
+      borderRadius: borderRadius,
     );
   }
 
@@ -240,8 +361,19 @@ final class TextElement extends CanvasElement {
   Map<String, dynamic> toJson() => {
         ...CanvasElement.baseToJson(this),
         'text': text,
+        'fontFamily': fontFamily,
         'fontSize': fontSize,
-        'color': color,
+        'fontWeight': fontWeight.wireName,
+        'italic': italic,
+        'underline': underline,
+        'strikethrough': strikethrough,
+        'textColor': textColor,
+        'color': textColor, // v1 compat
+        'backgroundColor': backgroundColor,
+        'textAlign': textAlign.wireName,
+        'lineHeight': lineHeight,
+        'padding': padding,
+        'borderRadius': borderRadius,
       };
 
   factory TextElement.fromJson(Map<String, dynamic> json) {
@@ -260,32 +392,47 @@ final class TextElement extends CanvasElement {
       updatedAt: b.$11,
       metadata: b.$12,
       text: json['text'] as String? ?? '',
-      fontSize: (json['fontSize'] as num?)?.toDouble() ?? 16,
-      color: json['color'] as String? ?? '#1A1A1A',
+      fontFamily: json['fontFamily'] as String? ?? 'Roboto',
+      fontSize: (json['fontSize'] as num?)?.toDouble() ?? 18,
+      fontWeight: FontWeightKind.fromWire(json['fontWeight'] as String?),
+      italic: json['italic'] as bool? ?? json['fontItalic'] as bool? ?? false,
+      underline: json['underline'] as bool? ?? false,
+      strikethrough: json['strikethrough'] as bool? ?? false,
+      textColor: json['textColor'] as String? ??
+          json['color'] as String? ??
+          '#1A1A1A',
+      backgroundColor: json['backgroundColor'] as String?,
+      textAlign: TextAlignment.fromWire(
+        json['textAlign'] as String? ?? json['alignment'] as String?,
+      ),
+      lineHeight: (json['lineHeight'] as num?)?.toDouble() ?? 1.35,
+      padding: (json['padding'] as num?)?.toDouble() ?? 8,
+      borderRadius: (json['borderRadius'] as num?)?.toDouble() ??
+          (json['cornerRadius'] as num?)?.toDouble() ??
+          0,
     );
   }
 
   @override
-  List<Object?> get props => [...super.props, text, fontSize, color];
+  List<Object?> get props => [
+        ...super.props,
+        text,
+        fontFamily,
+        fontSize,
+        fontWeight,
+        italic,
+        underline,
+        strikethrough,
+        textColor,
+        backgroundColor,
+        textAlign,
+        lineHeight,
+        padding,
+        borderRadius,
+      ];
 }
 
-/// Shape kinds supported by [ShapeElement] (extensible).
-enum ShapeKind {
-  rectangle,
-  ellipse,
-  roundedRect;
-
-  String get wireName => name;
-
-  static ShapeKind fromWire(String value) {
-    return ShapeKind.values.firstWhere(
-      (e) => e.name == value,
-      orElse: () => ShapeKind.rectangle,
-    );
-  }
-}
-
-/// Shape element — demo rectangles use this type fully in phase 1.
+/// Structured shape with optional semantic label for RAG.
 final class ShapeElement extends CanvasElement {
   const ShapeElement({
     required super.id,
@@ -304,12 +451,34 @@ final class ShapeElement extends CanvasElement {
     this.fill = '#5B8DEF',
     this.stroke = '#2F5FBF',
     this.strokeWidth = 2,
+    this.strokeStyle = StrokeStyle.solid,
+    this.cornerRadius = 12,
+    this.starPoints = 5,
+    this.starInnerRatio = 0.45,
+    this.label = '',
+    this.labelFontSize = 16,
+    this.labelFontFamily = 'Roboto',
+    this.labelFontWeight = FontWeightKind.normal,
+    this.labelItalic = false,
+    this.labelColor = '#1A1A1A',
   });
 
   final ShapeKind shapeKind;
   final String? fill;
   final String? stroke;
   final double strokeWidth;
+  final StrokeStyle strokeStyle;
+  final double cornerRadius;
+  final int starPoints;
+  final double starInnerRatio;
+
+  /// Semantic label text rendered inside the shape (RAG-readable).
+  final String label;
+  final double labelFontSize;
+  final String labelFontFamily;
+  final FontWeightKind labelFontWeight;
+  final bool labelItalic;
+  final String labelColor;
 
   @override
   CanvasElementType get type => CanvasElementType.shape;
@@ -322,9 +491,13 @@ final class ShapeElement extends CanvasElement {
     ShapeKind shapeKind = ShapeKind.rectangle,
     String? fill = '#5B8DEF',
     String? stroke = '#2F5FBF',
+    double strokeWidth = 2,
+    StrokeStyle strokeStyle = StrokeStyle.solid,
+    double cornerRadius = 12,
     int zIndex = 0,
     bool locked = false,
     String? id,
+    String label = '',
   }) {
     final now = DateTime.now().toUtc();
     return ShapeElement(
@@ -340,6 +513,10 @@ final class ShapeElement extends CanvasElement {
       shapeKind: shapeKind,
       fill: fill,
       stroke: stroke,
+      strokeWidth: strokeWidth,
+      strokeStyle: strokeStyle,
+      cornerRadius: cornerRadius,
+      label: label,
     );
   }
 
@@ -359,6 +536,16 @@ final class ShapeElement extends CanvasElement {
     String? fill,
     String? stroke,
     double? strokeWidth,
+    StrokeStyle? strokeStyle,
+    double? cornerRadius,
+    int? starPoints,
+    double? starInnerRatio,
+    String? label,
+    double? labelFontSize,
+    String? labelFontFamily,
+    FontWeightKind? labelFontWeight,
+    bool? labelItalic,
+    String? labelColor,
     bool clearFill = false,
     bool clearStroke = false,
   }) {
@@ -379,6 +566,49 @@ final class ShapeElement extends CanvasElement {
       fill: clearFill ? null : (fill ?? this.fill),
       stroke: clearStroke ? null : (stroke ?? this.stroke),
       strokeWidth: strokeWidth ?? this.strokeWidth,
+      strokeStyle: strokeStyle ?? this.strokeStyle,
+      cornerRadius: cornerRadius ?? this.cornerRadius,
+      starPoints: starPoints ?? this.starPoints,
+      starInnerRatio: starInnerRatio ?? this.starInnerRatio,
+      label: label ?? this.label,
+      labelFontSize: labelFontSize ?? this.labelFontSize,
+      labelFontFamily: labelFontFamily ?? this.labelFontFamily,
+      labelFontWeight: labelFontWeight ?? this.labelFontWeight,
+      labelItalic: labelItalic ?? this.labelItalic,
+      labelColor: labelColor ?? this.labelColor,
+    );
+  }
+
+  @override
+  ShapeElement duplicate({required String newId, double dx = 0, double dy = 0}) {
+    final now = DateTime.now().toUtc();
+    return ShapeElement(
+      id: newId,
+      x: x + dx,
+      y: y + dy,
+      width: width,
+      height: height,
+      rotation: rotation,
+      zIndex: zIndex,
+      opacity: opacity,
+      locked: locked,
+      createdAt: now,
+      updatedAt: now,
+      metadata: metadata,
+      shapeKind: shapeKind,
+      fill: fill,
+      stroke: stroke,
+      strokeWidth: strokeWidth,
+      strokeStyle: strokeStyle,
+      cornerRadius: cornerRadius,
+      starPoints: starPoints,
+      starInnerRatio: starInnerRatio,
+      label: label,
+      labelFontSize: labelFontSize,
+      labelFontFamily: labelFontFamily,
+      labelFontWeight: labelFontWeight,
+      labelItalic: labelItalic,
+      labelColor: labelColor,
     );
   }
 
@@ -389,6 +619,16 @@ final class ShapeElement extends CanvasElement {
         'fill': fill,
         'stroke': stroke,
         'strokeWidth': strokeWidth,
+        'strokeStyle': strokeStyle.wireName,
+        'cornerRadius': cornerRadius,
+        'starPoints': starPoints,
+        'starInnerRatio': starInnerRatio,
+        'label': label,
+        'labelFontSize': labelFontSize,
+        'labelFontFamily': labelFontFamily,
+        'labelFontWeight': labelFontWeight.wireName,
+        'labelItalic': labelItalic,
+        'labelColor': labelColor,
       };
 
   factory ShapeElement.fromJson(Map<String, dynamic> json) {
@@ -410,15 +650,41 @@ final class ShapeElement extends CanvasElement {
       fill: json['fill'] as String?,
       stroke: json['stroke'] as String?,
       strokeWidth: (json['strokeWidth'] as num?)?.toDouble() ?? 2,
+      strokeStyle: StrokeStyle.fromWire(json['strokeStyle'] as String?),
+      cornerRadius: (json['cornerRadius'] as num?)?.toDouble() ?? 12,
+      starPoints: (json['starPoints'] as num?)?.toInt() ?? 5,
+      starInnerRatio: (json['starInnerRatio'] as num?)?.toDouble() ?? 0.45,
+      label: json['label'] as String? ?? '',
+      labelFontSize: (json['labelFontSize'] as num?)?.toDouble() ?? 16,
+      labelFontFamily: json['labelFontFamily'] as String? ?? 'Roboto',
+      labelFontWeight:
+          FontWeightKind.fromWire(json['labelFontWeight'] as String?),
+      labelItalic: json['labelItalic'] as bool? ?? false,
+      labelColor: json['labelColor'] as String? ?? '#1A1A1A',
     );
   }
 
   @override
-  List<Object?> get props =>
-      [...super.props, shapeKind, fill, stroke, strokeWidth];
+  List<Object?> get props => [
+        ...super.props,
+        shapeKind,
+        fill,
+        stroke,
+        strokeWidth,
+        strokeStyle,
+        cornerRadius,
+        starPoints,
+        starInnerRatio,
+        label,
+        labelFontSize,
+        labelFontFamily,
+        labelFontWeight,
+        labelItalic,
+        labelColor,
+      ];
 }
 
-/// Freehand stroke placeholder.
+/// Freehand stroke — points are absolute world coordinates [x0,y0,x1,y1,...].
 final class DrawingElement extends CanvasElement {
   const DrawingElement({
     required super.id,
@@ -435,37 +701,54 @@ final class DrawingElement extends CanvasElement {
     super.metadata,
     this.points = const [],
     this.color = '#1A1A1A',
-    this.strokeWidth = 2,
+    this.strokeWidth = 3,
+    this.strokeStyle = StrokeStyle.solid,
   });
 
-  /// Flattened [x0,y0,x1,y1,...] in world coordinates relative to [x],[y]
-  /// or absolute — convention reserved for a later drawing tool.
   final List<double> points;
   final String color;
   final double strokeWidth;
+  final StrokeStyle strokeStyle;
 
   @override
   CanvasElementType get type => CanvasElementType.drawing;
 
-  factory DrawingElement.create({
-    required double x,
-    required double y,
-    double width = 0,
-    double height = 0,
-    List<double> points = const [],
+  factory DrawingElement.fromPoints({
+    required List<double> absolutePoints,
+    required String color,
+    required double strokeWidth,
+    StrokeStyle strokeStyle = StrokeStyle.solid,
     int zIndex = 0,
+    String? id,
   }) {
+    assert(absolutePoints.length >= 4);
+    var minX = absolutePoints[0];
+    var minY = absolutePoints[1];
+    var maxX = minX;
+    var maxY = minY;
+    for (var i = 0; i < absolutePoints.length; i += 2) {
+      final px = absolutePoints[i];
+      final py = absolutePoints[i + 1];
+      if (px < minX) minX = px;
+      if (py < minY) minY = py;
+      if (px > maxX) maxX = px;
+      if (py > maxY) maxY = py;
+    }
+    final pad = strokeWidth;
     final now = DateTime.now().toUtc();
     return DrawingElement(
-      id: generateId(),
-      x: x,
-      y: y,
-      width: width,
-      height: height,
+      id: id ?? generateId(),
+      x: minX - pad,
+      y: minY - pad,
+      width: (maxX - minX) + pad * 2,
+      height: (maxY - minY) + pad * 2,
       zIndex: zIndex,
       createdAt: now,
       updatedAt: now,
-      points: points,
+      points: List<double>.from(absolutePoints),
+      color: color,
+      strokeWidth: strokeWidth,
+      strokeStyle: strokeStyle,
     );
   }
 
@@ -484,6 +767,7 @@ final class DrawingElement extends CanvasElement {
     List<double>? points,
     String? color,
     double? strokeWidth,
+    StrokeStyle? strokeStyle,
   }) {
     return DrawingElement(
       id: id,
@@ -501,6 +785,50 @@ final class DrawingElement extends CanvasElement {
       points: points ?? this.points,
       color: color ?? this.color,
       strokeWidth: strokeWidth ?? this.strokeWidth,
+      strokeStyle: strokeStyle ?? this.strokeStyle,
+    );
+  }
+
+  @override
+  DrawingElement duplicate({required String newId, double dx = 0, double dy = 0}) {
+    final now = DateTime.now().toUtc();
+    final shifted = <double>[];
+    for (var i = 0; i < points.length; i += 2) {
+      shifted.add(points[i] + dx);
+      shifted.add(points[i + 1] + dy);
+    }
+    return DrawingElement(
+      id: newId,
+      x: x + dx,
+      y: y + dy,
+      width: width,
+      height: height,
+      rotation: rotation,
+      zIndex: zIndex,
+      opacity: opacity,
+      locked: locked,
+      createdAt: now,
+      updatedAt: now,
+      metadata: metadata,
+      points: shifted,
+      color: color,
+      strokeWidth: strokeWidth,
+      strokeStyle: strokeStyle,
+    );
+  }
+
+  /// Translate stroke points when the element is moved.
+  DrawingElement movedBy(double dx, double dy) {
+    final shifted = <double>[];
+    for (var i = 0; i < points.length; i += 2) {
+      shifted.add(points[i] + dx);
+      shifted.add(points[i + 1] + dy);
+    }
+    return copyWithBase(
+      x: x + dx,
+      y: y + dy,
+      points: shifted,
+      updatedAt: DateTime.now().toUtc(),
     );
   }
 
@@ -510,6 +838,7 @@ final class DrawingElement extends CanvasElement {
         'points': points,
         'color': color,
         'strokeWidth': strokeWidth,
+        'strokeStyle': strokeStyle.wireName,
       };
 
   factory DrawingElement.fromJson(Map<String, dynamic> json) {
@@ -532,15 +861,17 @@ final class DrawingElement extends CanvasElement {
               .toList() ??
           const [],
       color: json['color'] as String? ?? '#1A1A1A',
-      strokeWidth: (json['strokeWidth'] as num?)?.toDouble() ?? 2,
+      strokeWidth: (json['strokeWidth'] as num?)?.toDouble() ?? 3,
+      strokeStyle: StrokeStyle.fromWire(json['strokeStyle'] as String?),
     );
   }
 
   @override
-  List<Object?> get props => [...super.props, points, color, strokeWidth];
+  List<Object?> get props =>
+      [...super.props, points, color, strokeWidth, strokeStyle];
 }
 
-/// Raster image placeholder.
+/// Image referenced by a local/storage URI — not necessarily embedded bytes.
 final class ImageElement extends CanvasElement {
   const ImageElement({
     required super.id,
@@ -560,6 +891,7 @@ final class ImageElement extends CanvasElement {
     this.naturalHeight = 0,
   });
 
+  /// File path, asset key, or future cloud URL.
   final String src;
   final double naturalWidth;
   final double naturalHeight;
@@ -570,14 +902,17 @@ final class ImageElement extends CanvasElement {
   factory ImageElement.create({
     required double x,
     required double y,
-    double width = 200,
-    double height = 150,
-    String src = '',
+    required double width,
+    required double height,
+    required String src,
+    double naturalWidth = 0,
+    double naturalHeight = 0,
     int zIndex = 0,
+    String? id,
   }) {
     final now = DateTime.now().toUtc();
     return ImageElement(
-      id: generateId(),
+      id: id ?? generateId(),
       x: x,
       y: y,
       width: width,
@@ -586,6 +921,8 @@ final class ImageElement extends CanvasElement {
       createdAt: now,
       updatedAt: now,
       src: src,
+      naturalWidth: naturalWidth,
+      naturalHeight: naturalHeight,
     );
   }
 
@@ -625,6 +962,28 @@ final class ImageElement extends CanvasElement {
   }
 
   @override
+  ImageElement duplicate({required String newId, double dx = 0, double dy = 0}) {
+    final now = DateTime.now().toUtc();
+    return ImageElement(
+      id: newId,
+      x: x + dx,
+      y: y + dy,
+      width: width,
+      height: height,
+      rotation: rotation,
+      zIndex: zIndex,
+      opacity: opacity,
+      locked: locked,
+      createdAt: now,
+      updatedAt: now,
+      metadata: metadata,
+      src: src,
+      naturalWidth: naturalWidth,
+      naturalHeight: naturalHeight,
+    );
+  }
+
+  @override
   Map<String, dynamic> toJson() => {
         ...CanvasElement.baseToJson(this),
         'src': src,
@@ -658,7 +1017,7 @@ final class ImageElement extends CanvasElement {
       [...super.props, src, naturalWidth, naturalHeight];
 }
 
-/// Connector / relationship placeholder for future graph / RAG edges.
+/// Line / arrow connector — future RAG graph edge via binding IDs.
 final class ConnectorElement extends CanvasElement {
   const ConnectorElement({
     required super.id,
@@ -681,18 +1040,22 @@ final class ConnectorElement extends CanvasElement {
     this.endBindingId,
     this.stroke = '#666666',
     this.strokeWidth = 2,
+    this.strokeStyle = StrokeStyle.solid,
+    this.connectorKind = ConnectorKind.line,
+    this.arrowHeads = ArrowHeads.none,
   });
 
   final double startX;
   final double startY;
   final double endX;
   final double endY;
-
-  /// Future: element IDs this connector binds to (graph edges for RAG).
   final String? startBindingId;
   final String? endBindingId;
   final String stroke;
   final double strokeWidth;
+  final StrokeStyle strokeStyle;
+  final ConnectorKind connectorKind;
+  final ArrowHeads arrowHeads;
 
   @override
   CanvasElementType get type => CanvasElementType.connector;
@@ -704,17 +1067,24 @@ final class ConnectorElement extends CanvasElement {
     required double endY,
     String? startBindingId,
     String? endBindingId,
+    String stroke = '#666666',
+    double strokeWidth = 2,
+    StrokeStyle strokeStyle = StrokeStyle.solid,
+    ConnectorKind connectorKind = ConnectorKind.line,
+    ArrowHeads arrowHeads = ArrowHeads.none,
     int zIndex = 0,
+    String? id,
   }) {
     final now = DateTime.now().toUtc();
     final minX = startX < endX ? startX : endX;
     final minY = startY < endY ? startY : endY;
+    final pad = strokeWidth * 4;
     return ConnectorElement(
-      id: generateId(),
-      x: minX,
-      y: minY,
-      width: (endX - startX).abs(),
-      height: (endY - startY).abs(),
+      id: id ?? generateId(),
+      x: minX - pad,
+      y: minY - pad,
+      width: (endX - startX).abs() + pad * 2,
+      height: (endY - startY).abs() + pad * 2,
       zIndex: zIndex,
       createdAt: now,
       updatedAt: now,
@@ -724,6 +1094,11 @@ final class ConnectorElement extends CanvasElement {
       endY: endY,
       startBindingId: startBindingId,
       endBindingId: endBindingId,
+      stroke: stroke,
+      strokeWidth: strokeWidth,
+      strokeStyle: strokeStyle,
+      connectorKind: connectorKind,
+      arrowHeads: arrowHeads,
     );
   }
 
@@ -747,6 +1122,9 @@ final class ConnectorElement extends CanvasElement {
     String? endBindingId,
     String? stroke,
     double? strokeWidth,
+    StrokeStyle? strokeStyle,
+    ConnectorKind? connectorKind,
+    ArrowHeads? arrowHeads,
     bool clearStartBinding = false,
     bool clearEndBinding = false,
   }) {
@@ -773,6 +1151,55 @@ final class ConnectorElement extends CanvasElement {
           clearEndBinding ? null : (endBindingId ?? this.endBindingId),
       stroke: stroke ?? this.stroke,
       strokeWidth: strokeWidth ?? this.strokeWidth,
+      strokeStyle: strokeStyle ?? this.strokeStyle,
+      connectorKind: connectorKind ?? this.connectorKind,
+      arrowHeads: arrowHeads ?? this.arrowHeads,
+    );
+  }
+
+  @override
+  ConnectorElement duplicate({
+    required String newId,
+    double dx = 0,
+    double dy = 0,
+  }) {
+    return ConnectorElement.create(
+      id: newId,
+      startX: startX + dx,
+      startY: startY + dy,
+      endX: endX + dx,
+      endY: endY + dy,
+      stroke: stroke,
+      strokeWidth: strokeWidth,
+      strokeStyle: strokeStyle,
+      connectorKind: connectorKind,
+      arrowHeads: arrowHeads,
+      zIndex: zIndex,
+      // Bindings intentionally cleared on duplicate — remapped by caller if needed.
+    ).copyWithBase(opacity: opacity, locked: locked);
+  }
+
+  ConnectorElement movedBy(double dx, double dy) {
+    return ConnectorElement.create(
+      id: id,
+      startX: startX + dx,
+      startY: startY + dy,
+      endX: endX + dx,
+      endY: endY + dy,
+      startBindingId: startBindingId,
+      endBindingId: endBindingId,
+      stroke: stroke,
+      strokeWidth: strokeWidth,
+      strokeStyle: strokeStyle,
+      connectorKind: connectorKind,
+      arrowHeads: arrowHeads,
+      zIndex: zIndex,
+    ).copyWithBase(
+      opacity: opacity,
+      locked: locked,
+      rotation: rotation,
+      metadata: metadata,
+      updatedAt: DateTime.now().toUtc(),
     );
   }
 
@@ -787,10 +1214,18 @@ final class ConnectorElement extends CanvasElement {
         'endBindingId': endBindingId,
         'stroke': stroke,
         'strokeWidth': strokeWidth,
+        'strokeStyle': strokeStyle.wireName,
+        'connectorKind': connectorKind.wireName,
+        'arrowHeads': arrowHeads.wireName,
       };
 
   factory ConnectorElement.fromJson(Map<String, dynamic> json) {
     final b = CanvasElement.parseBase(json);
+    final kind = ConnectorKind.fromWire(json['connectorKind'] as String?);
+    var heads = ArrowHeads.fromWire(json['arrowHeads'] as String?);
+    if (json['arrowHeads'] == null && kind == ConnectorKind.arrow) {
+      heads = ArrowHeads.end;
+    }
     return ConnectorElement(
       id: b.$1,
       x: b.$2,
@@ -812,6 +1247,9 @@ final class ConnectorElement extends CanvasElement {
       endBindingId: json['endBindingId'] as String?,
       stroke: json['stroke'] as String? ?? '#666666',
       strokeWidth: (json['strokeWidth'] as num?)?.toDouble() ?? 2,
+      strokeStyle: StrokeStyle.fromWire(json['strokeStyle'] as String?),
+      connectorKind: kind,
+      arrowHeads: heads,
     );
   }
 
@@ -826,5 +1264,8 @@ final class ConnectorElement extends CanvasElement {
         endBindingId,
         stroke,
         strokeWidth,
+        strokeStyle,
+        connectorKind,
+        arrowHeads,
       ];
 }

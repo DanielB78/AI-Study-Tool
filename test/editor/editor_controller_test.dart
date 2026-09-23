@@ -39,8 +39,8 @@ void main() {
     editor.setTool(EditorTool.pan);
     expect(container.read(editorControllerProvider).activeTool, EditorTool.pan);
 
-    editor.setTool(EditorTool.text); // not implemented — ignored
-    expect(container.read(editorControllerProvider).activeTool, EditorTool.pan);
+    editor.setTool(EditorTool.text);
+    expect(container.read(editorControllerProvider).activeTool, EditorTool.text);
   });
 
   test('createElement goes through command history', () {

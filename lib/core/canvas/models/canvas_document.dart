@@ -7,7 +7,7 @@ import 'canvas_element.dart';
 import 'ids.dart';
 
 /// Current on-disk / wire schema version for [CanvasDocument].
-const int kCanvasDocumentVersion = 1;
+const int kCanvasDocumentVersion = 2;
 
 /// Structured canvas document — the source of truth for the board.
 ///

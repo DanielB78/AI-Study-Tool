@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 
-import 'desktop_floating_toolbar.dart';
-import 'desktop_shortcuts.dart';
 import '../../editor/rendering/editor_canvas_view.dart';
+import 'contextual/contextual_toolbar.dart';
+import 'desktop_shortcuts.dart';
+import 'toolbar/desktop_floating_toolbar.dart';
 
-/// Desktop application shell: full-bleed canvas + floating toolbar.
-///
-/// Editor logic is not embedded here — only layout and desktop chrome.
+/// Desktop application shell: full-bleed canvas + floating chrome.
 class DesktopShell extends StatelessWidget {
   const DesktopShell({super.key});
 
@@ -17,14 +16,23 @@ class DesktopShell extends StatelessWidget {
         backgroundColor: const Color(0xFFF4F5F7),
         body: Stack(
           fit: StackFit.expand,
+          clipBehavior: Clip.none,
           children: [
             const EditorCanvasView(),
-            // Left-edge hover reveal zone + floating toolbar.
             const Positioned(
               left: 16,
               top: 0,
               bottom: 0,
               child: _LeftEdgeToolbarHost(),
+            ),
+            const Positioned(
+              top: 16,
+              left: 0,
+              right: 0,
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ContextualToolbar(),
+              ),
             ),
           ],
         ),
@@ -47,20 +55,21 @@ class _LeftEdgeToolbarHostState extends State<_LeftEdgeToolbarHost> {
   Widget build(BuildContext context) {
     return MouseRegion(
       onEnter: (_) => setState(() => _visible = true),
-      onExit: (_) => setState(() => _visible = false),
+      onExit: (_) {
+        Future.delayed(const Duration(milliseconds: 250), () {
+          if (mounted) setState(() => _visible = false);
+        });
+      },
+      // Narrow hit target so the canvas remains clickable; popout paints
+      // outside via Stack overflow (clipBehavior: none on parent).
       child: SizedBox(
         width: 72,
         child: Align(
           alignment: Alignment.centerLeft,
-          child: AnimatedSlide(
+          child: AnimatedOpacity(
             duration: const Duration(milliseconds: 200),
-            curve: Curves.easeOutCubic,
-            offset: _visible ? Offset.zero : const Offset(-0.15, 0),
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 200),
-              opacity: _visible ? 1 : 0.35,
-              child: const DesktopFloatingToolbar(),
-            ),
+            opacity: _visible ? 1 : 0.35,
+            child: const DesktopFloatingToolbar(),
           ),
         ),
       ),

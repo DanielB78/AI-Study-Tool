@@ -1,8 +1,6 @@
 /// Active editor tool.
 ///
-/// Only [select] and [pan] are implemented in phase 1.
-/// Other values exist so the model is ready for future tools — do not
-/// invent fake behavior for unfinished tools.
+/// All tools listed here are implemented in phase 2 except as noted.
 enum EditorTool {
   select,
   pan,
@@ -13,5 +11,19 @@ enum EditorTool {
   arrow,
   image;
 
-  bool get isImplemented => this == select || this == pan;
+  bool get isCreationTool =>
+      this == text ||
+      this == pen ||
+      this == shape ||
+      this == line ||
+      this == arrow ||
+      this == image;
+
+  bool get usesTopContextualBar =>
+      this == text ||
+      this == pen ||
+      this == shape ||
+      this == line ||
+      this == arrow ||
+      this == image;
 }

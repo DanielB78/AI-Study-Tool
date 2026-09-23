@@ -1,8 +1,20 @@
+import 'dart:io';
+import 'dart:math' as math;
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 
+import '../../core/canvas/geometry/shape_geometry.dart';
 import '../../core/canvas/models/canvas_element.dart';
 
-/// Dispatches painting for a single element type.
+Color parseCanvasColor(String hex, {double opacity = 1}) {
+  var value = hex.replaceFirst('#', '');
+  if (value.length == 6) value = 'FF$value';
+  if (value.length != 8) return Color.fromRGBO(136, 136, 136, opacity);
+  final c = Color(int.parse(value, radix: 16));
+  return c.withValues(alpha: opacity * c.a / 255);
+}
+
 abstract class ElementRenderer {
   void paint(
     Canvas canvas,
@@ -32,51 +44,112 @@ class ShapeElementRenderer implements ElementRenderer {
 
     canvas.save();
     if (element.opacity < 1) {
-      canvas.saveLayer(rect.inflate(8), Paint()..color = Color.fromRGBO(0, 0, 0, element.opacity));
+      canvas.saveLayer(
+        rect.inflate(8),
+        Paint()..color = Color.fromRGBO(0, 0, 0, element.opacity),
+      );
     }
 
-    final rrect = switch (element.shapeKind) {
-      ShapeKind.roundedRect => RRect.fromRectAndRadius(rect, const Radius.circular(12)),
-      ShapeKind.rectangle || ShapeKind.ellipse => null,
-    };
-
+    final path = _shapePath(element, rect);
     if (element.fill != null) {
-      final fillPaint = Paint()
-        ..style = PaintingStyle.fill
-        ..color = _parseColor(element.fill!);
-      switch (element.shapeKind) {
-        case ShapeKind.ellipse:
-          canvas.drawOval(rect, fillPaint);
-        case ShapeKind.roundedRect:
-          canvas.drawRRect(rrect!, fillPaint);
-        case ShapeKind.rectangle:
-          canvas.drawRect(rect, fillPaint);
-      }
+      canvas.drawPath(
+        path,
+        Paint()
+          ..style = PaintingStyle.fill
+          ..color = parseCanvasColor(element.fill!),
+      );
     }
-
     if (element.stroke != null && element.strokeWidth > 0) {
       final strokePaint = Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = element.strokeWidth
-        ..color = _parseColor(element.stroke!);
-      switch (element.shapeKind) {
-        case ShapeKind.ellipse:
-          canvas.drawOval(rect, strokePaint);
-        case ShapeKind.roundedRect:
-          canvas.drawRRect(rrect!, strokePaint);
-        case ShapeKind.rectangle:
-          canvas.drawRect(rect, strokePaint);
-      }
+        ..color = parseCanvasColor(element.stroke!);
+      _applyStrokeStyle(strokePaint, element.strokeStyle, element.strokeWidth);
+      canvas.drawPath(path, strokePaint);
     }
 
-    if (element.opacity < 1) {
-      canvas.restore();
+    if (element.label.isNotEmpty) {
+      final tp = TextPainter(
+        text: TextSpan(
+          text: element.label,
+          style: TextStyle(
+            color: parseCanvasColor(element.labelColor),
+            fontSize: element.labelFontSize,
+            fontFamily: element.labelFontFamily,
+            fontWeight: element.labelFontWeight == FontWeightKind.bold
+                ? FontWeight.w700
+                : FontWeight.w400,
+            fontStyle:
+                element.labelItalic ? FontStyle.italic : FontStyle.normal,
+          ),
+        ),
+        textAlign: TextAlign.center,
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: math.max(8, element.width - 16));
+      tp.paint(
+        canvas,
+        Offset(
+          rect.center.dx - tp.width / 2,
+          rect.center.dy - tp.height / 2,
+        ),
+      );
     }
+
+    if (element.opacity < 1) canvas.restore();
     canvas.restore();
+  }
+
+  Path _shapePath(ShapeElement element, Rect rect) {
+    final bounds = element.bounds.translate(
+      rect.left - element.x,
+      rect.top - element.y,
+    );
+    // Use world-relative polygon then offset — simpler: rebuild from rect.
+    final kind = element.shapeKind;
+    if (kind == ShapeKind.ellipse) {
+      return Path()..addOval(rect);
+    }
+    if (kind == ShapeKind.roundedRect) {
+      return Path()
+        ..addRRect(RRect.fromRectAndRadius(
+          rect,
+          Radius.circular(element.cornerRadius),
+        ));
+    }
+    if (kind == ShapeKind.rectangle) {
+      return Path()..addRect(rect);
+    }
+    final poly = shapePolygon(
+      kind,
+      bounds,
+      starPoints: element.starPoints,
+      starInnerRatio: element.starInnerRatio,
+    );
+    final path = Path();
+    if (poly.isEmpty) return path;
+    path.moveTo(poly.first.x, poly.first.y);
+    for (var i = 1; i < poly.length; i++) {
+      path.lineTo(poly[i].x, poly[i].y);
+    }
+    path.close();
+    return path;
   }
 }
 
-/// Placeholder painters — establish the dispatch pattern without full features.
+void _applyStrokeStyle(Paint paint, StrokeStyle style, double width) {
+  switch (style) {
+    case StrokeStyle.solid:
+      paint.strokeCap = StrokeCap.round;
+    case StrokeStyle.dashed:
+      // Dash via path effect approximation — Flutter Paint has no dash natively
+      // on all platforms; we use a simple solid with longer joins as fallback
+      // and rely on path drawing with intervals in connector/drawing when needed.
+      paint.strokeCap = StrokeCap.square;
+    case StrokeStyle.dotted:
+      paint.strokeCap = StrokeCap.round;
+  }
+}
+
 class TextElementRenderer implements ElementRenderer {
   const TextElementRenderer();
 
@@ -94,21 +167,70 @@ class TextElementRenderer implements ElementRenderer {
       element.width,
       element.height,
     );
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..color = const Color(0xFF999999);
-    canvas.drawRect(rect, paint);
+
+    canvas.save();
+    if (element.opacity < 1) {
+      canvas.saveLayer(
+        rect.inflate(4),
+        Paint()..color = Color.fromRGBO(0, 0, 0, element.opacity),
+      );
+    }
+
+    if (element.backgroundColor != null) {
+      final rrect = RRect.fromRectAndRadius(
+        rect,
+        Radius.circular(element.borderRadius),
+      );
+      canvas.drawRRect(
+        rrect,
+        Paint()..color = parseCanvasColor(element.backgroundColor!),
+      );
+    }
+
+    final align = switch (element.textAlign) {
+      TextAlignment.left => TextAlign.left,
+      TextAlignment.center => TextAlign.center,
+      TextAlignment.right => TextAlign.right,
+    };
+
+    final style = TextStyle(
+      color: parseCanvasColor(element.textColor),
+      fontSize: element.fontSize,
+      fontFamily: element.fontFamily,
+      fontWeight: element.fontWeight == FontWeightKind.bold
+          ? FontWeight.w700
+          : FontWeight.w400,
+      fontStyle: element.italic ? FontStyle.italic : FontStyle.normal,
+      decoration: TextDecoration.combine([
+        if (element.underline) TextDecoration.underline,
+        if (element.strikethrough) TextDecoration.lineThrough,
+      ]),
+      height: element.lineHeight,
+    );
+
     final tp = TextPainter(
       text: TextSpan(
         text: element.text.isEmpty ? 'Text' : element.text,
-        style: TextStyle(
-          color: _parseColor(element.color),
-          fontSize: element.fontSize,
+        style: style.copyWith(
+          color: element.text.isEmpty
+              ? parseCanvasColor(element.textColor, opacity: 0.35)
+              : style.color,
         ),
       ),
+      textAlign: align,
       textDirection: TextDirection.ltr,
-    )..layout(maxWidth: element.width);
-    tp.paint(canvas, Offset(rect.left, rect.top));
+    )..layout(maxWidth: math.max(8, element.width - element.padding * 2));
+
+    final dx = switch (element.textAlign) {
+      TextAlignment.left => rect.left + element.padding,
+      TextAlignment.center =>
+        rect.left + (rect.width - tp.width) / 2,
+      TextAlignment.right => rect.right - element.padding - tp.width,
+    };
+    tp.paint(canvas, Offset(dx, rect.top + element.padding));
+
+    if (element.opacity < 1) canvas.restore();
+    canvas.restore();
   }
 }
 
@@ -135,20 +257,27 @@ class DrawingElementRenderer implements ElementRenderer {
         element.points[i + 1] + liveOffset.dy,
       );
     }
-    canvas.drawPath(
-      path,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = element.strokeWidth
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round
-        ..color = _parseColor(element.color),
-    );
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = element.strokeWidth
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..color = parseCanvasColor(element.color, opacity: element.opacity);
+    if (element.strokeStyle == StrokeStyle.dashed) {
+      _drawDashedPath(canvas, path, paint, [8, 6]);
+    } else if (element.strokeStyle == StrokeStyle.dotted) {
+      _drawDashedPath(canvas, path, paint, [2, 6]);
+    } else {
+      canvas.drawPath(path, paint);
+    }
   }
 }
 
 class ImageElementRenderer implements ElementRenderer {
-  const ImageElementRenderer();
+  ImageElementRenderer({this.imageCache});
+
+  /// Optional shared cache: src → decoded image.
+  final Map<String, ui.Image>? imageCache;
 
   @override
   void paint(
@@ -164,12 +293,39 @@ class ImageElementRenderer implements ElementRenderer {
       element.width,
       element.height,
     );
-    canvas.drawRect(rect, Paint()..color = const Color(0xFFE8E8E8));
+
+    final cached = imageCache?[element.src];
+    if (cached != null) {
+      paintImage(
+        canvas: canvas,
+        rect: rect,
+        image: cached,
+        fit: BoxFit.fill,
+        opacity: element.opacity,
+      );
+      return;
+    }
+
+    canvas.drawRect(
+      rect,
+      Paint()..color = const Color(0xFFE8E8E8).withValues(alpha: element.opacity),
+    );
     canvas.drawRect(
       rect,
       Paint()
         ..style = PaintingStyle.stroke
         ..color = const Color(0xFFB0B0B0),
+    );
+    final tp = TextPainter(
+      text: const TextSpan(
+        text: 'Image',
+        style: TextStyle(color: Color(0xFF888888), fontSize: 14),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(
+      canvas,
+      Offset(rect.center.dx - tp.width / 2, rect.center.dy - tp.height / 2),
     );
   }
 }
@@ -185,20 +341,99 @@ class ConnectorElementRenderer implements ElementRenderer {
     Offset liveOffset = Offset.zero,
   }) {
     if (element is! ConnectorElement) return;
-    canvas.drawLine(
-      Offset(element.startX + liveOffset.dx, element.startY + liveOffset.dy),
-      Offset(element.endX + liveOffset.dx, element.endY + liveOffset.dy),
-      Paint()
-        ..color = _parseColor(element.stroke)
-        ..strokeWidth = element.strokeWidth
-        ..strokeCap = StrokeCap.round,
+    final a = Offset(
+      element.startX + liveOffset.dx,
+      element.startY + liveOffset.dy,
     );
+    final b = Offset(
+      element.endX + liveOffset.dx,
+      element.endY + liveOffset.dy,
+    );
+    final paint = Paint()
+      ..color = parseCanvasColor(element.stroke, opacity: element.opacity)
+      ..strokeWidth = element.strokeWidth
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    final path = Path()
+      ..moveTo(a.dx, a.dy)
+      ..lineTo(b.dx, b.dy);
+
+    if (element.strokeStyle == StrokeStyle.dashed) {
+      _drawDashedPath(canvas, path, paint, [10, 6]);
+    } else if (element.strokeStyle == StrokeStyle.dotted) {
+      _drawDashedPath(canvas, path, paint, [2, 6]);
+    } else {
+      canvas.drawPath(path, paint);
+    }
+
+    final heads = element.arrowHeads;
+    if (heads == ArrowHeads.end || heads == ArrowHeads.both) {
+      _drawArrowHead(canvas, a, b, paint.color, element.strokeWidth);
+    }
+    if (heads == ArrowHeads.start || heads == ArrowHeads.both) {
+      _drawArrowHead(canvas, b, a, paint.color, element.strokeWidth);
+    }
+  }
+
+  void _drawArrowHead(
+    Canvas canvas,
+    Offset from,
+    Offset to,
+    Color color,
+    double strokeWidth,
+  ) {
+    final angle = math.atan2(to.dy - from.dy, to.dx - from.dx);
+    final size = 10 + strokeWidth;
+    final path = Path()
+      ..moveTo(to.dx, to.dy)
+      ..lineTo(
+        to.dx - size * math.cos(angle - 0.4),
+        to.dy - size * math.sin(angle - 0.4),
+      )
+      ..lineTo(
+        to.dx - size * math.cos(angle + 0.4),
+        to.dy - size * math.sin(angle + 0.4),
+      )
+      ..close();
+    canvas.drawPath(path, Paint()..color = color);
   }
 }
 
-Color _parseColor(String hex) {
-  var value = hex.replaceFirst('#', '');
-  if (value.length == 6) value = 'FF$value';
-  if (value.length != 8) return const Color(0xFF888888);
-  return Color(int.parse(value, radix: 16));
+void _drawDashedPath(
+  Canvas canvas,
+  Path source,
+  Paint paint,
+  List<double> pattern,
+) {
+  final metrics = source.computeMetrics();
+  for (final metric in metrics) {
+    var distance = 0.0;
+    var draw = true;
+    var patternIndex = 0;
+    while (distance < metric.length) {
+      final len = pattern[patternIndex % pattern.length];
+      final next = math.min(distance + len, metric.length);
+      if (draw) {
+        canvas.drawPath(metric.extractPath(distance, next), paint);
+      }
+      distance = next;
+      draw = !draw;
+      patternIndex++;
+    }
+  }
+}
+
+/// Load a local image file into a ui.Image for the cache.
+Future<ui.Image?> loadUiImage(String path) async {
+  try {
+    final file = File(path);
+    if (!await file.exists()) return null;
+    final bytes = await file.readAsBytes();
+    final codec = await ui.instantiateImageCodec(bytes);
+    final frame = await codec.getNextFrame();
+    return frame.image;
+  } catch (_) {
+    return null;
+  }
 }
