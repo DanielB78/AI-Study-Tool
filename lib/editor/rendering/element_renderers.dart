@@ -12,7 +12,8 @@ Color parseCanvasColor(String hex, {double opacity = 1}) {
   if (value.length == 6) value = 'FF$value';
   if (value.length != 8) return Color.fromRGBO(136, 136, 136, opacity);
   final c = Color(int.parse(value, radix: 16));
-  return c.withValues(alpha: opacity * c.a / 255);
+  // Color.a is 0..1 in current Flutter (not 0..255).
+  return c.withValues(alpha: (c.a * opacity).clamp(0.0, 1.0));
 }
 
 abstract class ElementRenderer {
