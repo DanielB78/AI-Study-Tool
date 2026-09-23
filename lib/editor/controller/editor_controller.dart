@@ -281,10 +281,20 @@ class EditorController extends Notifier<EditorState> {
   }
 
   void toggleLockSelection() {
-    updateSelected((el) => el.copyWithBase(
-          locked: !el.locked,
-          updatedAt: DateTime.now().toUtc(),
-        ));
+    // Must allow updating locked elements so unlock works.
+    final before = <CanvasElement>[];
+    final after = <CanvasElement>[];
+    for (final id in state.selectedIds) {
+      final el = document.getElementById(id);
+      if (el == null) continue;
+      before.add(el);
+      after.add(el.copyWithBase(
+        locked: !el.locked,
+        updatedAt: DateTime.now().toUtc(),
+      ));
+    }
+    if (after.isEmpty) return;
+    commitUpdates(before, after);
   }
 
   void alignSelection(AlignMode mode) {

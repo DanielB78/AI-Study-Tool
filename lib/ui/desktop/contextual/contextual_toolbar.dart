@@ -200,24 +200,13 @@ class _OpacityButton extends StatelessWidget {
     return Tooltip(
       message: 'Opacity',
       child: PopupMenuButton<double>(
-      tooltip: 'Opacity',
-      itemBuilder: (context) => [
+        tooltip: 'Opacity',
+        itemBuilder: (context) => [
           PopupMenuItem(
             enabled: false,
             child: SizedBox(
               width: 180,
-              child: StatefulBuilder(
-                builder: (context, setLocal) {
-                  var local = value;
-                  return Slider(
-                    value: local.clamp(0.05, 1),
-                    min: 0.05,
-                    max: 1,
-                    onChanged: (v) => setLocal(() => local = v),
-                    onChangeEnd: onCommit,
-                  );
-                },
-              ),
+              child: _OpacitySlider(value: value, onCommit: onCommit),
             ),
           ),
         ],
@@ -227,6 +216,37 @@ class _OpacityButton extends StatelessWidget {
           child: Icon(Icons.opacity, size: 18),
         ),
       ),
+    );
+  }
+}
+
+class _OpacitySlider extends StatefulWidget {
+  const _OpacitySlider({required this.value, required this.onCommit});
+
+  final double value;
+  final ValueChanged<double> onCommit;
+
+  @override
+  State<_OpacitySlider> createState() => _OpacitySliderState();
+}
+
+class _OpacitySliderState extends State<_OpacitySlider> {
+  late double _local;
+
+  @override
+  void initState() {
+    super.initState();
+    _local = widget.value.clamp(0.05, 1);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Slider(
+      value: _local,
+      min: 0.05,
+      max: 1,
+      onChanged: (v) => setState(() => _local = v),
+      onChangeEnd: widget.onCommit,
     );
   }
 }

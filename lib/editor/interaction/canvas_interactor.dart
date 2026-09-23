@@ -128,11 +128,13 @@ class CanvasInteractor {
       final id = editor.session.selectedIds.first;
       final el = _doc.getElementById(id);
       if (el != null && !el.locked) {
-        final handle = handleTester.hitTest(
-          el.bounds,
-          world,
-          zoom: _camera.zoom,
-        );
+        final handle = (el is DrawingElement || el is ConnectorElement)
+            ? null
+            : handleTester.hitTest(
+                el.bounds,
+                world,
+                zoom: _camera.zoom,
+              );
         if (handle != null) {
           interaction.update(
             (s) => s.copyWith(
@@ -428,6 +430,8 @@ class CanvasInteractor {
   void _commitTransform(GestureTransforming gesture, Point world) {
     final el = _doc.getElementById(gesture.elementId);
     if (el == null || el.locked) return;
+    // Path-based elements are moved, not box-resized.
+    if (el is DrawingElement || el is ConnectorElement) return;
 
     if (gesture.handle == TransformHandle.rotate) {
       final rot = applyRotation(origin: gesture.originBounds, current: world);
@@ -446,7 +450,7 @@ class CanvasInteractor {
       keepAspect: keepAspect,
     );
 
-    // Text: resize box (don't scale glyphs).
+    // Text: resize box (don't scale glyphs). Shapes/images update AABB.
     final after = el.copyWithBase(
       x: rect.x,
       y: rect.y,

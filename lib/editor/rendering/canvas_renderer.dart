@@ -82,7 +82,10 @@ class CanvasRenderer {
       _paintSelectionBounds(
         canvas,
         paintBounds,
-        showHandles: selectedIds.length == 1 && element is! DrawingElement,
+        // Drawings/connectors use path geometry — move only, no box resize.
+        showHandles: selectedIds.length == 1 &&
+            element is! DrawingElement &&
+            element is! ConnectorElement,
         zoom: camera.zoom,
       );
     }
@@ -132,17 +135,32 @@ class CanvasRenderer {
     required bool selected,
     Offset liveOffset = Offset.zero,
   }) {
-    // Keep image renderer cache in sync
     final renderer = renderers[element.type];
-    if (element.type == CanvasElementType.image && imageCache != null) {
-      (renderer as ImageElementRenderer);
+    if (renderer == null) return;
+
+    if (element.rotation == 0) {
+      renderer.paint(
+        canvas,
+        element,
+        selected: selected,
+        liveOffset: liveOffset,
+      );
+      return;
     }
-    renderer?.paint(
+
+    final cx = element.x + liveOffset.dx + element.width / 2;
+    final cy = element.y + liveOffset.dy + element.height / 2;
+    canvas.save();
+    canvas.translate(cx, cy);
+    canvas.rotate(element.rotation);
+    canvas.translate(-cx, -cy);
+    renderer.paint(
       canvas,
       element,
       selected: selected,
       liveOffset: liveOffset,
     );
+    canvas.restore();
   }
 
   Map<String, Offset> _liveOffsets(GestureState gesture) {

@@ -1,5 +1,5 @@
-import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -64,8 +64,14 @@ class ShapeElementRenderer implements ElementRenderer {
         ..style = PaintingStyle.stroke
         ..strokeWidth = element.strokeWidth
         ..color = parseCanvasColor(element.stroke!);
-      _applyStrokeStyle(strokePaint, element.strokeStyle, element.strokeWidth);
-      canvas.drawPath(path, strokePaint);
+      if (element.strokeStyle == StrokeStyle.dashed) {
+        _drawDashedPath(canvas, path, strokePaint, [8, 6]);
+      } else if (element.strokeStyle == StrokeStyle.dotted) {
+        _drawDashedPath(canvas, path, strokePaint, [2, 6]);
+      } else {
+        strokePaint.strokeCap = StrokeCap.round;
+        canvas.drawPath(path, strokePaint);
+      }
     }
 
     if (element.label.isNotEmpty) {
@@ -133,20 +139,6 @@ class ShapeElementRenderer implements ElementRenderer {
     }
     path.close();
     return path;
-  }
-}
-
-void _applyStrokeStyle(Paint paint, StrokeStyle style, double width) {
-  switch (style) {
-    case StrokeStyle.solid:
-      paint.strokeCap = StrokeCap.round;
-    case StrokeStyle.dashed:
-      // Dash via path effect approximation — Flutter Paint has no dash natively
-      // on all platforms; we use a simple solid with longer joins as fallback
-      // and rely on path drawing with intervals in connector/drawing when needed.
-      paint.strokeCap = StrokeCap.square;
-    case StrokeStyle.dotted:
-      paint.strokeCap = StrokeCap.round;
   }
 }
 
@@ -424,12 +416,9 @@ void _drawDashedPath(
   }
 }
 
-/// Load a local image file into a ui.Image for the cache.
-Future<ui.Image?> loadUiImage(String path) async {
+/// Decode image bytes into a ui.Image for the cache.
+Future<ui.Image?> decodeUiImage(Uint8List bytes) async {
   try {
-    final file = File(path);
-    if (!await file.exists()) return null;
-    final bytes = await file.readAsBytes();
     final codec = await ui.instantiateImageCodec(bytes);
     final frame = await codec.getNextFrame();
     return frame.image;

@@ -1,19 +1,16 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 
 import '../../core/canvas/geometry/point.dart';
 import '../../core/canvas/models/camera_state.dart';
 import '../../core/canvas/models/canvas_element.dart';
+import '../../core/canvas/models/ids.dart';
 import '../controller/editor_controller.dart';
 import '../interaction/canvas_interactor.dart';
 import '../state/editor_tool.dart';
@@ -22,7 +19,11 @@ import 'canvas_renderer.dart';
 import 'element_renderers.dart';
 import 'text_edit_overlay.dart';
 
+/// Decoded image cache keyed by ImageElement.src reference.
 final imageCacheProvider = Provider<Map<String, ui.Image>>((ref) => {});
+
+/// Raw bytes for image refs (local session). Keeps CanvasDocument free of blobs.
+final imageBytesCacheProvider = Provider<Map<String, Uint8List>>((ref) => {});
 
 /// Infinite canvas surface with overlays for text editing.
 class EditorCanvasView extends ConsumerStatefulWidget {
@@ -135,7 +136,9 @@ class _EditorCanvasViewState extends ConsumerState<EditorCanvasView> {
   }
 
   Future<void> _loadImage(String src) async {
-    final img = await loadUiImage(src);
+    final bytes = ref.read(imageBytesCacheProvider)[src];
+    if (bytes == null) return;
+    final img = await decodeUiImage(bytes);
     if (img != null && mounted) {
       ref.read(imageCacheProvider)[src] = img;
       setState(() {});
@@ -256,42 +259,26 @@ class _EditorCanvasViewState extends ConsumerState<EditorCanvasView> {
   Future<void> _pickAndInsertImage() async {
     final result = await FilePicker.pickFiles(
       type: FileType.image,
-      withData: kIsWeb,
+      withData: true,
     );
     if (result == null || result.files.isEmpty) {
       ref.read(editorControllerProvider.notifier).setTool(EditorTool.select);
       return;
     }
     final file = result.files.first;
-    String? storedPath;
-
-    if (!kIsWeb && file.path != null) {
-      final dir = await getApplicationSupportDirectory();
-      final imagesDir = Directory(p.join(dir.path, 'canvas_images'));
-      if (!await imagesDir.exists()) {
-        await imagesDir.create(recursive: true);
-      }
-      final dest = p.join(
-        imagesDir.path,
-        '${DateTime.now().millisecondsSinceEpoch}_${file.name}',
-      );
-      await File(file.path!).copy(dest);
-      storedPath = dest;
-    } else if (file.bytes != null) {
-      final dir = await getTemporaryDirectory();
-      final dest = p.join(
-        dir.path,
-        '${DateTime.now().millisecondsSinceEpoch}_${file.name}',
-      );
-      await File(dest).writeAsBytes(file.bytes!);
-      storedPath = dest;
+    final bytes = file.bytes;
+    if (bytes == null) {
+      ref.read(editorControllerProvider.notifier).setTool(EditorTool.select);
+      return;
     }
 
-    if (storedPath == null) return;
+    // Stable local reference — later replaceable by file/Supabase storage keys.
+    final src = 'local://${generateId()}_${file.name}';
+    ref.read(imageBytesCacheProvider)[src] = bytes;
 
-    final uiImage = await loadUiImage(storedPath);
+    final uiImage = await decodeUiImage(bytes);
     if (uiImage != null) {
-      ref.read(imageCacheProvider)[storedPath] = uiImage;
+      ref.read(imageCacheProvider)[src] = uiImage;
     }
 
     if (!mounted) return;
@@ -314,7 +301,7 @@ class _EditorCanvasViewState extends ConsumerState<EditorCanvasView> {
       y: center.y - h / 2,
       width: w,
       height: h,
-      src: storedPath,
+      src: src,
       naturalWidth: (uiImage?.width ?? w).toDouble(),
       naturalHeight: (uiImage?.height ?? h).toDouble(),
       zIndex: editor.document.nextZIndex,

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import '../../core/canvas/geometry/point.dart';
 import '../../core/canvas/geometry/rect.dart';
 import '../../core/canvas/geometry/shape_geometry.dart';
@@ -24,15 +26,30 @@ class CanvasHitTester {
   }
 
   bool hitsElement(CanvasElement element, Point worldPoint) {
+    final local = _toLocal(element, worldPoint);
     return switch (element) {
-      ShapeElement(:final shapeKind) =>
-        _hitShape(element, shapeKind, worldPoint),
-      TextElement() => element.bounds.containsPoint(worldPoint),
-      ImageElement() => element.bounds.containsPoint(worldPoint),
+      ShapeElement(:final shapeKind) => _hitShape(element, shapeKind, local),
+      TextElement() => element.bounds.containsPoint(local),
+      ImageElement() => element.bounds.containsPoint(local),
       DrawingElement(:final points, :final strokeWidth) =>
-        distanceToPolyline(worldPoint, points) <= (strokeWidth / 2 + 4),
-      ConnectorElement() => _hitConnector(element, worldPoint),
+        distanceToPolyline(local, points) <= (strokeWidth / 2 + 4),
+      ConnectorElement() => _hitConnector(element, local),
     };
+  }
+
+  /// Inverse-rotate the world point into the element's unrotated local space.
+  Point _toLocal(CanvasElement element, Point worldPoint) {
+    if (element.rotation == 0) return worldPoint;
+    final cx = element.x + element.width / 2;
+    final cy = element.y + element.height / 2;
+    final dx = worldPoint.x - cx;
+    final dy = worldPoint.y - cy;
+    final cos = math.cos(-element.rotation);
+    final sin = math.sin(-element.rotation);
+    return Point(
+      cx + dx * cos - dy * sin,
+      cy + dx * sin + dy * cos,
+    );
   }
 
   bool _hitShape(ShapeElement element, ShapeKind kind, Point worldPoint) {
