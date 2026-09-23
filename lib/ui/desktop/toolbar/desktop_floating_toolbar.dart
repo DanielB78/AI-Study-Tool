@@ -25,6 +25,7 @@ class _DesktopFloatingToolbarState
     final active = state.activeTool;
     final shapesOpen = state.shapesPopoverOpen;
 
+    // Host controls fade; keep toolbar fully opaque while open/hovered here.
     final visible = _hovered || shapesOpen;
 
     return MouseRegion(
@@ -37,54 +38,50 @@ class _DesktopFloatingToolbarState
           }
         });
       },
-      child: AnimatedOpacity(
+      child: AnimatedSlide(
         duration: const Duration(milliseconds: 180),
-        opacity: visible ? 1 : 0.28,
-        child: AnimatedSlide(
-          duration: const Duration(milliseconds: 180),
-          offset: visible ? Offset.zero : const Offset(-0.12, 0),
-          child: Material(
-            color: const Color(0xFFFAFBFC),
-            elevation: 6,
-            shadowColor: const Color(0x33000000),
-            shape: const StadiumBorder(
-              side: BorderSide(color: Color(0x22000000)),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _tool(Icons.near_me_outlined, 'Select (V)', EditorTool.select,
-                      active, () => editor.setTool(EditorTool.select)),
-                  _tool(Icons.pan_tool_alt_outlined, 'Pan (H)', EditorTool.pan,
-                      active, () => editor.setTool(EditorTool.pan)),
-                  const _Divider(),
-                  _tool(Icons.title, 'Text (T)', EditorTool.text, active,
-                      () => editor.setTool(EditorTool.text)),
-                  _tool(Icons.edit_outlined, 'Pen (P)', EditorTool.pen, active,
-                      () => editor.setTool(EditorTool.pen)),
-                  _ShapeToolButton(
-                    selected: active == EditorTool.shape,
-                    open: shapesOpen,
-                    onOpen: () {
-                      editor.setTool(EditorTool.shape);
-                      editor.setShapesPopoverOpen(true);
-                      setState(() => _hovered = true);
-                    },
-                    onClose: () => editor.setShapesPopoverOpen(false),
-                  ),
-                  _tool(Icons.remove, 'Line (L)', EditorTool.line, active,
-                      () => editor.setTool(EditorTool.line)),
-                  _tool(Icons.arrow_right_alt, 'Arrow (A)', EditorTool.arrow,
-                      active, () => editor.setTool(EditorTool.arrow)),
-                  _tool(Icons.image_outlined, 'Image (I)', EditorTool.image,
-                      active, () => editor.setTool(EditorTool.image)),
-                  const _Divider(),
-                  _action(Icons.undo, 'Undo', state.canUndo, editor.undo),
-                  _action(Icons.redo, 'Redo', state.canRedo, editor.redo),
-                ],
-              ),
+        offset: visible ? Offset.zero : const Offset(-0.12, 0),
+        child: Material(
+          color: const Color(0xFFFAFBFC),
+          elevation: 6,
+          shadowColor: const Color(0x33000000),
+          shape: const StadiumBorder(
+            side: BorderSide(color: Color(0x22000000)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _tool(Icons.near_me_outlined, 'Select (V)', EditorTool.select,
+                    active, () => editor.setTool(EditorTool.select)),
+                _tool(Icons.pan_tool_alt_outlined, 'Pan (H)', EditorTool.pan,
+                    active, () => editor.setTool(EditorTool.pan)),
+                const _Divider(),
+                _tool(Icons.title, 'Text (T)', EditorTool.text, active,
+                    () => editor.setTool(EditorTool.text)),
+                _tool(Icons.edit_outlined, 'Pen (P)', EditorTool.pen, active,
+                    () => editor.setTool(EditorTool.pen)),
+                _ShapeToolButton(
+                  selected: active == EditorTool.shape,
+                  open: shapesOpen,
+                  onOpen: () {
+                    editor.setTool(EditorTool.shape);
+                    editor.setShapesPopoverOpen(true);
+                    setState(() => _hovered = true);
+                  },
+                  onClose: () => editor.setShapesPopoverOpen(false),
+                ),
+                _tool(Icons.remove, 'Line (L)', EditorTool.line, active,
+                    () => editor.setTool(EditorTool.line)),
+                _tool(Icons.arrow_right_alt, 'Arrow (A)', EditorTool.arrow,
+                    active, () => editor.setTool(EditorTool.arrow)),
+                _tool(Icons.image_outlined, 'Image (I)', EditorTool.image,
+                    active, () => editor.setTool(EditorTool.image)),
+                const _Divider(),
+                _action(Icons.undo, 'Undo', state.canUndo, editor.undo),
+                _action(Icons.redo, 'Redo', state.canRedo, editor.redo),
+              ],
             ),
           ),
         ),
@@ -162,6 +159,7 @@ class _IconBtn extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(16),
+          // Ensure the full 40×40 target is hittable even when translucent.
           child: SizedBox(
             width: 40,
             height: 40,

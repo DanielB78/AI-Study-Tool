@@ -299,7 +299,7 @@ class CanvasInteractor {
         final ly = pts[pts.length - 1];
         final dx = world.x - lx;
         final dy = world.y - ly;
-        if (dx * dx + dy * dy < 1.5) {
+        if (dx * dx + dy * dy < 0.25) {
           interaction.update((s) => s.copyWith(pointerScreen: screen));
           return;
         }
@@ -403,15 +403,19 @@ class CanvasInteractor {
     }
 
     if (gesture is GestureDrawingStroke) {
-      if (gesture.points.length >= 4) {
-        final drawing = DrawingElement.fromPoints(
-          absolutePoints: gesture.points,
-          color: _defaults.penColor,
-          strokeWidth: _defaults.penWidth,
-          zIndex: _doc.nextZIndex,
-        ).copyWithBase(opacity: _defaults.penOpacity);
-        editor.createElement(drawing);
+      // Always include the final pointer position.
+      var pts = List<double>.from(gesture.points)..addAll([world.x, world.y]);
+      if (pts.length < 4) {
+        // Degenerate click — still create a tiny visible mark.
+        pts = [pts[0], pts[1], pts[0] + 2, pts[1]];
       }
+      final drawing = DrawingElement.fromPoints(
+        absolutePoints: pts,
+        color: _defaults.penColor,
+        strokeWidth: _defaults.penWidth,
+        zIndex: _doc.nextZIndex,
+      ).copyWithBase(opacity: _defaults.penOpacity);
+      editor.createElement(drawing);
       interaction.resetGesture();
       return;
     }

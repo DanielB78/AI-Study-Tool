@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../editor/controller/editor_controller.dart';
 import '../../editor/rendering/editor_canvas_view.dart';
 import 'contextual/contextual_toolbar.dart';
 import 'desktop_shortcuts.dart';
@@ -41,34 +43,42 @@ class DesktopShell extends StatelessWidget {
   }
 }
 
-class _LeftEdgeToolbarHost extends StatefulWidget {
+class _LeftEdgeToolbarHost extends ConsumerStatefulWidget {
   const _LeftEdgeToolbarHost();
 
   @override
-  State<_LeftEdgeToolbarHost> createState() => _LeftEdgeToolbarHostState();
+  ConsumerState<_LeftEdgeToolbarHost> createState() =>
+      _LeftEdgeToolbarHostState();
 }
 
-class _LeftEdgeToolbarHostState extends State<_LeftEdgeToolbarHost> {
-  bool _visible = false;
+class _LeftEdgeToolbarHostState extends ConsumerState<_LeftEdgeToolbarHost> {
+  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
+    final shapesOpen = ref.watch(
+      editorControllerProvider.select((s) => s.shapesPopoverOpen),
+    );
+    final visible = _hovered || shapesOpen;
+
     return MouseRegion(
-      onEnter: (_) => setState(() => _visible = true),
+      onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) {
-        Future.delayed(const Duration(milliseconds: 250), () {
-          if (mounted) setState(() => _visible = false);
+        Future.delayed(const Duration(milliseconds: 280), () {
+          if (!mounted) return;
+          if (ref.read(editorControllerProvider).shapesPopoverOpen) return;
+          setState(() => _hovered = false);
         });
       },
-      // Narrow hit target so the canvas remains clickable; popout paints
-      // outside via Stack overflow (clipBehavior: none on parent).
+      // Widen while the shapes popout is open so it receives pointer events
+      // (overflow alone does not expand hit-testing).
       child: SizedBox(
-        width: 72,
+        width: shapesOpen ? 320 : 72,
         child: Align(
           alignment: Alignment.centerLeft,
           child: AnimatedOpacity(
             duration: const Duration(milliseconds: 200),
-            opacity: _visible ? 1 : 0.35,
+            opacity: visible ? 1 : 0.35,
             child: const DesktopFloatingToolbar(),
           ),
         ),

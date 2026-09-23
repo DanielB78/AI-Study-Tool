@@ -144,9 +144,10 @@ class _DesktopShortcutsState extends ConsumerState<DesktopShortcuts> {
           _SetToolIntent: CallbackAction<_SetToolIntent>(
             onInvoke: (intent) {
               if (_editing) return null;
-              // Avoid conflict: Ctrl+V is paste (handled above with control).
-              // Bare V is select — but also used while typing. Guard editing.
               editor.setTool(intent.tool);
+              if (intent.tool == EditorTool.shape) {
+                editor.setShapesPopoverOpen(true);
+              }
               return null;
             },
           ),
