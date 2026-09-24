@@ -62,28 +62,29 @@ Backend tests:
 cd backend && pytest
 ```
 
-## AI feature (v1)
+## AI feature
 
-This phase is intentionally minimal:
-
-1. User types a prompt in the floating bar
+1. User types a prompt in the floating **Ask AI** bar
 2. React app calls `POST /api/chat` on our backend
 3. Backend calls the configured LLM via an `LLMService` abstraction
-4. Plain text is shown in a floating response panel above the prompt
+4. Returned plain text is inserted as a normal undoable `TextElement` on the canvas (viewport-centred placement)
 
-**Not included yet:** RAG, embeddings, board context, canvas editing, agents, conversation history, streaming.
+A brief “Added to canvas” chip may appear on the prompt UI. The response is **not** kept in a floating chat panel.
+
+**Not included yet:** RAG, embeddings, board context, structured AI canvas operations, agents, conversation history, streaming.
 
 Secrets never live in the client — only the backend URL does.
 
 ## Architecture notes
 
-Board state is a structured `CanvasDocument` (elements + camera). Konva is a view layer only — never the source of truth. AI prompt state lives in `src/features/ai` (separate Zustand store) and does not mutate the canvas document.
+Board state is a structured `CanvasDocument` (elements + camera). Konva is a view layer only — never the source of truth. AI prompt state lives in `src/features/ai` (separate Zustand store). Successful replies call the canvas store’s `addElement` so history, selection, and serialization stay consistent.
 
 ```
 React (Ask AI UI)
   → AiService.sendPrompt
   → POST /api/chat
   → LLMService.generate
-  → OpenAIProvider
-  → LLM
+  → plain text
+  → insertAiTextResponse → addElement(TextElement)
+  → CanvasDocument
 ```
