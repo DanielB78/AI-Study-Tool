@@ -561,10 +561,7 @@ textarea {
   align-items: center;
   gap: 10px;
   width: min(520px, calc(100vw - 32px));
-  pointer-events: none;
-}
-
-.ai-floating > * {
+  /* Keep the whole chrome hit-testable so pill/panel clicks are reliable. */
   pointer-events: auto;
 }
 
