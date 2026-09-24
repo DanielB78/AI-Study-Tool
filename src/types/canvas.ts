@@ -1,6 +1,8 @@
 /** Canonical canvas document model — source of truth for the board. */
 
-export const DOCUMENT_VERSION = 2 as const;
+import { nanoid } from 'nanoid';
+
+export const DOCUMENT_VERSION = 3 as const;
 
 export type ShapeType =
   | 'rectangle'
@@ -132,6 +134,8 @@ export type CanvasElementType = CanvasElement['type'];
 
 export interface CanvasDocument {
   version: typeof DOCUMENT_VERSION;
+  /** Stable board identity for RAG indexing / sync (not regenerated on load). */
+  id: string;
   elements: CanvasElement[];
   camera: Camera;
 }
@@ -191,6 +195,7 @@ export const TRANSPARENT = null;
 export function createEmptyDocument(): CanvasDocument {
   return {
     version: DOCUMENT_VERSION,
+    id: nanoid(12),
     elements: [],
     camera: { ...DEFAULT_CAMERA },
   };

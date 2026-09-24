@@ -20,6 +20,7 @@ import {
 } from '../utils/coordinates';
 import { snapPosition } from '../utils/snap';
 import { ZOOM_STEP, isShapeTool } from '../types/canvas';
+import { ragSync } from '../features/rag/ragSync';
 
 function getCursor(
   tool: string,
@@ -648,9 +649,17 @@ export function InfiniteCanvas() {
             );
           }}
           onClose={() => {
+            const closing = editingTarget;
             setEditingTextId(null);
             setEditingShapeLabelId(null);
             persist();
+            if (closing?.kind === 'text') {
+              const state = useCanvasStore.getState();
+              const latest = state.document.elements.find((el) => el.id === closing.element.id);
+              if (latest?.type === 'text') {
+                ragSync.indexText(state.document.id, latest);
+              }
+            }
           }}
         />
       )}

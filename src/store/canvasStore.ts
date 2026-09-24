@@ -24,6 +24,7 @@ import {
   type PersistenceService,
 } from '../persistence/storage';
 import { styleFromElement } from '../persistence/migrate';
+import { ragSync } from '../features/rag/ragSync';
 
 const MAX_HISTORY = 80;
 const persistence: PersistenceService = createLocalStoragePersistence();
@@ -181,6 +182,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       editingTextId: null,
       editingShapeLabelId: null,
     });
+    ragSync.scheduleReconcile(doc.id, doc.elements);
   },
 
   persist: () => {
@@ -267,6 +269,15 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   endInteraction: () => {
     set({ historySuspended: false, snapGuides: [] });
     get().persist();
+    // Geometry commits (drag/resize) finish here — sync text boxes without re-chunking.
+    const { document, selectedIds } = get();
+    const idSet = selectedIds.length > 0 ? new Set(selectedIds) : null;
+    for (const el of document.elements) {
+      if (el.type !== 'text') continue;
+      if (idSet && !idSet.has(el.id)) continue;
+      if (!idSet) continue;
+      ragSync.updateGeometry(document.id, el);
+    }
   },
 
   undo: () => {
@@ -282,6 +293,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       editingShapeLabelId: null,
     });
     get().persist();
+    ragSync.scheduleReconcile(previous.id, previous.elements);
   },
 
   redo: () => {
@@ -297,6 +309,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       editingShapeLabelId: null,
     });
     get().persist();
+    ragSync.scheduleReconcile(next.id, next.elements);
   },
 
   nextZIndex: () => {
@@ -312,6 +325,9 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       selectedIds: select ? [element.id] : s.selectedIds,
     }));
     get().persist();
+    if (element.type === 'text') {
+      ragSync.indexText(get().document.id, element);
+    }
   },
 
   updateElement: (id, updater) => {
@@ -341,6 +357,9 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     if (locked && selectedIds.every((id) => document.elements.find((e) => e.id === id)?.locked)) {
       return;
     }
+    const removedTextIds = document.elements
+      .filter((el) => idSet.has(el.id) && !el.locked && el.type === 'text')
+      .map((el) => el.id);
     get().pushHistory();
     set({
       document: withUpdatedElements(
@@ -354,6 +373,9 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       editingShapeLabelId: null,
     });
     get().persist();
+    if (removedTextIds.length > 0) {
+      ragSync.deleteMany(document.id, removedTextIds);
+    }
   },
 
   replaceElements: (elements) => {

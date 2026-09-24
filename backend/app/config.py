@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     # Comma-separated origins for local Vite / future web clients.
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
+    # PostgreSQL (Supabase-compatible). Required for RAG indexing routes.
+    database_url: str = ""
+
+    # Chunking knobs (tunable without code scatter).
+    rag_short_text_threshold: int = 100
+    rag_target_chunk_words: int = 75
+    rag_chunk_overlap_words: int = 15
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
@@ -32,6 +40,11 @@ class Settings(BaseSettings):
     @property
     def is_mock_provider(self) -> bool:
         return self.llm_provider.strip().lower() == "mock"
+
+    @property
+    def has_database_url(self) -> bool:
+        return bool(self.database_url.strip())
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -1,90 +1,68 @@
 # AI Study Tool — StudyBoard
 
-Infinite-canvas study/note editor with a first-pass AI chat overlay.
+Infinite-canvas study/note editor with AI chat + RAG text indexing foundation.
 
 ## Stack
 
 - React + TypeScript + Vite
 - react-konva / Konva for rendering
 - Zustand for canvas + AI UI state
-- FastAPI backend that proxies prompts to an LLM (OpenAI by default)
+- FastAPI backend (LLM proxy + PostgreSQL RAG chunk index)
+- PostgreSQL / Alembic (Supabase-compatible `DATABASE_URL`)
 
 ## Quick start
 
-### 1. Backend (required for AI)
+### 1. Database
+
+```bash
+# Example local Postgres
+createuser -s studyboard   # or use your own role
+createdb -O studyboard studyboard
+```
+
+### 2. Backend
 
 ```bash
 cd backend
 python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# Edit .env and set OPENAI_API_KEY=sk-...
-# Or for key-free local UI testing: LLM_PROVIDER=mock
+# Set DATABASE_URL=postgresql+psycopg://studyboard:studyboard@127.0.0.1:5432/studyboard
+# Set OPENAI_API_KEY=... or LLM_PROVIDER=mock
+alembic upgrade head
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-- API key: `backend/.env` → `OPENAI_API_KEY`
-- Model: `backend/.env` → `OPENAI_MODEL` (default `gpt-4o-mini`)
-- Provider: `backend/.env` → `LLM_PROVIDER` (`openai` or `mock`)
-- Health check: `GET http://127.0.0.1:8000/health`
-- Chat: `POST http://127.0.0.1:8000/api/chat` with `{ "prompt": "..." }` → `{ "text": "..." }`
-
-The backend starts even without an API key; chat requests then return a clear configuration error (unless `LLM_PROVIDER=mock`).
-
-### 2. Frontend
+### 3. Frontend
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open the Vite URL (usually http://localhost:5173). The floating **Ask AI** control sits at the bottom centre of the canvas.
+Optional: `VITE_AI_API_BASE_URL=http://127.0.0.1:8000`
 
-Optional: set the backend URL in `.env.local` (gitignored):
+## RAG indexing (this phase)
 
-```
-VITE_AI_API_BASE_URL=http://127.0.0.1:8000
+Text elements are indexed into `rag_chunks` (no embeddings yet):
+
+- ≤100 words → 1 chunk
+- >100 words → ~75-word chunks with ~15-word overlap (paragraph → sentence → word)
+- Text edits re-chunk; move/resize only updates geometry via `content_hash`
+- Deletes remove chunks; undo/redo schedules a board reconcile
+
+Inspect chunks:
+
+```bash
+curl http://127.0.0.1:8000/api/rag/boards/<board_id>/chunks
 ```
 
 ## Scripts
 
-- `npm run dev` — local development server
-- `npm run build` — typecheck + production build
-- `npm run typecheck` — TypeScript only
-- `npm run lint` — oxlint
-- `npm run test` — frontend unit tests (mocked AI)
-- `npm run preview` — preview production build
-
-Backend tests:
-
-```bash
-cd backend && pytest
-```
-
-## AI feature
-
-1. User types a prompt in the floating **Ask AI** bar
-2. React app calls `POST /api/chat` on our backend
-3. Backend calls the configured LLM via an `LLMService` abstraction
-4. Returned plain text is inserted as a normal undoable `TextElement` on the canvas (viewport-centred placement)
-
-A brief “Added to canvas” chip may appear on the prompt UI. The response is **not** kept in a floating chat panel.
-
-**Not included yet:** RAG, embeddings, board context, structured AI canvas operations, agents, conversation history, streaming.
-
-Secrets never live in the client — only the backend URL does.
+- `npm run dev` / `build` / `typecheck` / `lint` / `test`
+- `cd backend && pytest`
 
 ## Architecture notes
 
-Board state is a structured `CanvasDocument` (elements + camera). Konva is a view layer only — never the source of truth. AI prompt state lives in `src/features/ai` (separate Zustand store). Successful replies call the canvas store’s `addElement` so history, selection, and serialization stay consistent.
-
-```
-React (Ask AI UI)
-  → AiService.sendPrompt
-  → POST /api/chat
-  → LLMService.generate
-  → plain text
-  → insertAiTextResponse → addElement(TextElement)
-  → CanvasDocument
-```
+`CanvasDocument` remains the source of truth (now with stable `id` for board identity). `rag_chunks` is a derived index. AI replies still insert normal `TextElement`s via `addElement`.

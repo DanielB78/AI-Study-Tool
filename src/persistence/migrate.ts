@@ -10,6 +10,7 @@ import type {
   TextElement,
 } from '../types/canvas';
 import { DOCUMENT_VERSION, DEFAULT_STYLE, createEmptyDocument } from '../types/canvas';
+import { nanoid } from 'nanoid';
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -202,7 +203,7 @@ export function migrateDocument(raw: unknown): CanvasDocument | null {
   if (!Array.isArray(raw.elements) || !isObject(raw.camera)) return null;
 
   const version = raw.version;
-  if (version !== 1 && version !== 2 && version !== DOCUMENT_VERSION) {
+  if (version !== 1 && version !== 2 && version !== 3 && version !== DOCUMENT_VERSION) {
     return null;
   }
 
@@ -219,8 +220,11 @@ export function migrateDocument(raw: unknown): CanvasDocument | null {
     .map((el, i) => migrateElement(el, i))
     .filter((el): el is CanvasElement => el !== null);
 
+  const existingId = typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : null;
+
   return {
     version: DOCUMENT_VERSION,
+    id: existingId ?? nanoid(12),
     elements,
     camera: { x: camera.x, y: camera.y, zoom: camera.zoom },
   };
