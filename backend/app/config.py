@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     openai_base_url: str = "https://api.openai.com/v1"
     llm_timeout_seconds: float = 60.0
+    # "openai" (default) or "mock" for local UI testing without a paid key.
+    llm_provider: str = "openai"
     # Comma-separated origins for local Vite / future web clients.
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
@@ -27,6 +29,9 @@ class Settings(BaseSettings):
     def has_openai_api_key(self) -> bool:
         return bool(self.openai_api_key.strip())
 
+    @property
+    def is_mock_provider(self) -> bool:
+        return self.llm_provider.strip().lower() == "mock"
 
 @lru_cache
 def get_settings() -> Settings:

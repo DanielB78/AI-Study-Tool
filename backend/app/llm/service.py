@@ -4,6 +4,7 @@ from functools import lru_cache
 
 from ..config import Settings, get_settings
 from .base import LLMProvider
+from .mock_provider import MockProvider
 from .openai_provider import OpenAIProvider
 
 
@@ -29,6 +30,8 @@ class LLMService:
 
 def build_llm_service(settings: Settings | None = None) -> LLMService:
     cfg = settings or get_settings()
+    if cfg.is_mock_provider:
+        return LLMService(MockProvider())
     return LLMService(OpenAIProvider(cfg))
 
 

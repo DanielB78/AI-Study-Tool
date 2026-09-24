@@ -20,15 +20,17 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
 # Edit .env and set OPENAI_API_KEY=sk-...
+# Or for key-free local UI testing: LLM_PROVIDER=mock
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 - API key: `backend/.env` → `OPENAI_API_KEY`
 - Model: `backend/.env` → `OPENAI_MODEL` (default `gpt-4o-mini`)
+- Provider: `backend/.env` → `LLM_PROVIDER` (`openai` or `mock`)
 - Health check: `GET http://127.0.0.1:8000/health`
 - Chat: `POST http://127.0.0.1:8000/api/chat` with `{ "prompt": "..." }` → `{ "text": "..." }`
 
-The backend starts even without an API key; chat requests then return a clear configuration error.
+The backend starts even without an API key; chat requests then return a clear configuration error (unless `LLM_PROVIDER=mock`).
 
 ### 2. Frontend
 

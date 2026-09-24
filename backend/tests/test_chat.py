@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.errors import AiServiceError
 from app.llm.base import LLMProvider
-from app.llm.service import LLMService
+from app.llm.service import LLMService, build_llm_service
 from app.main import create_app
 
 
@@ -100,6 +100,24 @@ def test_chat_provider_error_safe_message() -> None:
     assert body["error"]["message"] == "AI request failed. Please try again."
     assert body["error"]["code"] == "provider_error"
     assert "sk-SECRET" not in res.text
+
+
+def test_chat_mock_provider() -> None:
+    settings = Settings(llm_provider="mock", openai_api_key="")
+    service = build_llm_service(settings)
+    app = create_app()
+
+    def override() -> LLMService:
+        return service
+
+    from app.llm import service as service_module
+
+    app.dependency_overrides[service_module.get_llm_service] = override
+    client = TestClient(app)
+    res = client.post("/api/chat", json={"prompt": "Explain Gauss's law simply"})
+    assert res.status_code == 200
+    assert "mock AI response" in res.json()["text"]
+    assert "Gauss" in res.json()["text"]
 
 
 def test_chat_missing_api_key_via_real_provider(settings_no_key: Settings) -> None:

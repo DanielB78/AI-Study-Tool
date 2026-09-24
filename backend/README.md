@@ -15,8 +15,9 @@ Edit `.env`:
 
 | Variable | Purpose |
 |---|---|
-| `OPENAI_API_KEY` | Provider secret (required for chat) |
+| `OPENAI_API_KEY` | Provider secret (required for chat when `LLM_PROVIDER=openai`) |
 | `OPENAI_MODEL` | Model id (default `gpt-4o-mini`) |
+| `LLM_PROVIDER` | `openai` (default) or `mock` for key-free local UI testing |
 | `OPENAI_BASE_URL` | Optional API base override |
 | `LLM_TIMEOUT_SECONDS` | Request timeout (default `60`) |
 | `CORS_ORIGINS` | Comma-separated allowed browser origins |
