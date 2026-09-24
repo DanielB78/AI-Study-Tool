@@ -51,6 +51,7 @@ class IndexElementResponse(BaseModel):
     element_id: str
     chunk_count: int
     content_changed: bool
+    embeddings_updated: bool = False
 
 
 class GeometryUpdateResponse(BaseModel):
@@ -71,6 +72,14 @@ class BoardReindexResponse(BaseModel):
     board_id: str
     element_count: int
     chunk_count: int
+    embeddings_written: int = 0
+
+
+class RebuildEmbeddingsResponse(BaseModel):
+    board_id: str
+    chunk_count: int
+    embeddings_written: int
+    embedding_model: str
 
 
 class RagChunkView(BaseModel):
@@ -86,3 +95,48 @@ class RagChunkView(BaseModel):
     width: float
     height: float
     content_hash: str
+    has_embedding: bool = False
+    embedding_model: str | None = None
+
+
+class RetrieveRequest(BaseModel):
+    board_id: str = Field(..., min_length=1, max_length=128)
+    prompt: str
+    top_k: int | None = Field(default=None, ge=1, le=500)
+    # Explicit optional threshold — do NOT invent a default like 0.7.
+    min_similarity: float | None = Field(default=None, ge=-1.0, le=1.0)
+
+    @field_validator("board_id")
+    @classmethod
+    def strip_board(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("must not be empty")
+        return cleaned
+
+
+class MatchedChunkResponse(BaseModel):
+    chunk_id: str
+    chunk_index: int
+    text: str
+    similarity: float
+
+
+class RetrievedElementResponse(BaseModel):
+    element_id: str
+    element_type: str
+    score: float
+    matched_chunks: list[MatchedChunkResponse]
+    geometry: dict[str, float]
+
+
+class RetrieveResponse(BaseModel):
+    board_id: str
+    query_chunks: int
+    query_chunk_texts: list[str]
+    embedding_model: str
+    embedding_provider: str
+    similarity_metric: str
+    top_k: int
+    min_similarity: float | None
+    candidates: list[RetrievedElementResponse]

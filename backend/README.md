@@ -1,6 +1,6 @@
 # AI Study Tool — Backend
 
-FastAPI service: LLM chat proxy + RAG text indexing (no embeddings yet).
+FastAPI service: LLM chat proxy + RAG text indexing + semantic retrieval.
 
 ## Setup
 
@@ -11,30 +11,26 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env`:
-
 | Variable | Purpose |
 |---|---|
-| `OPENAI_API_KEY` | Provider secret (required for chat when `LLM_PROVIDER=openai`) |
-| `OPENAI_MODEL` | Model id (default `gpt-4o-mini`) |
-| `LLM_PROVIDER` | `openai` (default) or `mock` for key-free local UI testing |
-| `DATABASE_URL` | PostgreSQL URL, e.g. `postgresql+psycopg://user:pass@127.0.0.1:5432/studyboard` |
-| `OPENAI_BASE_URL` | Optional API base override |
-| `LLM_TIMEOUT_SECONDS` | Request timeout (default `60`) |
-| `CORS_ORIGINS` | Comma-separated allowed browser origins |
-| `RAG_SHORT_TEXT_THRESHOLD` | ≤ this many words → one chunk (default `100`) |
-| `RAG_TARGET_CHUNK_WORDS` | Target words per chunk (default `75`) |
-| `RAG_CHUNK_OVERLAP_WORDS` | Overlap words (default `15`) |
+| `DATABASE_URL` | Postgres URL |
+| `EMBEDDING_PROVIDER` | `openai` or `deterministic` (dev) — **required for retrieve** |
+| `EMBEDDING_MODEL` | Model id — **required, no default** |
+| `EMBEDDING_DIMENSION` | Optional; deterministic provider / future `vector(N)` only |
+| `RAG_CHUNK_TOP_K` | Top-K chunk hits (default `20`) |
+| `RAG_MIN_SIMILARITY` | **Leave unset** until empirically chosen |
+| `QUERY_LONG_PROMPT_THRESHOLD_WORDS` | Default `200` |
+| `QUERY_TARGET_CHUNK_WORDS` | Default `125` |
+| `QUERY_CHUNK_OVERLAP_WORDS` | Default `20` |
 
-Never commit `.env`.
-
-## Database migrations
+## Migrations
 
 ```bash
-cd backend
-export DATABASE_URL='postgresql+psycopg://studyboard:studyboard@127.0.0.1:5432/studyboard'
+export DATABASE_URL='postgresql+psycopg://...'
 alembic upgrade head
 ```
+
+Migration `0002_rag_embeddings` enables **pgvector** and adds nullable embedding columns as `float[]` (dimension not hard-coded). Convert to `vector(N)` later once the model/dimension are fixed.
 
 ## Run
 
@@ -42,32 +38,28 @@ alembic upgrade head
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-## RAG endpoints
+## Semantic retrieval
 
-- `PUT /api/rag/elements/text` — upsert/index a text element (re-chunk on text change; geometry-only when hash matches)
-- `PATCH /api/rag/elements/{board_id}/{element_id}/geometry` — geometry-only update
-- `DELETE /api/rag/elements/{board_id}/{element_id}` — remove element chunks
-- `POST /api/rag/boards/{board_id}/reindex` — rebuild board index from payload
-- `GET /api/rag/boards/{board_id}/chunks` — debug list of stored chunks (no embeddings)
+```bash
+# Index (embeds when EMBEDDING_* configured)
+curl -X PUT http://127.0.0.1:8000/api/rag/elements/text -H 'Content-Type: application/json' -d '{...}'
 
-## Chat endpoints
+# Rebuild embeddings after model change
+curl -X POST http://127.0.0.1:8000/api/rag/boards/{board_id}/embeddings/rebuild
 
-### `GET /health`
-
-### `POST /api/chat`
-
-```json
-{ "prompt": "Explain Faraday's law simply" }
+# Retrieve (cosine similarity only — no spatial scoring)
+curl -X POST http://127.0.0.1:8000/api/rag/retrieve -H 'Content-Type: application/json' -d '{
+  "board_id": "...",
+  "prompt": "Explain Gauss'\''s law"
+}'
 ```
 
-→ `{ "text": "..." }`
+Higher score = more similar. `min_similarity` defaults to `null` (top-K only).
 
 ## Tests
 
 ```bash
-cd backend
-DATABASE_URL='postgresql+psycopg://...' pytest
+DATABASE_URL='...' pytest
 ```
 
-Chunker tests need no database. Indexing tests require Postgres + migrations applied.
-No embedding model is used.
+Uses fake/deterministic embedders — no paid API / model download.

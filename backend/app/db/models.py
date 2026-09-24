@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Float, Index, Integer, String, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
@@ -13,7 +13,9 @@ from .base import Base
 class RagChunk(Base):
     """Indexed text chunk derived from a canvas TextElement.
 
-    Embeddings will be added in a later migration after a model is chosen.
+    Embeddings are stored as float arrays so the dimension is not baked into
+    the schema before EMBEDDING_MODEL is chosen. pgvector is enabled for a
+    later migration to vector(N) + ANN indexes once the model/dimension are fixed.
     """
 
     __tablename__ = "rag_chunks"
@@ -51,9 +53,18 @@ class RagChunk(Base):
 
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
 
+    # Embedding fields (nullable until embedded with the active model).
+    embedding: Mapped[list[float] | None] = mapped_column(ARRAY(Float), nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    embedding_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    embedding_content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    embedding_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     # Optional provenance / future fields (not required for rendering).
     element_revision: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    # JSONB keeps us Supabase/Postgres friendly without picking embedding dims.
     chunk_metadata: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
