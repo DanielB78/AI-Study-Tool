@@ -12,6 +12,7 @@ import {
   placeAiTextRect,
   AI_TEXT_DEFAULT_WIDTH,
 } from '../canvas/placement';
+import { ragSync } from '../../rag/ragSync';
 
 function mockService(
   impl: AiService['sendPrompt'] = async (prompt) => ({ text: `echo:${prompt}` }),
@@ -42,6 +43,11 @@ describe('aiStore → canvas insert', () => {
   beforeEach(() => {
     resetCanvasStore();
     vi.useFakeTimers();
+    vi.spyOn(ragSync, 'indexText').mockImplementation(() => {});
+    vi.spyOn(ragSync, 'updateGeometry').mockImplementation(() => {});
+    vi.spyOn(ragSync, 'deleteElement').mockImplementation(() => {});
+    vi.spyOn(ragSync, 'deleteMany').mockImplementation(() => {});
+    vi.spyOn(ragSync, 'scheduleReconcile').mockImplementation(() => {});
   });
 
   afterEach(() => {

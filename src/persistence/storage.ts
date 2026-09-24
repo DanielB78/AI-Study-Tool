@@ -13,6 +13,7 @@ export interface PersistenceService {
 export function serializeDocument(document: CanvasDocument): string {
   const payload: CanvasDocument = {
     version: DOCUMENT_VERSION,
+    id: document.id,
     elements: document.elements,
     camera: { ...document.camera },
   };
