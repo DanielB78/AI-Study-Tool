@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { useKeyboardShortcuts } from '../../canvas/hooks/useKeyboardShortcuts';
+import { AiFloatingPanel } from '../../features/ai';
 import { FloatingToolPalette } from './FloatingToolPalette';
 import { ContextualToolbar } from './ContextualToolbar';
 
@@ -12,6 +13,7 @@ export function EditorChrome() {
     <>
       <FloatingToolPalette fileInputRef={fileInputRef} />
       <ContextualToolbar />
+      <AiFloatingPanel />
     </>
   );
 }
