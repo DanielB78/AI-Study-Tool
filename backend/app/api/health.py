@@ -14,4 +14,7 @@ async def health() -> dict[str, object]:
         "model": settings.openai_model if not settings.is_mock_provider else "mock",
         "provider": "mock" if settings.is_mock_provider else "openai",
         "database_configured": settings.has_database_url,
+        "embedding_configured": settings.has_embedding_config,
+        "embedding_provider": settings.embedding_provider or None,
+        "embedding_model": settings.embedding_model or None,
     }
