@@ -5,51 +5,60 @@ import {
   AiRequestError,
   type AiStatus,
 } from '../models/types';
+import { insertAiResponseOntoCanvas } from '../canvas/liveInsert';
+
+export type AiInsertFn = (text: string) => { element: { id: string } } | null;
 
 /**
  * AI prompt UI state — editor chrome state, NOT canvas document state.
- *
- * Conversation history is intentionally omitted in v1 (one prompt / one response).
- * A `messages` array can be introduced later without touching CanvasDocument.
+ * Successful replies are inserted as TextElements via the canvas store.
  */
 export interface AiState {
   status: AiStatus;
   expanded: boolean;
   prompt: string;
   lastPrompt: string | null;
-  responseText: string | null;
   errorMessage: string | null;
-  responseVisible: boolean;
+  /** Brief non-document status after a successful canvas insert. */
+  statusMessage: string | null;
+  lastInsertedId: string | null;
 
   expand: () => void;
   collapse: () => void;
   setPrompt: (value: string) => void;
   setTyping: () => void;
   sendPrompt: () => Promise<void>;
-  regenerate: () => Promise<void>;
-  closeResponse: () => void;
   clearError: () => void;
-  copyResponse: () => Promise<boolean>;
+  clearStatusMessage: () => void;
 }
 
 let activeAbort: AbortController | null = null;
+let statusTimer: ReturnType<typeof setTimeout> | null = null;
 
-function createAiStore(service: AiService = aiService) {
+function clearStatusTimer() {
+  if (statusTimer !== null) {
+    clearTimeout(statusTimer);
+    statusTimer = null;
+  }
+}
+
+function createAiStore(
+  service: AiService = aiService,
+  insertFn: AiInsertFn = insertAiResponseOntoCanvas,
+) {
   return create<AiState>((set, get) => ({
     status: 'idle',
     expanded: false,
     prompt: '',
     lastPrompt: null,
-    responseText: null,
     errorMessage: null,
-    responseVisible: false,
+    statusMessage: null,
+    lastInsertedId: null,
 
     expand: () => set({ expanded: true }),
 
     collapse: () => {
-      const { status, responseVisible } = get();
-      if (status === 'loading') return;
-      if (responseVisible) return;
+      if (get().status === 'loading') return;
       set({
         expanded: false,
         status: 'idle',
@@ -58,16 +67,14 @@ function createAiStore(service: AiService = aiService) {
     },
 
     setPrompt: (value) => {
-      const { status, responseVisible } = get();
+      const { status } = get();
       if (status === 'loading') {
-        // Allow editing the draft text without leaving the loading status
-        // of the in-flight request (send remains blocked until it finishes).
         set({ prompt: value, errorMessage: null });
         return;
       }
       set({
         prompt: value,
-        status: value.trim() ? 'typing' : responseVisible ? 'success' : 'idle',
+        status: value.trim() ? 'typing' : 'idle',
         errorMessage: null,
       });
     },
@@ -86,25 +93,60 @@ function createAiStore(service: AiService = aiService) {
       activeAbort?.abort();
       activeAbort = new AbortController();
       const signal = activeAbort.signal;
+      clearStatusTimer();
 
       set({
         status: 'loading',
         expanded: true,
         errorMessage: null,
+        statusMessage: null,
         lastPrompt: trimmed,
-        responseVisible: true,
       });
 
       try {
         const result = await service.sendPrompt(trimmed, signal);
         if (signal.aborted) return;
+
+        const text = result.text.trim();
+        if (!text) {
+          set({
+            status: 'error',
+            errorMessage: AI_USER_ERROR_MESSAGE,
+            statusMessage: null,
+          });
+          return;
+        }
+
+        const inserted = insertFn(text);
+        if (!inserted) {
+          set({
+            status: 'error',
+            errorMessage: AI_USER_ERROR_MESSAGE,
+            statusMessage: null,
+          });
+          return;
+        }
+
         set({
           status: 'success',
-          responseText: result.text,
-          responseVisible: true,
           errorMessage: null,
           prompt: '',
+          statusMessage: 'Added to canvas',
+          lastInsertedId: inserted.element.id,
+          expanded: true,
         });
+
+        // Collapse shortly after success so the board stays primary.
+        statusTimer = setTimeout(() => {
+          const state = get();
+          if (state.status === 'loading') return;
+          set({
+            statusMessage: null,
+            expanded: false,
+            status: 'idle',
+          });
+          statusTimer = null;
+        }, 1600);
       } catch (err) {
         if (signal.aborted) return;
         const message =
@@ -112,7 +154,8 @@ function createAiStore(service: AiService = aiService) {
         set({
           status: 'error',
           errorMessage: message,
-          responseVisible: true,
+          statusMessage: null,
+          expanded: true,
         });
       } finally {
         if (activeAbort?.signal === signal) {
@@ -121,41 +164,21 @@ function createAiStore(service: AiService = aiService) {
       }
     },
 
-    regenerate: async () => {
-      const last = get().lastPrompt;
-      if (!last || get().status === 'loading') return;
-      set({ prompt: last });
-      await get().sendPrompt();
-    },
+    clearError: () => set({ errorMessage: null, status: 'idle' }),
 
-    closeResponse: () => {
-      if (get().status === 'loading') return;
-      set({
-        responseVisible: false,
-        responseText: null,
-        errorMessage: null,
-        status: get().prompt.trim() ? 'typing' : 'idle',
-      });
-    },
-
-    clearError: () => set({ errorMessage: null, status: get().responseText ? 'success' : 'idle' }),
-
-    copyResponse: async () => {
-      const text = get().responseText;
-      if (!text) return false;
-      try {
-        await navigator.clipboard.writeText(text);
-        return true;
-      } catch {
-        return false;
-      }
-    },
+    clearStatusMessage: () => set({ statusMessage: null }),
   }));
 }
 
 export const useAiStore = createAiStore();
 
-/** Test helper: build an isolated store with a mock service. */
-export function createTestAiStore(service: AiService) {
-  return createAiStore(service);
+/** Test helper: isolated store with mock AI + optional insert fn. */
+export function createTestAiStore(service: AiService, insertFn?: AiInsertFn) {
+  return createAiStore(
+    service,
+    insertFn ??
+      (() => ({
+        element: { id: 'test-inserted' },
+      })),
+  );
 }
