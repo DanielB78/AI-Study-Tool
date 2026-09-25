@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App.tsx';
 import { useCanvasStore } from './store/canvasStore';
-import { debugRetrieve } from './features/rag';
+import { debugRetrieve, useRagDebugStore } from './features/rag';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -22,5 +22,8 @@ if (import.meta.env.DEV) {
       });
     },
     getBoardId: () => useCanvasStore.getState().document.id,
+    openPanel: () => useRagDebugStore.getState().openPanel(),
+    closePanel: () => useRagDebugStore.getState().closePanel(),
+    getState: () => useRagDebugStore.getState(),
   };
 }

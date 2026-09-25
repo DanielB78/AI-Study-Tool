@@ -56,6 +56,18 @@ curl -X POST http://127.0.0.1:8000/api/rag/retrieve -H 'Content-Type: applicatio
 
 Higher score = more similar. `min_similarity` defaults to `null` (top-K only).
 
+## Chat with optional RAG context
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/chat -H 'Content-Type: application/json' -d '{
+  "prompt": "Explain Gauss'\''s law",
+  "system_instruction": "You are an AI assistant inside a study canvas...",
+  "canvas_context": "CANVAS CONTEXT\n..."
+}'
+```
+
+When `canvas_context` is set and `system_instruction` is omitted, the backend applies a default study-canvas system instruction. Plain `{ "prompt": "..." }` requests remain unchanged.
+
 ## Tests
 
 ```bash

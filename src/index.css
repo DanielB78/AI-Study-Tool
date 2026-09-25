@@ -733,3 +733,283 @@ textarea {
     transform: rotate(360deg);
   }
 }
+
+/* —— RAG debug panel (development) —— */
+
+.rag-debug-toggle {
+  appearance: none;
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 55;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 94%, white);
+  color: var(--ink);
+  font: 600 0.72rem/1 var(--font-ui);
+  letter-spacing: 0.04em;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.rag-debug-toggle:hover {
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.rag-debug-panel {
+  position: absolute;
+  top: 48px;
+  right: 14px;
+  z-index: 56;
+  width: min(360px, calc(100vw - 28px));
+  max-height: calc(100vh - 72px);
+  overflow: auto;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 96%, white);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: auto;
+  font: 0.82rem/1.35 var(--font-ui);
+  color: var(--ink);
+}
+
+.rag-debug-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rag-debug-header strong {
+  display: block;
+  font-size: 0.9rem;
+}
+
+.rag-debug-sub {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  margin-top: 2px;
+}
+
+.rag-debug-icon-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--muted);
+  padding: 0 2px;
+}
+
+.rag-debug-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.rag-debug-textarea {
+  width: 100%;
+  resize: vertical;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  padding: 8px;
+  font: inherit;
+  background: #fff;
+  color: var(--ink);
+}
+
+.rag-debug-textarea.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+}
+
+.rag-debug-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.rag-debug-row.tight {
+  gap: 6px;
+}
+
+.rag-debug-btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: #fff;
+  color: var(--ink);
+  font: 600 0.78rem/1 var(--font-ui);
+  cursor: pointer;
+}
+
+.rag-debug-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.rag-debug-btn.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+}
+
+.rag-debug-btn.ghost {
+  padding: 4px 8px;
+  font-weight: 500;
+  background: transparent;
+}
+
+.rag-debug-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.rag-debug-section-title {
+  font-weight: 600;
+  font-size: 0.78rem;
+}
+
+.rag-debug-radius-value {
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.rag-debug-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.rag-debug-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.rag-debug-list.compact {
+  max-height: 160px;
+}
+
+.rag-debug-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: #fff;
+}
+
+.rag-debug-item.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: rgba(15, 118, 110, 0.06);
+}
+
+.rag-debug-item label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.rag-debug-score {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--accent);
+  min-width: 3.2em;
+}
+
+.rag-debug-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+}
+
+.rag-debug-preview {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.rag-debug-meta {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.rag-debug-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.rag-debug-slider {
+  width: 100%;
+}
+
+.rag-debug-number {
+  width: 88px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  padding: 4px 6px;
+  font: inherit;
+}
+
+.rag-debug-counts {
+  font-size: 0.78rem;
+}
+
+.rag-debug-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.rag-debug-badge.semantic {
+  background: rgba(15, 118, 110, 0.12);
+  color: #0f766e;
+}
+
+.rag-debug-badge.spatial {
+  background: rgba(217, 119, 6, 0.12);
+  color: #b45309;
+}
+
+.rag-debug-badge.both {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+}
+
+.rag-debug-error {
+  margin: 0;
+  color: #b91c1c;
+  font-size: 0.78rem;
+}
+
+.rag-debug-status {
+  margin: 0;
+  color: var(--accent);
+  font-size: 0.78rem;
+}

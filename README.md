@@ -25,22 +25,35 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 npm install && npm run dev
 ```
 
-## Semantic retrieval (this phase)
+## Semantic retrieval + manual RAG debug
 
 ```
-prompt → query processing → EmbeddingService → cosine vs rag_chunks
-      → top-K chunks → group by element_id (max score) → candidates
+prompt → embed → cosine → ranked TextElements
+      → (debug) pick semantic anchors
+      → (debug) spatial AABB radius expansion
+      → context budget → preview → Send with context → LLM
 ```
 
-- Same embedding model for documents and queries
-- Geometry stored/returned but **not** used for ranking
-- No default similarity threshold
-- Not yet wired into the LLM chat path
+- Semantic ranking and spatial expansion are **separate stages** (no combined score)
+- Radius uses **world-space** AABB edge distance (zoom-independent)
+- Radius `0` = semantic anchors only
+- `RAG_MIN_SIMILARITY` still unset by default
+- Normal Ask AI path is unchanged; RAG context is opt-in via the debug panel
 
-Debug in the browser console (dev):
+### RAG Debug panel (dev)
+
+1. Run the app with `npm run dev`
+2. Click the **RAG** button (top-right) or `window.__RAG_DEBUG__.openPanel()`
+3. Enter a prompt → **Retrieve** → check anchors (or Top 1/3/5)
+4. Adjust spatial radius (slider) — highlights update live; no LLM call
+5. **Preview context** → inspect elements + serialized payload
+6. **Send with context** → system instruction + canvas context + user prompt → LLM → canvas TextElement
+
+Console helpers:
 
 ```js
 await window.__RAG_DEBUG__.debugRetrieve("Explain Gauss's law")
+window.__RAG_DEBUG__.openPanel()
 ```
 
 ## Tests

@@ -9,10 +9,15 @@ export type AiStatus = 'idle' | 'typing' | 'loading' | 'success' | 'error';
 
 export interface ChatRequest {
   prompt: string;
-  // Future (not sent in v1):
-  // boardId?: string;
-  // selectedElementIds?: string[];
-  // context?: Record<string, unknown>;
+  /** Optional trusted system instruction (not shown in the user prompt box). */
+  system_instruction?: string | null;
+  /** Serialized canvas RAG context (debug / retrieval stage). */
+  canvas_context?: string | null;
+}
+
+export interface ChatRequestOptions {
+  systemInstruction?: string | null;
+  canvasContext?: string | null;
 }
 
 export interface ChatResponse {
