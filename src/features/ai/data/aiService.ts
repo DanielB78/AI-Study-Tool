@@ -3,11 +3,16 @@ import {
   AI_USER_ERROR_MESSAGE,
   AiRequestError,
   type ChatRequest,
+  type ChatRequestOptions,
   type ChatResponse,
 } from '../models/types';
 
 export interface AiService {
-  sendPrompt(prompt: string, signal?: AbortSignal): Promise<ChatResponse>;
+  sendPrompt(
+    prompt: string,
+    signal?: AbortSignal,
+    options?: ChatRequestOptions,
+  ): Promise<ChatResponse>;
 }
 
 function parseErrorBody(data: unknown): { code: string; message: string } | null {
@@ -22,7 +27,11 @@ function parseErrorBody(data: unknown): { code: string; message: string } | null
 
 export function createAiService(baseUrl: string = AI_API_BASE_URL): AiService {
   return {
-    async sendPrompt(prompt: string, externalSignal?: AbortSignal): Promise<ChatResponse> {
+    async sendPrompt(
+      prompt: string,
+      externalSignal?: AbortSignal,
+      options?: ChatRequestOptions,
+    ): Promise<ChatResponse> {
       const trimmed = prompt.trim();
       if (!trimmed) {
         throw new AiRequestError('Prompt cannot be empty.', 'invalid_prompt', 422);
@@ -35,6 +44,10 @@ export function createAiService(baseUrl: string = AI_API_BASE_URL): AiService {
       externalSignal?.addEventListener('abort', onExternalAbort);
 
       const body: ChatRequest = { prompt: trimmed };
+      const system = options?.systemInstruction?.trim();
+      const canvas = options?.canvasContext?.trim();
+      if (system) body.system_instruction = system;
+      if (canvas) body.canvas_context = canvas;
 
       try {
         const res = await fetch(`${baseUrl}/api/chat`, {
@@ -53,7 +66,6 @@ export function createAiService(baseUrl: string = AI_API_BASE_URL): AiService {
 
         if (!res.ok) {
           const parsed = parseErrorBody(data);
-          // Prefer a safe generic UI message; keep provider/backend codes for logs.
           console.warn('[ai] request failed', res.status, parsed ?? data);
           throw new AiRequestError(AI_USER_ERROR_MESSAGE, parsed?.code ?? 'http_error', res.status);
         }

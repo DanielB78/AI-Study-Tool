@@ -12,10 +12,22 @@ class FakeProvider(LLMProvider):
     def __init__(self, text: str = "hello", *, error: Exception | None = None) -> None:
         self.text = text
         self.error = error
-        self.calls: list[str] = []
+        self.calls: list[dict[str, str | None]] = []
 
-    async def generate(self, prompt: str) -> str:
-        self.calls.append(prompt)
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        system_instruction: str | None = None,
+        canvas_context: str | None = None,
+    ) -> str:
+        self.calls.append(
+            {
+                "prompt": prompt,
+                "system_instruction": system_instruction,
+                "canvas_context": canvas_context,
+            }
+        )
         if self.error is not None:
             raise self.error
         return self.text
@@ -73,7 +85,13 @@ def test_chat_success_mocked_provider() -> None:
     assert res.json() == {
         "text": "Faraday's law relates induced EMF to changing flux.",
     }
-    assert provider.calls == ["Explain Faraday's law simply"]
+    assert provider.calls == [
+        {
+            "prompt": "Explain Faraday's law simply",
+            "system_instruction": None,
+            "canvas_context": None,
+        }
+    ]
 
 
 def test_chat_trims_prompt() -> None:
@@ -81,7 +99,42 @@ def test_chat_trims_prompt() -> None:
     client = make_client(provider)
     res = client.post("/api/chat", json={"prompt": "  hello  "})
     assert res.status_code == 200
-    assert provider.calls == ["hello"]
+    assert provider.calls[0]["prompt"] == "hello"
+
+
+def test_chat_with_canvas_context_applies_default_system() -> None:
+    provider = FakeProvider("answered")
+    client = make_client(provider)
+    res = client.post(
+        "/api/chat",
+        json={
+            "prompt": "Explain Gauss",
+            "canvas_context": "CANVAS CONTEXT\n\nID: textbox_18\nTEXT:\nflux",
+        },
+    )
+    assert res.status_code == 200
+    call = provider.calls[0]
+    assert call["prompt"] == "Explain Gauss"
+    assert call["canvas_context"] is not None
+    assert "textbox_18" in (call["canvas_context"] or "")
+    assert call["system_instruction"] is not None
+    assert "study canvas" in (call["system_instruction"] or "").lower()
+
+
+def test_chat_with_explicit_system_instruction() -> None:
+    provider = FakeProvider("ok")
+    client = make_client(provider)
+    res = client.post(
+        "/api/chat",
+        json={
+            "prompt": "hi",
+            "system_instruction": "Custom system",
+            "canvas_context": "CTX",
+        },
+    )
+    assert res.status_code == 200
+    assert provider.calls[0]["system_instruction"] == "Custom system"
+    assert provider.calls[0]["canvas_context"] == "CTX"
 
 
 def test_chat_provider_error_safe_message() -> None:

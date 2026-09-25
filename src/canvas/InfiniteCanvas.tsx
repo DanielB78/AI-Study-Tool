@@ -21,6 +21,7 @@ import {
 import { snapPosition } from '../utils/snap';
 import { ZOOM_STEP, isShapeTool } from '../types/canvas';
 import { ragSync } from '../features/rag/ragSync';
+import { RagDebugOverlay } from '../features/rag/ui/RagDebugOverlay';
 
 function getCursor(
   tool: string,
@@ -619,6 +620,8 @@ export function InfiniteCanvas() {
               listening={false}
             />
           )}
+
+          <RagDebugOverlay />
 
           <SelectionTransformer
             selectedIds={selectedIds.filter((id) => {

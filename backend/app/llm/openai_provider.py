@@ -25,7 +25,13 @@ class OpenAIProvider(LLMProvider):
             timeout=settings.llm_timeout_seconds,
         )
 
-    async def generate(self, prompt: str) -> str:
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        system_instruction: str | None = None,
+        canvas_context: str | None = None,
+    ) -> str:
         if not self._settings.has_openai_api_key:
             raise AiServiceError(
                 "AI is not configured. Set OPENAI_API_KEY on the backend.",
@@ -34,10 +40,20 @@ class OpenAIProvider(LLMProvider):
                 detail="OPENAI_API_KEY is empty",
             )
 
+        messages: list[dict[str, str]] = []
+        system_parts: list[str] = []
+        if system_instruction:
+            system_parts.append(system_instruction)
+        if canvas_context:
+            system_parts.append(canvas_context)
+        if system_parts:
+            messages.append({"role": "system", "content": "\n\n".join(system_parts)})
+        messages.append({"role": "user", "content": prompt})
+
         try:
             completion = await self._client.chat.completions.create(
                 model=self._settings.openai_model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
             )
         except RateLimitError as exc:
             raise AiServiceError(

@@ -30,6 +30,33 @@ describe('aiService', () => {
     );
   });
 
+  it('includes system_instruction and canvas_context when provided', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ text: 'ok' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = createAiService('http://example.test');
+    await service.sendPrompt('question', undefined, {
+      systemInstruction: 'Use context',
+      canvasContext: 'CANVAS CONTEXT\nID: a',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://example.test/api/chat',
+      expect.objectContaining({
+        body: JSON.stringify({
+          prompt: 'question',
+          system_instruction: 'Use context',
+          canvas_context: 'CANVAS CONTEXT\nID: a',
+        }),
+      }),
+    );
+  });
+
   it('maps HTTP failures to a friendly error', async () => {
     vi.stubGlobal(
       'fetch',
