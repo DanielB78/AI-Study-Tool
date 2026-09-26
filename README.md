@@ -25,34 +25,36 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 npm install && npm run dev
 ```
 
-## Semantic retrieval + manual RAG debug
+## Semantic retrieval + Manual LLM Mode
 
 ```
 prompt → embed → cosine → ranked TextElements
-      → (debug) pick semantic anchors
-      → (debug) spatial AABB radius expansion
-      → context budget → preview → Send with context → LLM
+      → pick semantic anchors → spatial radius → context budget
+      → LlmPromptBuilder → Copy LLM Prompt
+      → (you) paste into ChatGPT → Paste LLM Response → Apply
+      → same handleLlmResponse → canvas TextElement
 ```
 
-- Semantic ranking and spatial expansion are **separate stages** (no combined score)
-- Radius uses **world-space** AABB edge distance (zoom-independent)
-- Radius `0` = semantic anchors only
-- `RAG_MIN_SIMILARITY` still unset by default
-- Normal Ask AI path is unchanged; RAG context is opt-in via the debug panel
+**Default: Manual LLM Mode** (`VITE_LLM_EXECUTION_MODE=manual`) — **zero paid LLM API calls**.
+
+- Semantic ranking and spatial expansion are **separate stages**
+- Radius uses **world-space** AABB edge distance
+- Leave `EMBEDDING_MODEL` blank until you choose a model; use `deterministic` only for pipeline smoke tests
+- Leave `RAG_MIN_SIMILARITY` unset
 
 ### RAG Debug panel (dev)
 
-1. Run the app with `npm run dev`
-2. Click the **RAG** button (top-right) or `window.__RAG_DEBUG__.openPanel()`
-3. Enter a prompt → **Retrieve** → check anchors (or Top 1/3/5)
-4. Adjust spatial radius (slider) — highlights update live; no LLM call
-5. **Preview context** → inspect elements + serialized payload
-6. **Send with context** → system instruction + canvas context + user prompt → LLM → canvas TextElement
+1. `npm run dev` → click **RAG** (top-right)
+2. Confirm **Manual** under LLM execution
+3. Prompt → **Retrieve** → select anchors (Top 1/3/5)
+4. Adjust spatial radius
+5. **Preview context** (retrieval) and/or **Preview LLM prompt** (full ChatGPT paste)
+6. **Copy LLM prompt** → paste into ChatGPT
+7. **Paste LLM response** → Apply → TextElement on canvas (undoable)
 
-Console helpers:
+Automatic mode (`VITE_LLM_EXECUTION_MODE=automatic` or panel toggle) restores **Send with context (API)**.
 
 ```js
-await window.__RAG_DEBUG__.debugRetrieve("Explain Gauss's law")
 window.__RAG_DEBUG__.openPanel()
 ```
 

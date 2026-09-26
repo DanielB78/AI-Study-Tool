@@ -13,6 +13,7 @@ import {
   AI_TEXT_DEFAULT_WIDTH,
 } from '../canvas/placement';
 import { ragSync } from '../../rag/ragSync';
+import { setLlmExecutionModeOverride } from '../llm/executionMode';
 
 function mockService(
   impl: AiService['sendPrompt'] = async (prompt) => ({ text: `echo:${prompt}` }),
@@ -42,6 +43,8 @@ function resetCanvasStore() {
 describe('aiStore → canvas insert', () => {
   beforeEach(() => {
     resetCanvasStore();
+    // Exercise the Automatic API path in unit tests (dev default is Manual).
+    setLlmExecutionModeOverride('automatic');
     vi.useFakeTimers();
     vi.spyOn(ragSync, 'indexText').mockImplementation(() => {});
     vi.spyOn(ragSync, 'updateGeometry').mockImplementation(() => {});
@@ -51,6 +54,7 @@ describe('aiStore → canvas insert', () => {
   });
 
   afterEach(() => {
+    setLlmExecutionModeOverride(null);
     vi.useRealTimers();
     vi.restoreAllMocks();
   });

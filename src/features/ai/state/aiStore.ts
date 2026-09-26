@@ -6,6 +6,11 @@ import {
   type AiStatus,
 } from '../models/types';
 import { insertAiResponseOntoCanvas } from '../canvas/liveInsert';
+import { handleLlmResponse } from '../llm/handleLlmResponse';
+import {
+  getLlmExecutionMode,
+  isManualLlmMode,
+} from '../llm/executionMode';
 
 export type AiInsertFn = (text: string) => { element: { id: string } } | null;
 
@@ -90,6 +95,19 @@ function createAiStore(
       if (!trimmed) return;
       if (get().status === 'loading') return;
 
+      // Manual LLM Mode: never call a paid provider from Ask AI.
+      if (isManualLlmMode(getLlmExecutionMode())) {
+        set({
+          status: 'error',
+          expanded: true,
+          errorMessage:
+            'Manual LLM Mode is on — open RAG Debug to Copy LLM Prompt / Paste Response (no API credits).',
+          statusMessage: null,
+          lastPrompt: trimmed,
+        });
+        return;
+      }
+
       activeAbort?.abort();
       activeAbort = new AbortController();
       const signal = activeAbort.signal;
@@ -107,18 +125,8 @@ function createAiStore(
         const result = await service.sendPrompt(trimmed, signal);
         if (signal.aborted) return;
 
-        const text = result.text.trim();
-        if (!text) {
-          set({
-            status: 'error',
-            errorMessage: AI_USER_ERROR_MESSAGE,
-            statusMessage: null,
-          });
-          return;
-        }
-
-        const inserted = insertFn(text);
-        if (!inserted) {
+        const applied = handleLlmResponse(result.text, insertFn);
+        if (!applied) {
           set({
             status: 'error',
             errorMessage: AI_USER_ERROR_MESSAGE,
@@ -132,11 +140,10 @@ function createAiStore(
           errorMessage: null,
           prompt: '',
           statusMessage: 'Added to canvas',
-          lastInsertedId: inserted.element.id,
+          lastInsertedId: applied.element.id,
           expanded: true,
         });
 
-        // Collapse shortly after success so the board stays primary.
         statusTimer = setTimeout(() => {
           const state = get();
           if (state.status === 'loading') return;
