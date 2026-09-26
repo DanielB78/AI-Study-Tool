@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useCanvasStore } from '../../../store/canvasStore';
+import { buildLlmPrompt } from '../../ai/llm';
 import {
   RAG_MAX_CONTEXT_CHARACTERS,
   RAG_MAX_CONTEXT_ELEMENTS,
@@ -16,8 +17,8 @@ function previewText(text: string, max = 80): string {
 }
 
 /**
- * Development-only RAG debug panel: retrieve → pick anchors → radius → preview → send.
- * Does not replace the normal Ask AI chrome.
+ * Development-only RAG debug panel: retrieve → anchors → radius →
+ * copy LLM prompt / paste response (Manual LLM Mode by default).
  */
 export function RagDebugPanel() {
   const open = useRagDebugStore((s) => s.open);
@@ -30,6 +31,10 @@ export function RagDebugPanel() {
   const selectedAnchorIds = useRagDebugStore((s) => s.selectedAnchorIds);
   const radius = useRagDebugStore((s) => s.radius);
   const previewOpen = useRagDebugStore((s) => s.previewOpen);
+  const llmPromptPreviewOpen = useRagDebugStore((s) => s.llmPromptPreviewOpen);
+  const responseModalOpen = useRagDebugStore((s) => s.responseModalOpen);
+  const pastedResponse = useRagDebugStore((s) => s.pastedResponse);
+  const llmExecutionMode = useRagDebugStore((s) => s.llmExecutionMode);
   const lastQueryChunks = useRagDebugStore((s) => s.lastQueryChunks);
   const lastRetrieveMeta = useRagDebugStore((s) => s.lastRetrieveMeta);
   const elements = useCanvasStore((s) => s.document.elements);
@@ -42,6 +47,15 @@ export function RagDebugPanel() {
   const retrieve = useRagDebugStore((s) => s.retrieve);
   const sendWithContext = useRagDebugStore((s) => s.sendWithContext);
   const setPreviewOpen = useRagDebugStore((s) => s.setPreviewOpen);
+  const setLlmPromptPreviewOpen = useRagDebugStore((s) => s.setLlmPromptPreviewOpen);
+  const setLlmExecutionMode = useRagDebugStore((s) => s.setLlmExecutionMode);
+  const copyLlmPrompt = useRagDebugStore((s) => s.copyLlmPrompt);
+  const openResponseModal = useRagDebugStore((s) => s.openResponseModal);
+  const closeResponseModal = useRagDebugStore((s) => s.closeResponseModal);
+  const setPastedResponse = useRagDebugStore((s) => s.setPastedResponse);
+  const pasteResponseFromClipboard = useRagDebugStore((s) => s.pasteResponseFromClipboard);
+  const applyPastedResponse = useRagDebugStore((s) => s.applyPastedResponse);
+  const copyRetrievalDebugData = useRagDebugStore((s) => s.copyRetrievalDebugData);
   const closePanel = useRagDebugStore((s) => s.closePanel);
   const togglePanel = useRagDebugStore((s) => s.togglePanel);
 
@@ -59,9 +73,16 @@ export function RagDebugPanel() {
     [prompt, candidates, selectedAnchorIds, radius, elements],
   );
 
+  const llmPrompt = useMemo(() => {
+    if (!prompt.trim() || selectedAnchorIds.length === 0) return null;
+    return buildLlmPrompt({ userPrompt: prompt, ragContext: context });
+  }, [prompt, context, selectedAnchorIds.length]);
+
   const selectedSet = useMemo(() => new Set(selectedAnchorIds), [selectedAnchorIds]);
   const busy = retrieving || sending;
-  const canSend = selectedAnchorIds.length > 0 && prompt.trim().length > 0 && !busy;
+  const manual = llmExecutionMode === 'manual';
+  const canBuildPrompt = selectedAnchorIds.length > 0 && prompt.trim().length > 0;
+  const canSendAutomatic = canBuildPrompt && !busy && !manual;
 
   return (
     <>
@@ -83,15 +104,42 @@ export function RagDebugPanel() {
           <header className="rag-debug-header">
             <div>
               <strong>RAG Debug</strong>
-              <span className="rag-debug-sub">manual context builder</span>
+              <span className="rag-debug-sub">
+                {manual ? 'manual LLM mode — no API credits' : 'automatic LLM API mode'}
+              </span>
             </div>
             <button type="button" className="rag-debug-icon-btn" onClick={closePanel} aria-label="Close">
               ×
             </button>
           </header>
 
+          <section className="rag-debug-section rag-debug-mode">
+            <div className="rag-debug-section-title">LLM execution</div>
+            <div className="rag-debug-shortcuts">
+              <button
+                type="button"
+                className={`rag-debug-btn ghost${manual ? ' is-active' : ''}`}
+                onClick={() => setLlmExecutionMode('manual')}
+              >
+                Manual
+              </button>
+              <button
+                type="button"
+                className={`rag-debug-btn ghost${!manual ? ' is-active' : ''}`}
+                onClick={() => setLlmExecutionMode('automatic')}
+              >
+                Automatic
+              </button>
+            </div>
+            {manual && (
+              <p className="rag-debug-meta">
+                Copy the full prompt into ChatGPT, then paste the reply back. Zero paid LLM calls.
+              </p>
+            )}
+          </section>
+
           <label className="rag-debug-label" htmlFor="rag-debug-prompt">
-            Prompt
+            User prompt
           </label>
           <textarea
             id="rag-debug-prompt"
@@ -142,9 +190,7 @@ export function RagDebugPanel() {
               <ul className="rag-debug-list">
                 {candidates.map((c) => {
                   const checked = selectedSet.has(c.element_id);
-                  const preview =
-                    c.matched_chunks[0]?.text ??
-                    '';
+                  const preview = c.matched_chunks[0]?.text ?? '';
                   return (
                     <li key={c.element_id} className={`rag-debug-item${checked ? ' is-selected' : ''}`}>
                       <label>
@@ -226,21 +272,55 @@ export function RagDebugPanel() {
               disabled={context.stats.total_unique_elements === 0}
               onClick={() => setPreviewOpen(!previewOpen)}
             >
-              {previewOpen ? 'Hide preview' : 'Preview context'}
+              {previewOpen ? 'Hide context' : 'Preview context'}
+            </button>
+            <button
+              type="button"
+              className="rag-debug-btn"
+              disabled={!canBuildPrompt}
+              onClick={() => setLlmPromptPreviewOpen(!llmPromptPreviewOpen)}
+            >
+              {llmPromptPreviewOpen ? 'Hide LLM prompt' : 'Preview LLM prompt'}
+            </button>
+          </div>
+
+          <div className="rag-debug-row">
+            <button
+              type="button"
+              className="rag-debug-btn primary"
+              disabled={!canBuildPrompt}
+              onClick={() => void copyLlmPrompt()}
+            >
+              Copy LLM prompt
             </button>
             <button
               type="button"
               className="rag-debug-btn primary"
-              disabled={!canSend}
-              onClick={() => void sendWithContext()}
-              title={
-                selectedAnchorIds.length === 0
-                  ? 'Select at least one semantic anchor'
-                  : 'Send system + context + prompt to LLM'
-              }
+              onClick={openResponseModal}
             >
-              {sending ? 'Sending…' : 'Send with context'}
+              Paste LLM response
             </button>
+          </div>
+
+          <div className="rag-debug-row">
+            <button
+              type="button"
+              className="rag-debug-btn ghost"
+              onClick={() => void copyRetrievalDebugData()}
+            >
+              Copy retrieval debug JSON
+            </button>
+            {!manual && (
+              <button
+                type="button"
+                className="rag-debug-btn"
+                disabled={!canSendAutomatic}
+                onClick={() => void sendWithContext()}
+                title="Calls the backend LLM API (uses credits)"
+              >
+                {sending ? 'Sending…' : 'Send with context (API)'}
+              </button>
+            )}
           </div>
 
           {previewOpen && (
@@ -264,21 +344,92 @@ export function RagDebugPanel() {
                 ))}
               </ul>
               <label className="rag-debug-label" htmlFor="rag-debug-serialized">
-                Serialized payload
+                Serialized context payload
               </label>
               <textarea
                 id="rag-debug-serialized"
                 className="rag-debug-textarea mono"
-                rows={10}
+                rows={8}
                 readOnly
                 value={context.serialized}
               />
             </section>
           )}
 
+          {llmPromptPreviewOpen && (
+            <section className="rag-debug-section">
+              <div className="rag-debug-section-title">LLM prompt preview</div>
+              <p className="rag-debug-meta">
+                Exact text copied by “Copy LLM prompt” (regenerates when anchors/radius/prompt change).
+              </p>
+              <textarea
+                id="rag-debug-llm-prompt"
+                className="rag-debug-textarea mono"
+                rows={14}
+                readOnly
+                value={llmPrompt?.finalLlmPrompt ?? '(select anchors to build prompt)'}
+              />
+              <button
+                type="button"
+                className="rag-debug-btn"
+                disabled={!llmPrompt}
+                onClick={() => void copyLlmPrompt()}
+              >
+                Copy all
+              </button>
+            </section>
+          )}
+
           {error && <p className="rag-debug-error">{error}</p>}
           {statusMessage && !error && <p className="rag-debug-status">{statusMessage}</p>}
         </aside>
+      )}
+
+      {responseModalOpen && (
+        <div
+          className="rag-debug-modal-backdrop"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <div
+            className="rag-debug-modal"
+            role="dialog"
+            aria-labelledby="rag-paste-title"
+            onWheel={(e) => e.stopPropagation()}
+          >
+            <h2 id="rag-paste-title">Paste LLM response</h2>
+            <p className="rag-debug-meta">
+              Paste the ChatGPT answer below. Canvas is unchanged until you Apply.
+            </p>
+            <textarea
+              className="rag-debug-textarea"
+              rows={12}
+              value={pastedResponse}
+              placeholder="Paste the model response here…"
+              onChange={(e) => setPastedResponse(e.target.value)}
+              autoFocus
+            />
+            <div className="rag-debug-row">
+              <button
+                type="button"
+                className="rag-debug-btn ghost"
+                onClick={() => void pasteResponseFromClipboard()}
+              >
+                Paste from clipboard
+              </button>
+              <button type="button" className="rag-debug-btn" onClick={closeResponseModal}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rag-debug-btn primary"
+                disabled={!pastedResponse.trim()}
+                onClick={() => applyPastedResponse()}
+              >
+                Apply response
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

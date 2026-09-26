@@ -1013,3 +1013,42 @@ textarea {
   color: var(--accent);
   font-size: 0.78rem;
 }
+
+.rag-debug-btn.ghost.is-active {
+  background: rgba(15, 118, 110, 0.12);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.rag-debug-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.28);
+  pointer-events: auto;
+}
+
+.rag-debug-modal {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 97%, white);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font: 0.85rem/1.35 var(--font-ui);
+  color: var(--ink);
+}
+
+.rag-debug-modal h2 {
+  margin: 0;
+  font-size: 1rem;
+}

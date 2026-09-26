@@ -13,7 +13,6 @@ import {
 import {
   anchorsFromCandidates,
   buildRagContext,
-  DEFAULT_RAG_SYSTEM_INSTRUCTION,
   type RagContext,
 } from './contextBuilder';
 import { ragRetrievalService, type RetrievedCandidate } from './ragRetrieval';
@@ -23,8 +22,18 @@ import {
   type SpatialHit,
 } from './spatialContext';
 import { aiService } from '../ai/data/aiService';
-import { insertAiResponseOntoCanvas } from '../ai/canvas/liveInsert';
 import { useAiStore } from '../ai/state/aiStore';
+import {
+  DEFAULT_LLM_EXECUTION_MODE,
+  buildLlmPrompt,
+  handleLlmResponse,
+  isAutomaticLlmMode,
+  isManualLlmMode,
+  setLlmExecutionModeOverride,
+  type BuiltLlmPrompt,
+  type LlmExecutionMode,
+} from '../ai/llm';
+import { RAG_SYSTEM_INSTRUCTIONS_API } from '../ai/prompts/instructions';
 
 export interface RagDebugState {
   open: boolean;
@@ -37,6 +46,12 @@ export interface RagDebugState {
   selectedAnchorIds: string[];
   radius: number;
   previewOpen: boolean;
+  llmPromptPreviewOpen: boolean;
+  responseModalOpen: boolean;
+  pastedResponse: string;
+  llmExecutionMode: LlmExecutionMode;
+  lastCopiedPrompt: string | null;
+  lastBuiltPrompt: BuiltLlmPrompt | null;
   lastQueryChunks: number;
   lastRetrieveMeta: {
     embedding_model: string;
@@ -50,11 +65,22 @@ export interface RagDebugState {
   setPrompt: (value: string) => void;
   setRadius: (value: number) => void;
   setPreviewOpen: (open: boolean) => void;
+  setLlmPromptPreviewOpen: (open: boolean) => void;
+  setLlmExecutionMode: (mode: LlmExecutionMode) => void;
   toggleAnchor: (elementId: string) => void;
   selectTopN: (n: number) => void;
   clearAnchors: () => void;
   retrieve: () => Promise<void>;
+  /** Automatic mode only — never called when Manual LLM Mode is active. */
   sendWithContext: () => Promise<void>;
+  buildCurrentLlmPrompt: () => BuiltLlmPrompt | null;
+  copyLlmPrompt: () => Promise<boolean>;
+  openResponseModal: () => void;
+  closeResponseModal: () => void;
+  setPastedResponse: (value: string) => void;
+  pasteResponseFromClipboard: () => Promise<boolean>;
+  applyPastedResponse: () => boolean;
+  copyRetrievalDebugData: () => Promise<boolean>;
   clearError: () => void;
 }
 
@@ -122,6 +148,28 @@ export function computeDebugContext(
   return { context, spatialHits };
 }
 
+async function writeClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // Fallback for environments without clipboard permission.
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
 export function createRagDebugStore() {
   return create<RagDebugState>((set, get) => ({
     open: false,
@@ -134,18 +182,43 @@ export function createRagDebugStore() {
     selectedAnchorIds: [],
     radius: RAG_SPATIAL_RADIUS_DEFAULT,
     previewOpen: false,
+    llmPromptPreviewOpen: false,
+    responseModalOpen: false,
+    pastedResponse: '',
+    llmExecutionMode: DEFAULT_LLM_EXECUTION_MODE,
+    lastCopiedPrompt: null,
+    lastBuiltPrompt: null,
     lastQueryChunks: 0,
     lastRetrieveMeta: null,
 
     openPanel: () => set({ open: true }),
-    closePanel: () => set({ open: false, previewOpen: false }),
-    togglePanel: () => set((s) => ({ open: !s.open, previewOpen: s.open ? false : s.previewOpen })),
+    closePanel: () =>
+      set({
+        open: false,
+        previewOpen: false,
+        llmPromptPreviewOpen: false,
+        responseModalOpen: false,
+      }),
+    togglePanel: () =>
+      set((s) => ({
+        open: !s.open,
+        previewOpen: s.open ? false : s.previewOpen,
+        llmPromptPreviewOpen: s.open ? false : s.llmPromptPreviewOpen,
+        responseModalOpen: s.open ? false : s.responseModalOpen,
+      })),
 
     setPrompt: (value) => set({ prompt: value, error: null }),
 
     setRadius: (value) => set({ radius: Math.max(0, value) }),
 
     setPreviewOpen: (open) => set({ previewOpen: open }),
+
+    setLlmPromptPreviewOpen: (open) => set({ llmPromptPreviewOpen: open }),
+
+    setLlmExecutionMode: (mode) => {
+      setLlmExecutionModeOverride(mode);
+      set({ llmExecutionMode: mode });
+    },
 
     toggleAnchor: (elementId) => {
       set((s) => {
@@ -167,6 +240,116 @@ export function createRagDebugStore() {
     clearAnchors: () => set({ selectedAnchorIds: [] }),
 
     clearError: () => set({ error: null }),
+
+    buildCurrentLlmPrompt: () => {
+      const state = get();
+      const prompt = state.prompt.trim();
+      if (!prompt || state.selectedAnchorIds.length === 0) return null;
+      const { context } = computeDebugContext(state);
+      const built = buildLlmPrompt({
+        userPrompt: prompt,
+        ragContext: context,
+      });
+      set({ lastBuiltPrompt: built });
+      return built;
+    },
+
+    copyLlmPrompt: async () => {
+      const built = get().buildCurrentLlmPrompt();
+      if (!built) {
+        set({
+          error:
+            !get().prompt.trim()
+              ? 'Enter a prompt first.'
+              : 'Select at least one semantic anchor.',
+        });
+        return false;
+      }
+      // Explicit: Manual copy path never invokes an LLM API.
+      const ok = await writeClipboard(built.finalLlmPrompt);
+      if (!ok) {
+        set({ error: 'Could not copy to clipboard.' });
+        return false;
+      }
+      set({
+        lastCopiedPrompt: built.finalLlmPrompt,
+        statusMessage: 'Prompt copied',
+        error: null,
+      });
+      return true;
+    },
+
+    openResponseModal: () => set({ responseModalOpen: true, pastedResponse: '', error: null }),
+    closeResponseModal: () => set({ responseModalOpen: false, pastedResponse: '' }),
+    setPastedResponse: (value) => set({ pastedResponse: value }),
+
+    pasteResponseFromClipboard: async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        set({ pastedResponse: text });
+        return true;
+      } catch {
+        set({ error: 'Could not read clipboard — paste with Ctrl+V.' });
+        return false;
+      }
+    },
+
+    applyPastedResponse: () => {
+      const text = get().pastedResponse;
+      // Do not modify CanvasDocument until Apply — handled here only.
+      const result = handleLlmResponse(text);
+      if (!result) {
+        set({ error: 'Response cannot be empty.' });
+        return false;
+      }
+      set({
+        responseModalOpen: false,
+        pastedResponse: '',
+        statusMessage: 'Response added to canvas',
+        error: null,
+      });
+      useAiStore.setState({
+        status: 'success',
+        errorMessage: null,
+        statusMessage: 'Added to canvas (manual LLM)',
+        lastInsertedId: result.element.id,
+        lastPrompt: get().prompt.trim() || useAiStore.getState().lastPrompt,
+        expanded: true,
+      });
+      return true;
+    },
+
+    copyRetrievalDebugData: async () => {
+      const state = get();
+      const { context, spatialHits } = computeDebugContext(state);
+      const built = state.selectedAnchorIds.length
+        ? buildLlmPrompt({ userPrompt: state.prompt.trim(), ragContext: context })
+        : null;
+      const payload = {
+        userPrompt: state.prompt,
+        llmExecutionMode: state.llmExecutionMode,
+        candidates: state.candidates,
+        selectedAnchorIds: state.selectedAnchorIds,
+        radius: state.radius,
+        spatialHits,
+        contextStats: context.stats,
+        includedElements: context.allElements.map((e) => ({
+          element_id: e.element_id,
+          inclusion: e.inclusion,
+          similarity: e.similarity,
+          nearest_distance: e.nearest_distance,
+          sources: e.sources,
+        })),
+        finalLlmPromptLength: built?.finalLlmPrompt.length ?? 0,
+      };
+      const ok = await writeClipboard(JSON.stringify(payload, null, 2));
+      if (!ok) {
+        set({ error: 'Could not copy debug data.' });
+        return false;
+      }
+      set({ statusMessage: 'Retrieval debug data copied', error: null });
+      return true;
+    },
 
     retrieve: async () => {
       const prompt = get().prompt.trim();
@@ -203,6 +386,21 @@ export function createRagDebugStore() {
 
     sendWithContext: async () => {
       const state = get();
+
+      // Hard guard: Manual LLM Mode must never hit a paid provider.
+      if (isManualLlmMode(state.llmExecutionMode)) {
+        set({
+          error:
+            'Manual LLM Mode is on — use Copy LLM Prompt → ChatGPT → Paste LLM Response (no API call).',
+        });
+        return;
+      }
+
+      if (!isAutomaticLlmMode(state.llmExecutionMode)) {
+        set({ error: 'Unknown LLM execution mode.' });
+        return;
+      }
+
       const prompt = state.prompt.trim();
       if (!prompt) {
         set({ error: 'Enter a prompt.' });
@@ -218,7 +416,6 @@ export function createRagDebugStore() {
       set({ sending: true, error: null, statusMessage: null });
 
       try {
-        // Keep AI chrome in sync for loading UX.
         useAiStore.setState({
           status: 'loading',
           expanded: true,
@@ -228,23 +425,13 @@ export function createRagDebugStore() {
         });
 
         const result = await aiService.sendPrompt(prompt, undefined, {
-          systemInstruction: DEFAULT_RAG_SYSTEM_INSTRUCTION,
+          systemInstruction: RAG_SYSTEM_INSTRUCTIONS_API,
           canvasContext: context.serialized,
         });
 
-        const text = result.text.trim();
-        if (!text) {
+        const applied = handleLlmResponse(result.text);
+        if (!applied) {
           set({ sending: false, error: 'Empty AI response.' });
-          useAiStore.setState({
-            status: 'error',
-            errorMessage: 'AI request failed. Please try again.',
-          });
-          return;
-        }
-
-        const inserted = insertAiResponseOntoCanvas(text);
-        if (!inserted) {
-          set({ sending: false, error: 'Could not insert AI reply on canvas.' });
           useAiStore.setState({
             status: 'error',
             errorMessage: 'AI request failed. Please try again.',
@@ -261,7 +448,7 @@ export function createRagDebugStore() {
           errorMessage: null,
           prompt: '',
           statusMessage: 'Added to canvas (RAG context)',
-          lastInsertedId: inserted.element.id,
+          lastInsertedId: applied.element.id,
           expanded: true,
         });
       } catch (err) {
