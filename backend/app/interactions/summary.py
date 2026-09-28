@@ -21,11 +21,11 @@ def _preview_phrase(text: str | None, max_len: int = 48) -> str:
     return f"{first[: max_len - 1]}…"
 
 
-def _about_phrase(text: str | None) -> str:
+def _about_suffix(text: str | None) -> str:
     phrase = _preview_phrase(text)
-    if phrase == "a note":
-        return phrase
-    return f"about {phrase}"
+    if not phrase or phrase == "a note":
+        return ""
+    return f" about {phrase}"
 
 
 def _topic_from_prompt(user_prompt: str) -> str | None:
@@ -82,14 +82,12 @@ def summarize_operations(
 
         if op_type == "update_text":
             target = str(op.get("target_element_id", "unknown"))
-            topic = (
-                _topic_from_prompt(user_prompt)
-                or _preview_phrase(previews.get(target))
-                or _preview_phrase(op.get("text"))
-            )
-            return f"Updated textbox {target} {_about_phrase(topic)}.".replace(
-                " about about ", " about "
-            )
+            topic = _topic_from_prompt(user_prompt)
+            if not topic and target in previews and previews.get(target):
+                topic = _preview_phrase(previews.get(target))
+            if not topic:
+                topic = _preview_phrase(op.get("text"))
+            return f"Updated textbox {target}{_about_suffix(topic)}."
 
     parts: list[str] = []
     create_idx = 0

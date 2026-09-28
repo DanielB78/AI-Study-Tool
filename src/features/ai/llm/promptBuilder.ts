@@ -1,6 +1,6 @@
 /**
- * LlmPromptBuilder — builds the COMPLETE text that would be sent to an LLM.
- * Now includes the Canvas Editor Agent instructions + JSON output contract.
+ * LlmPromptBuilder — complete copyable prompt for Manual LLM Mode.
+ * Includes agent instructions + interaction memory + canvas context.
  */
 
 import type { RagContext, RagContextElement } from '../../rag/contextBuilder';
@@ -9,6 +9,11 @@ import {
   CANVAS_EDITOR_SYSTEM_PROMPT,
 } from '../agent/prompts/loadAgentPrompt';
 import { CANVAS_AGENT_OUTPUT_CONTRACT } from '../agent/operations';
+import type { InteractionView } from '../../interactions/interactionMemoryApi';
+import {
+  formatHistoricalInteractionsSection,
+  formatRecentInteractionsSection,
+} from '../../interactions/agentContextBuilder';
 
 export interface BuiltLlmPrompt {
   /** Original user request (never overwritten by system/context). */
@@ -16,6 +21,8 @@ export interface BuiltLlmPrompt {
   systemInstructions: string;
   /** Canvas context section body (without outer USER REQUEST). */
   ragContextSection: string;
+  recentInteractionsSection: string;
+  historicalInteractionsSection: string;
   /** Full deterministic prompt ready to paste into ChatGPT. */
   finalLlmPrompt: string;
 }
@@ -85,8 +92,9 @@ export function formatCanvasContextSection(context: RagContext): string {
   return [
     'CANVAS CONTEXT',
     '',
-    'The following elements were retrieved for relevance. IDs are stable.',
+    'Authoritative current board state. IDs are stable.',
     'POSITION values are canvas world coordinates.',
+    'Prefer this over historical interaction text when they disagree.',
     '',
     blocks.join(`\n\n${'-'.repeat(50)}\n\n`),
   ].join('\n');
@@ -95,6 +103,9 @@ export function formatCanvasContextSection(context: RagContext): string {
 export interface BuildLlmPromptInput {
   userPrompt: string;
   ragContext: RagContext;
+  recentInteractions?: InteractionView[];
+  historicalInteractions?: InteractionView[];
+  existingElementIds?: Iterable<string>;
   systemInstructions?: string;
   responseInstructions?: string;
 }
@@ -111,6 +122,14 @@ export function buildLlmPrompt(input: BuildLlmPromptInput): BuiltLlmPrompt {
   const responseInstructions = (
     input.responseInstructions ?? CANVAS_EDITOR_RESPONSE_INSTRUCTIONS
   ).trim();
+  const existing = new Set(input.existingElementIds ?? []);
+  const recent = input.recentInteractions ?? [];
+  const historical = input.historicalInteractions ?? [];
+  const recentInteractionsSection = formatRecentInteractionsSection(recent, existing);
+  const historicalInteractionsSection = formatHistoricalInteractionsSection(
+    historical,
+    existing,
+  );
   const ragContextSection = formatCanvasContextSection(input.ragContext);
 
   const finalLlmPrompt = [
@@ -123,6 +142,14 @@ export function buildLlmPrompt(input: BuildLlmPromptInput): BuiltLlmPrompt {
     'OUTPUT CONTRACT',
     '',
     CANVAS_AGENT_OUTPUT_CONTRACT,
+    '',
+    '='.repeat(50),
+    '',
+    recentInteractionsSection,
+    '',
+    '='.repeat(50),
+    '',
+    historicalInteractionsSection,
     '',
     '='.repeat(50),
     '',
@@ -146,6 +173,8 @@ export function buildLlmPrompt(input: BuildLlmPromptInput): BuiltLlmPrompt {
     userPrompt,
     systemInstructions,
     ragContextSection,
+    recentInteractionsSection,
+    historicalInteractionsSection,
     finalLlmPrompt,
   };
 }

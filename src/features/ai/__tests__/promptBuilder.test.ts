@@ -102,6 +102,17 @@ describe('buildLlmPrompt', () => {
     expect(i22).toBeGreaterThan(i18);
   });
 
+  it('includes RECENT INTERACTIONS section even when empty', () => {
+    expect(built.finalLlmPrompt).toContain('RECENT INTERACTIONS');
+    expect(built.recentInteractionsSection).toContain('RECENT INTERACTIONS');
+    expect(built.recentInteractionsSection).toContain('(none)');
+  });
+
+  it('includes RELEVANT HISTORICAL INTERACTIONS section even when empty', () => {
+    expect(built.finalLlmPrompt).toContain('RELEVANT HISTORICAL INTERACTIONS');
+    expect(built.historicalInteractionsSection).toContain('(none selected)');
+  });
+
   it('keeps userPrompt / system / context fields separate', () => {
     expect(built.userPrompt).not.toContain('SYSTEM INSTRUCTIONS');
     expect(built.ragContextSection).toContain('CANVAS CONTEXT');

@@ -15,6 +15,7 @@ import {
   type RelativePlacement,
   type UpdateTextOperation,
 } from './operations';
+import { describeOperationPlanLines } from './actionSummary';
 
 export type ParseErrorCode =
   | 'empty'
@@ -212,20 +213,7 @@ export function parseCanvasAgentResponse(
 
 /** Human-readable plan lines for the debug UI. */
 export function describeOperationPlan(ops: readonly CanvasOperation[]): string[] {
-  return ops.map((op, i) => {
-    const n = i + 1;
-    if (op.type === 'update_text') {
-      const preview = op.text.replace(/\s+/g, ' ').slice(0, 80);
-      return `${n}. UPDATE TEXT\n   Target: ${op.target_element_id}\n   Text: ${preview}${op.text.length > 80 ? '…' : ''}`;
-    }
-    const p = op.placement;
-    let placementLine = '';
-    if (p.mode === 'viewport_default') placementLine = 'viewport_default';
-    else if (p.mode === 'absolute') placementLine = `absolute (${p.x}, ${p.y})`;
-    else placementLine = `${p.relation} ${p.anchor_element_id}`;
-    const preview = op.text.replace(/\s+/g, ' ').slice(0, 80);
-    return `${n}. CREATE TEXT\n   Placement: ${placementLine}\n   Text: ${preview}${op.text.length > 80 ? '…' : ''}`;
-  });
+  return describeOperationPlanLines(ops);
 }
 
 export { CANVAS_AGENT_JSON_SCHEMA };

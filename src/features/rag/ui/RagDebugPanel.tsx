@@ -8,7 +8,11 @@ import {
   RAG_SPATIAL_RADIUS_MIN,
   RAG_SPATIAL_RADIUS_STEP,
 } from '../config';
-import { computeDebugContext, useRagDebugStore } from '../ragDebugStore';
+import {
+  computeDebugContext,
+  getInteractionContextFromState,
+  useRagDebugStore,
+} from '../ragDebugStore';
 
 function previewText(text: string, max = 80): string {
   const t = text.replace(/\s+/g, ' ').trim();
@@ -24,11 +28,15 @@ export function RagDebugPanel() {
   const open = useRagDebugStore((s) => s.open);
   const prompt = useRagDebugStore((s) => s.prompt);
   const retrieving = useRagDebugStore((s) => s.retrieving);
+  const retrievingInteractions = useRagDebugStore((s) => s.retrievingInteractions);
   const sending = useRagDebugStore((s) => s.sending);
   const error = useRagDebugStore((s) => s.error);
   const statusMessage = useRagDebugStore((s) => s.statusMessage);
   const candidates = useRagDebugStore((s) => s.candidates);
   const selectedAnchorIds = useRagDebugStore((s) => s.selectedAnchorIds);
+  const recentInteractions = useRagDebugStore((s) => s.recentInteractions);
+  const historicalCandidates = useRagDebugStore((s) => s.historicalCandidates);
+  const selectedHistoricalIds = useRagDebugStore((s) => s.selectedHistoricalIds);
   const radius = useRagDebugStore((s) => s.radius);
   const previewOpen = useRagDebugStore((s) => s.previewOpen);
   const llmPromptPreviewOpen = useRagDebugStore((s) => s.llmPromptPreviewOpen);
@@ -40,6 +48,9 @@ export function RagDebugPanel() {
   const llmExecutionMode = useRagDebugStore((s) => s.llmExecutionMode);
   const lastQueryChunks = useRagDebugStore((s) => s.lastQueryChunks);
   const lastRetrieveMeta = useRagDebugStore((s) => s.lastRetrieveMeta);
+  const lastInteractionRetrieveMeta = useRagDebugStore(
+    (s) => s.lastInteractionRetrieveMeta,
+  );
   const elements = useCanvasStore((s) => s.document.elements);
 
   const setPrompt = useRagDebugStore((s) => s.setPrompt);
@@ -47,7 +58,11 @@ export function RagDebugPanel() {
   const toggleAnchor = useRagDebugStore((s) => s.toggleAnchor);
   const selectTopN = useRagDebugStore((s) => s.selectTopN);
   const clearAnchors = useRagDebugStore((s) => s.clearAnchors);
+  const toggleHistorical = useRagDebugStore((s) => s.toggleHistorical);
+  const selectTopHistorical = useRagDebugStore((s) => s.selectTopHistorical);
+  const clearHistorical = useRagDebugStore((s) => s.clearHistorical);
   const retrieve = useRagDebugStore((s) => s.retrieve);
+  const retrieveInteractions = useRagDebugStore((s) => s.retrieveInteractions);
   const sendWithContext = useRagDebugStore((s) => s.sendWithContext);
   const setPreviewOpen = useRagDebugStore((s) => s.setPreviewOpen);
   const setLlmPromptPreviewOpen = useRagDebugStore((s) => s.setLlmPromptPreviewOpen);
@@ -77,13 +92,45 @@ export function RagDebugPanel() {
     [prompt, candidates, selectedAnchorIds, radius, elements],
   );
 
+  const { recentInteractions: recentCtx, historicalInteractions } = useMemo(
+    () =>
+      getInteractionContextFromState({
+        recentInteractions,
+        historicalCandidates,
+        selectedHistoricalIds,
+      }),
+    [recentInteractions, historicalCandidates, selectedHistoricalIds],
+  );
+
+  const existingElementIds = useMemo(
+    () => elements.map((e) => e.id),
+    [elements],
+  );
+
   const llmPrompt = useMemo(() => {
     if (!prompt.trim() || selectedAnchorIds.length === 0) return null;
-    return buildLlmPrompt({ userPrompt: prompt, ragContext: context });
-  }, [prompt, context, selectedAnchorIds.length]);
+    return buildLlmPrompt({
+      userPrompt: prompt,
+      ragContext: context,
+      recentInteractions: recentCtx,
+      historicalInteractions,
+      existingElementIds,
+    });
+  }, [
+    prompt,
+    context,
+    selectedAnchorIds.length,
+    recentCtx,
+    historicalInteractions,
+    existingElementIds,
+  ]);
 
   const selectedSet = useMemo(() => new Set(selectedAnchorIds), [selectedAnchorIds]);
-  const busy = retrieving || sending;
+  const selectedHistoricalSet = useMemo(
+    () => new Set(selectedHistoricalIds),
+    [selectedHistoricalIds],
+  );
+  const busy = retrieving || retrievingInteractions || sending;
   const manual = llmExecutionMode === 'manual';
   const canBuildPrompt = selectedAnchorIds.length > 0 && prompt.trim().length > 0;
   const canSendAutomatic = canBuildPrompt && !busy && !manual;
@@ -162,7 +209,7 @@ export function RagDebugPanel() {
               disabled={!prompt.trim() || busy}
               onClick={() => void retrieve()}
             >
-              {retrieving ? 'Retrieving…' : 'Retrieve'}
+              {retrieving || retrievingInteractions ? 'Retrieving…' : 'Retrieve'}
             </button>
             {lastRetrieveMeta && (
               <span className="rag-debug-meta">
@@ -170,6 +217,118 @@ export function RagDebugPanel() {
               </span>
             )}
           </div>
+
+          <section className="rag-debug-section rag-debug-interactions">
+            <div className="rag-debug-section-title">Interaction memory</div>
+            <div className="rag-debug-row">
+              <button
+                type="button"
+                className="rag-debug-btn"
+                disabled={!prompt.trim() || retrievingInteractions}
+                onClick={() => void retrieveInteractions()}
+              >
+                {retrievingInteractions ? 'Retrieving…' : 'Retrieve interactions'}
+              </button>
+              {lastInteractionRetrieveMeta && (
+                <span className="rag-debug-meta">
+                  recent {lastInteractionRetrieveMeta.recent_count} · top_k{' '}
+                  {lastInteractionRetrieveMeta.top_k}
+                </span>
+              )}
+            </div>
+
+            <div className="rag-debug-section-title">Automatic recent context</div>
+            {recentInteractions.length === 0 ? (
+              <p className="rag-debug-empty">No recent interactions yet.</p>
+            ) : (
+              <ul className="rag-debug-list compact">
+                {recentInteractions.map((i) => (
+                  <li key={i.id} className="rag-debug-item">
+                    <div className="rag-debug-row tight">
+                      <span className="rag-debug-id">{i.id}</span>
+                      <span className={`rag-debug-badge status-${i.status}`}>{i.status}</span>
+                    </div>
+                    <p className="rag-debug-preview">{previewText(i.user_prompt)}</p>
+                    <p className="rag-debug-meta">{previewText(i.action_summary, 100)}</p>
+                    <p className="rag-debug-meta">
+                      tx {i.transaction_id}
+                      {i.affected_element_ids.length
+                        ? ` · affected ${i.affected_element_ids.join(', ')}`
+                        : ''}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="rag-debug-section-title">Relevant older interactions</div>
+            <div className="rag-debug-shortcuts">
+              <button
+                type="button"
+                className="rag-debug-btn ghost"
+                disabled={!historicalCandidates.length}
+                onClick={() => selectTopHistorical(1)}
+              >
+                Top 1
+              </button>
+              <button
+                type="button"
+                className="rag-debug-btn ghost"
+                disabled={!historicalCandidates.length}
+                onClick={() => selectTopHistorical(3)}
+              >
+                Top 3
+              </button>
+              <button
+                type="button"
+                className="rag-debug-btn ghost"
+                disabled={!historicalCandidates.length}
+                onClick={() => selectTopHistorical(5)}
+              >
+                Top 5
+              </button>
+              <button
+                type="button"
+                className="rag-debug-btn ghost"
+                disabled={!selectedHistoricalIds.length}
+                onClick={clearHistorical}
+              >
+                Clear
+              </button>
+            </div>
+            {historicalCandidates.length === 0 ? (
+              <p className="rag-debug-empty">No historical matches yet.</p>
+            ) : (
+              <ul className="rag-debug-list">
+                {historicalCandidates.map((i) => {
+                  const checked = selectedHistoricalSet.has(i.id);
+                  return (
+                    <li
+                      key={i.id}
+                      className={`rag-debug-item${checked ? ' is-selected' : ''}`}
+                    >
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleHistorical(i.id)}
+                        />
+                        <span className="rag-debug-score">
+                          {i.similarity != null ? i.similarity.toFixed(3) : '—'}
+                        </span>
+                        <span className="rag-debug-id">{i.id}</span>
+                      </label>
+                      <p className="rag-debug-preview">{previewText(i.user_prompt)}</p>
+                      <p className="rag-debug-meta">{previewText(i.action_summary, 100)}</p>
+                      <p className="rag-debug-meta">
+                        tx {i.transaction_id} · {i.status}
+                      </p>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
 
           <section className="rag-debug-section">
             <div className="rag-debug-section-title">Semantic matches</div>
@@ -250,6 +409,15 @@ export function RagDebugPanel() {
 
           <section className="rag-debug-section rag-debug-counts">
             <div>
+              Recent interactions: <strong>{recentInteractions.length}</strong>
+            </div>
+            <div>
+              Historical matches: <strong>{historicalCandidates.length}</strong>
+              {selectedHistoricalIds.length > 0 && (
+                <> (selected {selectedHistoricalIds.length})</>
+              )}
+            </div>
+            <div>
               Semantic anchors: <strong>{context.stats.semantic_anchor_count}</strong>
             </div>
             <div>
@@ -273,7 +441,11 @@ export function RagDebugPanel() {
             <button
               type="button"
               className="rag-debug-btn"
-              disabled={context.stats.total_unique_elements === 0}
+              disabled={
+                context.stats.total_unique_elements === 0 &&
+                recentInteractions.length === 0 &&
+                historicalInteractions.length === 0
+              }
               onClick={() => setPreviewOpen(!previewOpen)}
             >
               {previewOpen ? 'Hide context' : 'Preview context'}
@@ -292,8 +464,9 @@ export function RagDebugPanel() {
             <button
               type="button"
               className="rag-debug-btn primary"
-              disabled={!canBuildPrompt}
+              disabled={!canBuildPrompt && !prompt.trim()}
               onClick={() => void copyLlmPrompt()}
+              title="Undo/redo intents apply immediately without anchors"
             >
               Copy LLM prompt
             </button>
@@ -318,9 +491,9 @@ export function RagDebugPanel() {
               <button
                 type="button"
                 className="rag-debug-btn"
-                disabled={!canSendAutomatic}
+                disabled={!canSendAutomatic && !prompt.trim()}
                 onClick={() => void sendWithContext()}
-                title="Calls the backend LLM API (uses credits)"
+                title="Calls the backend LLM API (uses credits). Undo intents skip the API."
               >
                 {sending ? 'Sending…' : 'Send with context (API)'}
               </button>
@@ -330,6 +503,41 @@ export function RagDebugPanel() {
           {previewOpen && (
             <section className="rag-debug-section">
               <div className="rag-debug-section-title">Context preview</div>
+
+              <div className="rag-debug-section-title">Recent interactions</div>
+              {recentCtx.length === 0 ? (
+                <p className="rag-debug-empty">(none)</p>
+              ) : (
+                <ul className="rag-debug-list compact">
+                  {recentCtx.map((i) => (
+                    <li key={i.id} className="rag-debug-item">
+                      <span className="rag-debug-id">{i.id}</span>
+                      <p className="rag-debug-preview">{previewText(i.action_summary, 100)}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <div className="rag-debug-section-title">Historical interactions</div>
+              {historicalInteractions.length === 0 ? (
+                <p className="rag-debug-empty">(none selected)</p>
+              ) : (
+                <ul className="rag-debug-list compact">
+                  {historicalInteractions.map((i) => (
+                    <li key={i.id} className="rag-debug-item">
+                      <div className="rag-debug-row tight">
+                        <span className="rag-debug-id">{i.id}</span>
+                        {i.similarity != null && (
+                          <span className="rag-debug-score">{i.similarity.toFixed(3)}</span>
+                        )}
+                      </div>
+                      <p className="rag-debug-preview">{previewText(i.action_summary, 100)}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <div className="rag-debug-section-title">Canvas elements</div>
               <ul className="rag-debug-list compact">
                 {context.allElements.map((el) => (
                   <li key={el.element_id} className="rag-debug-item">
@@ -364,7 +572,7 @@ export function RagDebugPanel() {
             <section className="rag-debug-section">
               <div className="rag-debug-section-title">LLM prompt preview</div>
               <p className="rag-debug-meta">
-                Exact text copied by “Copy LLM prompt” (regenerates when anchors/radius/prompt change).
+                Exact text copied by “Copy LLM prompt” (regenerates when anchors/radius/prompt/interactions change).
               </p>
               <textarea
                 id="rag-debug-llm-prompt"

@@ -20,7 +20,7 @@ export interface AgentExecutorTarget {
   getStyle: () => StyleDefaults;
   nextZIndex: () => number;
   getBoardId: () => string;
-  beginInteraction: () => void;
+  beginInteraction: () => string;
   endInteraction: () => void;
   addElement: (element: CanvasElement, select?: boolean) => void;
   updateElement: (id: string, updater: (el: CanvasElement) => CanvasElement) => void;
@@ -35,6 +35,7 @@ export interface ExecuteAgentOpsResult {
   createdIds: string[];
   updatedIds: string[];
   affectedIds: string[];
+  transactionId: string | null;
 }
 
 /**
@@ -46,7 +47,7 @@ export function executeCanvasOperations(
   target: AgentExecutorTarget,
 ): ExecuteAgentOpsResult {
   if (operations.length === 0) {
-    return { createdIds: [], updatedIds: [], affectedIds: [] };
+    return { createdIds: [], updatedIds: [], affectedIds: [], transactionId: null };
   }
 
   const style = target.getStyle();
@@ -57,7 +58,7 @@ export function executeCanvasOperations(
   const createdIds: string[] = [];
   const updatedIds: string[] = [];
 
-  target.beginInteraction();
+  const transactionId = target.beginInteraction();
   try {
     for (const op of operations) {
       if (op.type === 'create_text') {
@@ -132,5 +133,5 @@ export function executeCanvasOperations(
   }
   target.persist?.();
 
-  return { createdIds, updatedIds, affectedIds };
+  return { createdIds, updatedIds, affectedIds, transactionId };
 }

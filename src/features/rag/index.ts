@@ -15,6 +15,10 @@ export {
   serializeRagContext,
   DEFAULT_RAG_SYSTEM_INSTRUCTION,
 } from './contextBuilder';
-export { useRagDebugStore, computeDebugContext } from './ragDebugStore';
+export {
+  useRagDebugStore,
+  computeDebugContext,
+  getInteractionContextFromState,
+} from './ragDebugStore';
 export { RagDebugPanel } from './ui/RagDebugPanel';
 export { RagDebugOverlay } from './ui/RagDebugOverlay';

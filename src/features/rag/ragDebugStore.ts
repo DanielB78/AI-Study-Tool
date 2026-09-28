@@ -3,7 +3,10 @@
  */
 
 import { create } from 'zustand';
-import { useCanvasStore } from '../../store/canvasStore';
+import {
+  subscribeHistoryTransactions,
+  useCanvasStore,
+} from '../../store/canvasStore';
 import type { CanvasElement, TextElement } from '../../types/canvas';
 import {
   RAG_MAX_CONTEXT_CHARACTERS,
@@ -39,17 +42,39 @@ import {
   parseAgentResponsePlan,
 } from '../ai/llm/handleLlmResponse';
 import type { CanvasAgentResponse } from '../ai/agent/operations';
+import { summarizeAiActions } from '../ai/agent/actionSummary';
 import { CANVAS_EDITOR_SYSTEM_PROMPT } from '../ai/agent/prompts/loadAgentPrompt';
+import {
+  INTERACTION_RAG_TOP_K,
+  RECENT_INTERACTION_COUNT,
+} from '../interactions/config';
+import {
+  interactionMemoryApi,
+  type InteractionView,
+} from '../interactions/interactionMemoryApi';
+import { detectUndoIntent } from '../interactions/undoIntent';
+
+export interface InteractionRetrieveMeta {
+  embedding_model: string | null;
+  embedding_provider: string | null;
+  recent_count: number;
+  top_k: number;
+  min_similarity: number | null;
+}
 
 export interface RagDebugState {
   open: boolean;
   prompt: string;
   retrieving: boolean;
+  retrievingInteractions: boolean;
   sending: boolean;
   error: string | null;
   statusMessage: string | null;
   candidates: RetrievedCandidate[];
   selectedAnchorIds: string[];
+  recentInteractions: InteractionView[];
+  historicalCandidates: InteractionView[];
+  selectedHistoricalIds: string[];
   radius: number;
   previewOpen: boolean;
   llmPromptPreviewOpen: boolean;
@@ -68,6 +93,7 @@ export interface RagDebugState {
     embedding_provider: string;
     min_similarity: number | null;
   } | null;
+  lastInteractionRetrieveMeta: InteractionRetrieveMeta | null;
 
   openPanel: () => void;
   closePanel: () => void;
@@ -80,11 +106,16 @@ export interface RagDebugState {
   toggleAnchor: (elementId: string) => void;
   selectTopN: (n: number) => void;
   clearAnchors: () => void;
+  toggleHistorical: (id: string) => void;
+  selectTopHistorical: (n: number) => void;
+  clearHistorical: () => void;
   retrieve: () => Promise<void>;
+  retrieveInteractions: () => Promise<void>;
   /** Automatic mode only — never called when Manual LLM Mode is active. */
   sendWithContext: () => Promise<void>;
   buildCurrentLlmPrompt: () => BuiltLlmPrompt | null;
   copyLlmPrompt: () => Promise<boolean>;
+  handleDirectUndoIntent: () => Promise<boolean>;
   openResponseModal: () => void;
   closeResponseModal: () => void;
   setPastedResponse: (value: string) => void;
@@ -177,6 +208,34 @@ export function computeDebugContext(
   return { context, spatialHits };
 }
 
+/** Selected historical interactions in candidate order. */
+export function getInteractionContextFromState(state: {
+  recentInteractions: InteractionView[];
+  historicalCandidates: InteractionView[];
+  selectedHistoricalIds: string[];
+}): {
+  recentInteractions: InteractionView[];
+  historicalInteractions: InteractionView[];
+} {
+  const selected = new Set(state.selectedHistoricalIds);
+  const historicalInteractions = state.historicalCandidates.filter((i) =>
+    selected.has(i.id),
+  );
+  return {
+    recentInteractions: state.recentInteractions,
+    historicalInteractions,
+  };
+}
+
+function existingElementIdsFromCanvas(): string[] {
+  return useCanvasStore.getState().document.elements.map((e) => e.id);
+}
+
+function defaultSelectedHistoricalIds(historical: InteractionView[]): string[] {
+  // All returned when ≤3, otherwise top 3.
+  return historical.slice(0, Math.min(3, historical.length)).map((i) => i.id);
+}
+
 async function writeClipboard(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
@@ -199,16 +258,62 @@ async function writeClipboard(text: string): Promise<boolean> {
   }
 }
 
+function elementPreviewMaps(ids: string[]): {
+  stringPreviews: Record<string, string>;
+  summaryPreviews: Record<
+    string,
+    { id: string; text?: string; exists?: boolean }
+  >;
+} {
+  const elements = useCanvasStore.getState().document.elements;
+  const byId = new Map(elements.map((e) => [e.id, e]));
+  const stringPreviews: Record<string, string> = {};
+  const summaryPreviews: Record<
+    string,
+    { id: string; text?: string; exists?: boolean }
+  > = {};
+  for (const id of ids) {
+    const el = byId.get(id);
+    if (el?.type === 'text') {
+      stringPreviews[id] = el.text;
+      summaryPreviews[id] = { id, text: el.text, exists: true };
+    } else if (el) {
+      stringPreviews[id] = el.type === 'shape' ? el.label ?? '' : '';
+      summaryPreviews[id] = { id, text: stringPreviews[id], exists: true };
+    } else {
+      summaryPreviews[id] = { id, exists: false };
+    }
+  }
+  return { stringPreviews, summaryPreviews };
+}
+
+async function refreshRecentInteractions(): Promise<void> {
+  try {
+    const boardId = useCanvasStore.getState().document.id;
+    const recent = await interactionMemoryApi.listRecent(
+      boardId,
+      RECENT_INTERACTION_COUNT,
+    );
+    useRagDebugStore.setState({ recentInteractions: recent });
+  } catch (err) {
+    console.warn('[interaction-memory] refresh recent failed', err);
+  }
+}
+
 export function createRagDebugStore() {
   return create<RagDebugState>((set, get) => ({
     open: false,
     prompt: '',
     retrieving: false,
+    retrievingInteractions: false,
     sending: false,
     error: null,
     statusMessage: null,
     candidates: [],
     selectedAnchorIds: [],
+    recentInteractions: [],
+    historicalCandidates: [],
+    selectedHistoricalIds: [],
     radius: RAG_SPATIAL_RADIUS_DEFAULT,
     previewOpen: false,
     llmPromptPreviewOpen: false,
@@ -222,6 +327,7 @@ export function createRagDebugStore() {
     lastBuiltPrompt: null,
     lastQueryChunks: 0,
     lastRetrieveMeta: null,
+    lastInteractionRetrieveMeta: null,
 
     openPanel: () => set({ open: true }),
     closePanel: () =>
@@ -276,22 +382,62 @@ export function createRagDebugStore() {
 
     clearAnchors: () => set({ selectedAnchorIds: [] }),
 
+    toggleHistorical: (id) => {
+      set((s) => {
+        const has = s.selectedHistoricalIds.includes(id);
+        return {
+          selectedHistoricalIds: has
+            ? s.selectedHistoricalIds.filter((x) => x !== id)
+            : [...s.selectedHistoricalIds, id],
+        };
+      });
+    },
+
+    selectTopHistorical: (n) => {
+      const { historicalCandidates } = get();
+      const ids = historicalCandidates
+        .slice(0, Math.max(0, n))
+        .map((i) => i.id);
+      set({ selectedHistoricalIds: ids });
+    },
+
+    clearHistorical: () => set({ selectedHistoricalIds: [] }),
+
     clearError: () => set({ error: null }),
+
+    handleDirectUndoIntent: async () => {
+      const intent = detectUndoIntent(get().prompt);
+      if (!intent) return false;
+      if (intent === 'undo') {
+        useCanvasStore.getState().undo();
+        set({ statusMessage: 'Undid last change', error: null });
+      } else {
+        useCanvasStore.getState().redo();
+        set({ statusMessage: 'Redid last change', error: null });
+      }
+      return true;
+    },
 
     buildCurrentLlmPrompt: () => {
       const state = get();
       const prompt = state.prompt.trim();
       if (!prompt || state.selectedAnchorIds.length === 0) return null;
       const { context } = computeDebugContext(state);
+      const { recentInteractions, historicalInteractions } =
+        getInteractionContextFromState(state);
       const built = buildLlmPrompt({
         userPrompt: prompt,
         ragContext: context,
+        recentInteractions,
+        historicalInteractions,
+        existingElementIds: existingElementIdsFromCanvas(),
       });
       set({ lastBuiltPrompt: built });
       return built;
     },
 
     copyLlmPrompt: async () => {
+      if (await get().handleDirectUndoIntent()) return true;
       const built = get().buildCurrentLlmPrompt();
       if (!built) {
         set({
@@ -405,6 +551,7 @@ export function createRagDebugStore() {
 
       try {
         const result = applyAgentOperations(ops.operations);
+        const userPrompt = get().prompt.trim();
         set({
           responseModalOpen: false,
           pastedResponse: '',
@@ -419,9 +566,45 @@ export function createRagDebugStore() {
           errorMessage: null,
           statusMessage: 'AI plan applied to canvas',
           lastInsertedId: result.createdIds[0] ?? result.updatedIds[0] ?? null,
-          lastPrompt: get().prompt.trim() || useAiStore.getState().lastPrompt,
+          lastPrompt: userPrompt || useAiStore.getState().lastPrompt,
           expanded: true,
         });
+
+        if (result.transactionId) {
+          const { stringPreviews, summaryPreviews } = elementPreviewMaps(
+            result.affectedIds,
+          );
+          const action_summary = summarizeAiActions({
+            userPrompt,
+            operations: ops.operations,
+            elementPreviews: summaryPreviews,
+            createdIds: result.createdIds,
+          });
+          const boardId = useCanvasStore.getState().document.id;
+          void interactionMemoryApi
+            .record({
+              board_id: boardId,
+              user_prompt: userPrompt,
+              transaction_id: result.transactionId,
+              operations: [...ops.operations],
+              affected_element_ids: result.affectedIds,
+              created_element_ids: result.createdIds,
+              updated_element_ids: result.updatedIds,
+              element_previews: stringPreviews,
+              action_summary,
+            })
+            .then(() => {
+              void refreshRecentInteractions();
+            })
+            .catch((err) => {
+              console.warn('[interaction-memory] record failed', err);
+              set({
+                statusMessage:
+                  'Applied operations, but interaction memory record failed',
+              });
+            });
+        }
+
         return true;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to apply operations';
@@ -433,14 +616,26 @@ export function createRagDebugStore() {
     copyRetrievalDebugData: async () => {
       const state = get();
       const { context, spatialHits } = computeDebugContext(state);
+      const { recentInteractions, historicalInteractions } =
+        getInteractionContextFromState(state);
       const built = state.selectedAnchorIds.length
-        ? buildLlmPrompt({ userPrompt: state.prompt.trim(), ragContext: context })
+        ? buildLlmPrompt({
+            userPrompt: state.prompt.trim(),
+            ragContext: context,
+            recentInteractions,
+            historicalInteractions,
+            existingElementIds: existingElementIdsFromCanvas(),
+          })
         : null;
       const payload = {
         userPrompt: state.prompt,
         llmExecutionMode: state.llmExecutionMode,
         candidates: state.candidates,
         selectedAnchorIds: state.selectedAnchorIds,
+        recentInteractions,
+        historicalCandidates: state.historicalCandidates,
+        selectedHistoricalIds: state.selectedHistoricalIds,
+        historicalInteractions,
         radius: state.radius,
         spatialHits,
         contextStats: context.stats,
@@ -452,6 +647,7 @@ export function createRagDebugStore() {
           sources: e.sources,
         })),
         finalLlmPromptLength: built?.finalLlmPrompt.length ?? 0,
+        interactionRetrieveMeta: state.lastInteractionRetrieveMeta,
       };
       const ok = await writeClipboard(JSON.stringify(payload, null, 2));
       if (!ok) {
@@ -460,6 +656,47 @@ export function createRagDebugStore() {
       }
       set({ statusMessage: 'Retrieval debug data copied', error: null });
       return true;
+    },
+
+    retrieveInteractions: async () => {
+      const prompt = get().prompt.trim();
+      if (!prompt) {
+        set({
+          statusMessage: 'Enter a prompt to retrieve interactions.',
+        });
+        return;
+      }
+      if (get().retrievingInteractions) return;
+
+      set({ retrievingInteractions: true });
+      try {
+        const boardId = useCanvasStore.getState().document.id;
+        const result = await interactionMemoryApi.retrieve(boardId, {
+          prompt,
+          recent_count: RECENT_INTERACTION_COUNT,
+          top_k: INTERACTION_RAG_TOP_K,
+        });
+        set({
+          recentInteractions: result.recent,
+          historicalCandidates: result.historical,
+          selectedHistoricalIds: defaultSelectedHistoricalIds(result.historical),
+          lastInteractionRetrieveMeta: {
+            embedding_model: result.embedding_model,
+            embedding_provider: result.embedding_provider,
+            recent_count: result.recent_count,
+            top_k: result.top_k,
+            min_similarity: result.min_similarity,
+          },
+          retrievingInteractions: false,
+        });
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'Interaction retrieve failed';
+        set({
+          retrievingInteractions: false,
+          statusMessage: `Interaction memory: ${message}`,
+        });
+      }
     },
 
     retrieve: async () => {
@@ -471,6 +708,10 @@ export function createRagDebugStore() {
       if (get().retrieving) return;
 
       set({ retrieving: true, error: null, statusMessage: null });
+
+      // Fetch interactions in parallel; soft-fail independently.
+      void get().retrieveInteractions();
+
       try {
         const boardId = useCanvasStore.getState().document.id;
         const result = await ragRetrievalService.retrieve({
@@ -497,6 +738,8 @@ export function createRagDebugStore() {
 
     sendWithContext: async () => {
       const state = get();
+
+      if (await get().handleDirectUndoIntent()) return;
 
       // Hard guard: Manual LLM Mode must never hit a paid provider.
       if (isManualLlmMode(state.llmExecutionMode)) {
@@ -589,6 +832,13 @@ export function createRagDebugStore() {
 }
 
 export const useRagDebugStore = createRagDebugStore();
+
+// Keep interaction memory transaction status in sync with editor undo/redo.
+subscribeHistoryTransactions((event, txId) => {
+  const boardId = useCanvasStore.getState().document.id;
+  const status = event === 'undo' ? 'undone' : 'redone';
+  void interactionMemoryApi.setTransactionStatus(boardId, txId, status).catch(() => {});
+});
 
 /** Ids for canvas overlay — anchors take visual precedence. */
 export function getDebugHighlightIds(state: {
