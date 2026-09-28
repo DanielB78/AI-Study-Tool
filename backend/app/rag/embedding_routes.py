@@ -131,8 +131,8 @@ async def embedding_smoke(body: EmbeddingSmokeRequest | None = None) -> Embeddin
         )
 
     settings = get_settings()
-    # Fresh build so status tests don't share a failed cache entry unexpectedly.
-    service = build_embedding_service(settings)
+    # Use the process-wide cached provider so the model stays loaded for RAG.
+    service = get_embedding_service()
 
     query_vec = await service.embed_query(payload.prompt)
     doc_vecs = await service.embed_documents([d.text for d in payload.documents])
