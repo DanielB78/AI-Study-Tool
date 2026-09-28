@@ -87,7 +87,7 @@ class RagIndexingService:
             if embedder is not None and _chunks_need_reembed(
                 existing, model=embedder.model, content_hash_value=digest
             ):
-                vectors = await embedder.embed_texts([row.text for row in existing])
+                vectors = await embedder.embed_documents([row.text for row in existing])
                 self.repo.update_embeddings_for_rows(
                     existing,
                     vectors,
@@ -114,7 +114,7 @@ class RagIndexingService:
         model = None
         provider = None
         if embedder is not None:
-            vectors = await embedder.embed_texts([c.text for c in chunks])
+            vectors = await embedder.embed_documents([c.text for c in chunks])
             model = embedder.model
             provider = embedder.provider
 
@@ -196,7 +196,7 @@ class RagIndexingService:
                 model = None
                 provider = None
                 if embedder is not None:
-                    vectors = await embedder.embed_texts([c.text for c in chunks])
+                    vectors = await embedder.embed_documents([c.text for c in chunks])
                     model = embedder.model
                     provider = embedder.provider
                     embedded += len(vectors)
@@ -246,7 +246,7 @@ class RagIndexingService:
                 embedding_model=embedder.model,
             )
         try:
-            vectors = await embedder.embed_texts([row.text for row in rows])
+            vectors = await embedder.embed_documents([row.text for row in rows])
             # Group by element for content_hash from each row.
             for row, vector in zip(rows, vectors, strict=True):
                 self.repo.update_embeddings_for_rows(
@@ -288,7 +288,7 @@ class RagIndexingService:
                 embedding_model=embedder.model,
             )
         try:
-            vectors = await embedder.embed_texts([row.text for row in rows])
+            vectors = await embedder.embed_documents([row.text for row in rows])
             self.repo.update_embeddings_for_rows(
                 rows,
                 vectors,

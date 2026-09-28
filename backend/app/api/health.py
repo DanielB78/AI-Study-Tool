@@ -17,4 +17,8 @@ async def health() -> dict[str, object]:
         "embedding_configured": settings.has_embedding_config,
         "embedding_provider": settings.embedding_provider or None,
         "embedding_model": settings.embedding_model or None,
+        "embedding_dimension": settings.embedding_dimension,
+        "embedding_similarity": settings.effective_similarity_metric,
+        "hf_token_configured": settings.has_hf_token,
+        "rag_min_similarity": settings.rag_min_similarity,
     }

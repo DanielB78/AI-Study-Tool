@@ -4,8 +4,9 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Float, Index, Integer, String, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
+from pgvector.sqlalchemy import Vector
 
 from .base import Base
 
@@ -13,9 +14,8 @@ from .base import Base
 class RagChunk(Base):
     """Indexed text chunk derived from a canvas TextElement.
 
-    Embeddings are stored as float arrays so the dimension is not baked into
-    the schema before EMBEDDING_MODEL is chosen. pgvector is enabled for a
-    later migration to vector(N) + ANN indexes once the model/dimension are fixed.
+    Embeddings use pgvector ``vector(768)`` for EmbeddingGemma
+    (google/embeddinggemma-300m). Dimension is fixed by migration 0003.
     """
 
     __tablename__ = "rag_chunks"
@@ -54,7 +54,7 @@ class RagChunk(Base):
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
 
     # Embedding fields (nullable until embedded with the active model).
-    embedding: Mapped[list[float] | None] = mapped_column(ARRAY(Float), nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
     embedding_model: Mapped[str | None] = mapped_column(String(256), nullable=True)
     embedding_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
     embedding_content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)

@@ -148,3 +148,12 @@ class RagChunkRepository:
             row.embedding_content_hash = content_hash
             row.embedding_updated_at = now
         return len(list(rows))
+
+
+def embedding_as_list(value) -> list[float] | None:
+    """Normalize pgvector Vector / list / ndarray into a plain list of floats."""
+    if value is None:
+        return None
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    return [float(x) for x in value]

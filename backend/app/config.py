@@ -30,10 +30,24 @@ class Settings(BaseSettings):
     rag_chunk_overlap_words: int = 15
 
     # Embedding configuration — intentionally NO default model.
+    # Recommended local setup:
+    #   EMBEDDING_PROVIDER=sentence_transformers
+    #   EMBEDDING_MODEL=google/embeddinggemma-300m
+    #   EMBEDDING_DIMENSION=768
+    #   EMBEDDING_SIMILARITY=cosine
     embedding_provider: str = ""
     embedding_model: str = ""
-    # Optional: only needed if converting ARRAY → pgvector(N) later.
     embedding_dimension: int | None = None
+    # Similarity metric for embeddings (kept in sync with RAG scoring).
+    embedding_similarity: str = "cosine"
+    # SentenceTransformers batch size for document encoding.
+    embedding_batch_size: int = 32
+    # Optional device override: "cpu", "cuda", "mps". Empty = auto.
+    embedding_device: str = ""
+
+    # Hugging Face auth for gated models (EmbeddingGemma). Never commit secrets.
+    hf_token: str = ""
+    huggingface_hub_token: str = ""
 
     # Retrieval (semantic-only). min_similarity has NO default — leave unset.
     rag_chunk_top_k: int = 20
@@ -64,6 +78,23 @@ class Settings(BaseSettings):
     @property
     def has_embedding_config(self) -> bool:
         return bool(self.embedding_provider.strip() and self.embedding_model.strip())
+
+    @property
+    def resolved_hf_token(self) -> str:
+        """HF token from HF_TOKEN or HUGGINGFACE_HUB_TOKEN (never log this)."""
+        return (self.hf_token or self.huggingface_hub_token or "").strip()
+
+    @property
+    def has_hf_token(self) -> bool:
+        return bool(self.resolved_hf_token)
+
+    @property
+    def effective_similarity_metric(self) -> str:
+        """Prefer EMBEDDING_SIMILARITY when set; fall back to RAG_SIMILARITY_METRIC."""
+        emb = (self.embedding_similarity or "").strip().lower()
+        if emb:
+            return emb
+        return (self.rag_similarity_metric or "cosine").strip().lower() or "cosine"
 
 
 @lru_cache

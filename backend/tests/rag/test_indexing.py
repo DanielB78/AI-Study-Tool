@@ -9,10 +9,14 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 # Ensure DB URL before app imports settings cache in some paths.
+# Keep embeddings UNCONFIGURED for indexing HTTP tests (geometry/chunking only).
 os.environ.setdefault(
     "DATABASE_URL",
     "postgresql+psycopg://studyboard:studyboard@127.0.0.1:5432/studyboard",
 )
+os.environ["EMBEDDING_PROVIDER"] = ""
+os.environ["EMBEDDING_MODEL"] = ""
+os.environ["HF_TOKEN"] = ""
 
 from app.config import get_settings
 from app.db.base import Base
@@ -24,12 +28,20 @@ from app.rag.service import RagIndexingService
 
 
 @pytest.fixture()
-def db_session() -> Session:
+def db_session(monkeypatch: pytest.MonkeyPatch) -> Session:
+    # Indexing tests assert chunking/geometry — do not activate any embedder.
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "")
+    monkeypatch.setenv("EMBEDDING_MODEL", "")
+    monkeypatch.setenv("HF_TOKEN", "")
+    monkeypatch.delenv("EMBEDDING_DIMENSION", raising=False)
     get_settings.cache_clear()
     reset_db_caches()
     settings = get_settings()
     assert settings.has_database_url
+    assert not settings.has_embedding_config
     engine = create_engine(settings.database_url, future=True)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
     session = factory()
@@ -49,7 +61,10 @@ def board_id() -> str:
 
 
 @pytest.fixture()
-def client(db_session: Session) -> TestClient:
+def client(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "")
+    monkeypatch.setenv("EMBEDDING_MODEL", "")
+    get_settings.cache_clear()
     app = create_app()
 
     def override() -> Session:

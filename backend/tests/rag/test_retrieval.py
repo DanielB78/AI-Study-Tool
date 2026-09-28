@@ -5,13 +5,18 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 os.environ.setdefault(
     "DATABASE_URL",
     "postgresql+psycopg://studyboard:studyboard@127.0.0.1:5432/studyboard",
 )
+# Avoid loading EmbeddingGemma from backend/.env during unit tests.
+os.environ["EMBEDDING_PROVIDER"] = "deterministic"
+os.environ["EMBEDDING_MODEL"] = "deterministic-hash-v1"
+os.environ["EMBEDDING_DIMENSION"] = "64"
+os.environ["HF_TOKEN"] = ""
 
 from app.config import Settings, get_settings
 from app.db.base import Base
@@ -31,6 +36,8 @@ def db_session() -> Session:
     reset_db_caches()
     settings = get_settings()
     engine = create_engine(settings.database_url, future=True)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
     session = factory()
@@ -241,3 +248,38 @@ async def test_geometry_only_does_not_clear_embeddings(
     chunks = indexer.list_board_chunks(board_id)
     assert chunks[0].has_embedding is True
     assert chunks[0].x == 50.0
+
+
+@pytest.mark.asyncio
+async def test_rebuild_fills_null_embeddings(
+    db_session: Session,
+    board_id: str,
+    fake_embedder: FakeSemanticEmbeddingService,
+) -> None:
+    """Chunks with NULL embedding are backfilled by embeddings/rebuild."""
+    bare_settings = Settings(
+        database_url=os.environ["DATABASE_URL"],
+        embedding_provider="",
+        embedding_model="",
+        embedding_dimension=None,
+    )
+    # Index without embedder → NULL embeddings.
+    bare = RagIndexingService(db_session, settings=bare_settings, embedding=None)
+    await bare.index_text_element(_el(board_id, "null1", "Gauss electric flux enclosed charge"))
+    chunks = bare.list_board_chunks(board_id)
+    assert chunks and chunks[0].has_embedding is False
+
+    # Rebuild with an embedder (model id stamped as active EmbeddingGemma name).
+    fake_embedder._model = "google/embeddinggemma-300m"
+    settings = Settings(
+        database_url=os.environ["DATABASE_URL"],
+        embedding_provider="fake",
+        embedding_model="google/embeddinggemma-300m",
+    )
+    indexer = RagIndexingService(db_session, settings=settings, embedding=fake_embedder)
+    result = await indexer.rebuild_embeddings_for_board(board_id)
+    assert result.embeddings_written >= 1
+    assert result.embedding_model == "google/embeddinggemma-300m"
+    after = indexer.list_board_chunks(board_id)
+    assert all(c.has_embedding for c in after)
+    assert all(c.embedding_model == "google/embeddinggemma-300m" for c in after)
