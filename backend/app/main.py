@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .api import chat, health
 from .config import get_settings
 from .errors import AiServiceError, ai_service_error_handler
+from .interactions import routes as interaction_routes
 from .rag import routes as rag_routes
 from .rag import embedding_routes
 
@@ -12,8 +13,8 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
         title="AI Study Tool Backend",
-        version="0.3.0",
-        description="LLM proxy + RAG indexing + EmbeddingGemma semantic retrieval.",
+        version="0.4.0",
+        description="LLM proxy + RAG indexing + EmbeddingGemma semantic retrieval + AI interaction memory.",
     )
 
     app.add_middleware(
@@ -29,6 +30,7 @@ def create_app() -> FastAPI:
     app.include_router(chat.router)
     app.include_router(rag_routes.router)
     app.include_router(embedding_routes.router)
+    app.include_router(interaction_routes.router)
     return app
 
 
