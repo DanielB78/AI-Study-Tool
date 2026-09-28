@@ -6,7 +6,7 @@ import {
   type AiStatus,
 } from '../models/types';
 import { insertAiResponseOntoCanvas } from '../canvas/liveInsert';
-import { handleLlmResponse } from '../llm/handleLlmResponse';
+import { handlePlainTextLlmResponse } from '../llm/legacyPlainText';
 import {
   getLlmExecutionMode,
   isManualLlmMode,
@@ -125,7 +125,7 @@ function createAiStore(
         const result = await service.sendPrompt(trimmed, signal);
         if (signal.aborted) return;
 
-        const applied = handleLlmResponse(result.text, insertFn);
+        const applied = handlePlainTextLlmResponse(result.text, insertFn);
         if (!applied) {
           set({
             status: 'error',

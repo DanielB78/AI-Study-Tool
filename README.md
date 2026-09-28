@@ -25,22 +25,32 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 npm install && npm run dev
 ```
 
-## Semantic retrieval + Manual LLM Mode
+## Semantic retrieval + Canvas Agent (structured ops)
 
 ```
 prompt → embed → cosine → ranked TextElements
       → pick semantic anchors → spatial radius → context budget
-      → LlmPromptBuilder → Copy LLM Prompt
-      → (you) paste into ChatGPT → Paste LLM Response → Apply
-      → same handleLlmResponse → canvas TextElement
+      → Canvas Editor Agent prompt + JSON schema → Copy LLM Prompt
+      → (you) paste into ChatGPT → Paste LLM Response
+      → Preview AI plan → Apply
+      → validate operations → editor commands (one undo transaction)
 ```
 
 **Default: Manual LLM Mode** (`VITE_LLM_EXECUTION_MODE=manual`) — **zero paid LLM API calls**.
 
-- Semantic ranking and spatial expansion are **separate stages**
-- Radius uses **world-space** AABB edge distance
+The LLM is a **planner**. It returns JSON operations only:
+
+- `create_text` — new TextElement (`viewport_default` | `relative_to_element` | `absolute`)
+- `update_text` — full-text replace of an existing TextElement by ID from context
+
+The app owns IDs, coordinates, collision avoidance, history, and RAG reindex.
+
+- Semantic ranking and spatial expansion are **separate** from edit-target choice
+- Relative placement uses **world-space** coordinates
 - Leave `EMBEDDING_MODEL` blank until you choose a model; use `deterministic` only for pipeline smoke tests
 - Leave `RAG_MIN_SIMILARITY` unset
+
+Agent docs: `src/features/ai/agent/prompts/canvas_editor_system.md` (mirrored under `backend/app/agent/prompts/`).
 
 ### RAG Debug panel (dev)
 
@@ -48,11 +58,11 @@ prompt → embed → cosine → ranked TextElements
 2. Confirm **Manual** under LLM execution
 3. Prompt → **Retrieve** → select anchors (Top 1/3/5)
 4. Adjust spatial radius
-5. **Preview context** (retrieval) and/or **Preview LLM prompt** (full ChatGPT paste)
-6. **Copy LLM prompt** → paste into ChatGPT
-7. **Paste LLM response** → Apply → TextElement on canvas (undoable)
+5. **Preview context** / **Preview LLM prompt**
+6. **Copy LLM prompt** → paste into ChatGPT (expect JSON `operations` only)
+7. **Paste LLM response** → **Preview AI plan** → **Apply** (atomic undo)
 
-Automatic mode (`VITE_LLM_EXECUTION_MODE=automatic` or panel toggle) restores **Send with context (API)**.
+Automatic mode (`VITE_LLM_EXECUTION_MODE=automatic` or panel toggle) restores **Send with context (API)** and still expects structured JSON.
 
 ```js
 window.__RAG_DEBUG__.openPanel()

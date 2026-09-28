@@ -1052,3 +1052,15 @@ textarea {
   margin: 0;
   font-size: 1rem;
 }
+
+.rag-debug-plan {
+  margin: 0;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font: 0.75rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow: auto;
+}

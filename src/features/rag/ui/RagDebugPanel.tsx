@@ -34,6 +34,9 @@ export function RagDebugPanel() {
   const llmPromptPreviewOpen = useRagDebugStore((s) => s.llmPromptPreviewOpen);
   const responseModalOpen = useRagDebugStore((s) => s.responseModalOpen);
   const pastedResponse = useRagDebugStore((s) => s.pastedResponse);
+  const pendingPlan = useRagDebugStore((s) => s.pendingPlan);
+  const pendingOperations = useRagDebugStore((s) => s.pendingOperations);
+  const parseError = useRagDebugStore((s) => s.parseError);
   const llmExecutionMode = useRagDebugStore((s) => s.llmExecutionMode);
   const lastQueryChunks = useRagDebugStore((s) => s.lastQueryChunks);
   const lastRetrieveMeta = useRagDebugStore((s) => s.lastRetrieveMeta);
@@ -53,6 +56,7 @@ export function RagDebugPanel() {
   const openResponseModal = useRagDebugStore((s) => s.openResponseModal);
   const closeResponseModal = useRagDebugStore((s) => s.closeResponseModal);
   const setPastedResponse = useRagDebugStore((s) => s.setPastedResponse);
+  const previewPastedPlan = useRagDebugStore((s) => s.previewPastedPlan);
   const pasteResponseFromClipboard = useRagDebugStore((s) => s.pasteResponseFromClipboard);
   const applyPastedResponse = useRagDebugStore((s) => s.applyPastedResponse);
   const copyRetrievalDebugData = useRagDebugStore((s) => s.copyRetrievalDebugData);
@@ -398,13 +402,13 @@ export function RagDebugPanel() {
           >
             <h2 id="rag-paste-title">Paste LLM response</h2>
             <p className="rag-debug-meta">
-              Paste the ChatGPT answer below. Canvas is unchanged until you Apply.
+              Paste structured JSON operations from ChatGPT. Canvas is unchanged until Apply.
             </p>
             <textarea
-              className="rag-debug-textarea"
-              rows={12}
+              className="rag-debug-textarea mono"
+              rows={10}
               value={pastedResponse}
-              placeholder="Paste the model response here…"
+              placeholder='{"operations":[...]}'
               onChange={(e) => setPastedResponse(e.target.value)}
               autoFocus
             />
@@ -416,6 +420,34 @@ export function RagDebugPanel() {
               >
                 Paste from clipboard
               </button>
+              <button
+                type="button"
+                className="rag-debug-btn"
+                disabled={!pastedResponse.trim()}
+                onClick={() => previewPastedPlan()}
+              >
+                Preview AI plan
+              </button>
+            </div>
+
+            {parseError && <p className="rag-debug-error">{parseError}</p>}
+
+            {pendingPlan && pendingPlan.length > 0 && (
+              <section className="rag-debug-section">
+                <div className="rag-debug-section-title">AI plan</div>
+                <pre className="rag-debug-plan">{pendingPlan.join('\n\n')}</pre>
+                {pendingOperations && (
+                  <>
+                    <div className="rag-debug-section-title">Raw JSON</div>
+                    <pre className="rag-debug-plan">
+                      {JSON.stringify(pendingOperations, null, 2)}
+                    </pre>
+                  </>
+                )}
+              </section>
+            )}
+
+            <div className="rag-debug-row">
               <button type="button" className="rag-debug-btn" onClick={closeResponseModal}>
                 Cancel
               </button>
@@ -425,7 +457,7 @@ export function RagDebugPanel() {
                 disabled={!pastedResponse.trim()}
                 onClick={() => applyPastedResponse()}
               >
-                Apply response
+                Apply
               </button>
             </div>
           </div>

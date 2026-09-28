@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { buildRagContext, type SemanticAnchorInput } from '../../rag/contextBuilder';
 import type { SpatialHit } from '../../rag/spatialContext';
 import { buildLlmPrompt } from '../llm/promptBuilder';
-import { RAG_SYSTEM_INSTRUCTIONS, RAG_RESPONSE_INSTRUCTIONS } from '../prompts/instructions';
+import {
+  CANVAS_EDITOR_RESPONSE_INSTRUCTIONS,
+  CANVAS_EDITOR_SYSTEM_PROMPT,
+} from '../agent/prompts/loadAgentPrompt';
+import { CANVAS_AGENT_OUTPUT_CONTRACT } from '../agent/operations';
 
 const anchorA: SemanticAnchorInput = {
   element_id: 'textbox_18',
@@ -26,20 +30,27 @@ const hitB: SpatialHit = {
 
 describe('buildLlmPrompt', () => {
   const context = buildRagContext({
-    query: 'Explain why Gauss\'s law is useful for spherical symmetry.',
+    query: "Explain why Gauss's law is useful for spherical symmetry.",
     semanticAnchors: [anchorA],
     spatialHits: [hitB],
   });
 
   const built = buildLlmPrompt({
-    userPrompt: 'Explain why Gauss\'s law is useful for spherical symmetry.',
+    userPrompt: "Explain why Gauss's law is useful for spherical symmetry.",
     ragContext: context,
   });
 
-  it('includes system instructions', () => {
+  it('includes Canvas Editor Agent system instructions', () => {
     expect(built.finalLlmPrompt).toContain('SYSTEM INSTRUCTIONS');
-    expect(built.finalLlmPrompt).toContain('infinite study canvas');
-    expect(built.systemInstructions).toBe(RAG_SYSTEM_INSTRUCTIONS);
+    expect(built.finalLlmPrompt).toContain('editing planner for an infinite study canvas');
+    expect(built.systemInstructions).toBe(CANVAS_EDITOR_SYSTEM_PROMPT.trim());
+  });
+
+  it('includes OUTPUT CONTRACT for structured operations', () => {
+    expect(built.finalLlmPrompt).toContain('OUTPUT CONTRACT');
+    expect(built.finalLlmPrompt).toContain(CANVAS_AGENT_OUTPUT_CONTRACT.slice(0, 40));
+    expect(built.finalLlmPrompt).toContain('create_text');
+    expect(built.finalLlmPrompt).toContain('update_text');
   });
 
   it('includes canvas context with full textbox text (not only chunk)', () => {
@@ -58,21 +69,22 @@ describe('buildLlmPrompt', () => {
 
   it('includes semantic provenance', () => {
     expect(built.finalLlmPrompt).toContain('ID: textbox_18');
-    expect(built.finalLlmPrompt).toContain('SEMANTIC SIMILARITY:');
+    expect(built.finalLlmPrompt).toContain('SIMILARITY:');
     expect(built.finalLlmPrompt).toContain('0.8600');
   });
 
   it('includes spatial provenance', () => {
     expect(built.finalLlmPrompt).toContain('ID: textbox_22');
     expect(built.finalLlmPrompt).toContain('SPATIAL ANCHOR:');
-    expect(built.finalLlmPrompt).toContain('textbox_18');
     expect(built.finalLlmPrompt).toContain('DISTANCE:');
     expect(built.finalLlmPrompt).toContain('143.2');
   });
 
-  it('includes response instructions', () => {
+  it('includes response instructions for JSON-only output', () => {
     expect(built.finalLlmPrompt).toContain('RESPONSE INSTRUCTIONS');
-    expect(built.finalLlmPrompt).toContain(RAG_RESPONSE_INSTRUCTIONS.split('\n')[0]!);
+    expect(built.finalLlmPrompt).toContain(
+      CANVAS_EDITOR_RESPONSE_INSTRUCTIONS.split('\n')[0]!,
+    );
   });
 
   it('is deterministic', () => {
@@ -94,5 +106,7 @@ describe('buildLlmPrompt', () => {
     expect(built.userPrompt).not.toContain('SYSTEM INSTRUCTIONS');
     expect(built.ragContextSection).toContain('CANVAS CONTEXT');
     expect(built.ragContextSection).not.toContain('USER REQUEST');
+    // Canvas content must not be folded into trusted system instructions.
+    expect(built.systemInstructions).not.toContain('FULL TEXT.');
   });
 });

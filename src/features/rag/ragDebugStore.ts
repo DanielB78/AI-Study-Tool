@@ -26,14 +26,20 @@ import { useAiStore } from '../ai/state/aiStore';
 import {
   DEFAULT_LLM_EXECUTION_MODE,
   buildLlmPrompt,
-  handleLlmResponse,
   isAutomaticLlmMode,
   isManualLlmMode,
   setLlmExecutionModeOverride,
   type BuiltLlmPrompt,
   type LlmExecutionMode,
 } from '../ai/llm';
-import { RAG_SYSTEM_INSTRUCTIONS_API } from '../ai/prompts/instructions';
+import {
+  applyAgentOperations,
+  handleAgentResponse,
+  CanvasAgentParseError,
+  parseAgentResponsePlan,
+} from '../ai/llm/handleLlmResponse';
+import type { CanvasAgentResponse } from '../ai/agent/operations';
+import { CANVAS_EDITOR_SYSTEM_PROMPT } from '../ai/agent/prompts/loadAgentPrompt';
 
 export interface RagDebugState {
   open: boolean;
@@ -49,6 +55,10 @@ export interface RagDebugState {
   llmPromptPreviewOpen: boolean;
   responseModalOpen: boolean;
   pastedResponse: string;
+  /** Parsed plan ready for Apply (null until valid JSON is previewed). */
+  pendingPlan: string[] | null;
+  pendingOperations: CanvasAgentResponse | null;
+  parseError: string | null;
   llmExecutionMode: LlmExecutionMode;
   lastCopiedPrompt: string | null;
   lastBuiltPrompt: BuiltLlmPrompt | null;
@@ -78,10 +88,29 @@ export interface RagDebugState {
   openResponseModal: () => void;
   closeResponseModal: () => void;
   setPastedResponse: (value: string) => void;
+  previewPastedPlan: () => boolean;
   pasteResponseFromClipboard: () => Promise<boolean>;
   applyPastedResponse: () => boolean;
   copyRetrievalDebugData: () => Promise<boolean>;
   clearError: () => void;
+}
+
+function buildParseContextFromState(state: {
+  prompt: string;
+  candidates: RetrievedCandidate[];
+  selectedAnchorIds: string[];
+  radius: number;
+}) {
+  const { context } = computeDebugContext(state);
+  const allowedElementIds = new Set(context.allElements.map((e) => e.element_id));
+  // Also allow any live text element that appears in context geometry resolution.
+  const elementTypes = new Map<string, string>();
+  for (const el of useCanvasStore.getState().document.elements) {
+    if (allowedElementIds.has(el.id)) {
+      elementTypes.set(el.id, el.type);
+    }
+  }
+  return { allowedElementIds, elementTypes, context };
 }
 
 /** Derive current context from store slices + live canvas (pure enough for UI). */
@@ -185,6 +214,9 @@ export function createRagDebugStore() {
     llmPromptPreviewOpen: false,
     responseModalOpen: false,
     pastedResponse: '',
+    pendingPlan: null,
+    pendingOperations: null,
+    parseError: null,
     llmExecutionMode: DEFAULT_LLM_EXECUTION_MODE,
     lastCopiedPrompt: null,
     lastBuiltPrompt: null,
@@ -198,6 +230,9 @@ export function createRagDebugStore() {
         previewOpen: false,
         llmPromptPreviewOpen: false,
         responseModalOpen: false,
+        pendingPlan: null,
+        pendingOperations: null,
+        parseError: null,
       }),
     togglePanel: () =>
       set((s) => ({
@@ -205,6 +240,8 @@ export function createRagDebugStore() {
         previewOpen: s.open ? false : s.previewOpen,
         llmPromptPreviewOpen: s.open ? false : s.llmPromptPreviewOpen,
         responseModalOpen: s.open ? false : s.responseModalOpen,
+        pendingPlan: s.open ? null : s.pendingPlan,
+        pendingOperations: s.open ? null : s.pendingOperations,
       })),
 
     setPrompt: (value) => set({ prompt: value, error: null }),
@@ -279,14 +316,72 @@ export function createRagDebugStore() {
       return true;
     },
 
-    openResponseModal: () => set({ responseModalOpen: true, pastedResponse: '', error: null }),
-    closeResponseModal: () => set({ responseModalOpen: false, pastedResponse: '' }),
-    setPastedResponse: (value) => set({ pastedResponse: value }),
+    openResponseModal: () =>
+      set({
+        responseModalOpen: true,
+        pastedResponse: '',
+        pendingPlan: null,
+        pendingOperations: null,
+        parseError: null,
+        error: null,
+      }),
+    closeResponseModal: () =>
+      set({
+        responseModalOpen: false,
+        pastedResponse: '',
+        pendingPlan: null,
+        pendingOperations: null,
+        parseError: null,
+      }),
+    setPastedResponse: (value) =>
+      set({
+        pastedResponse: value,
+        pendingPlan: null,
+        pendingOperations: null,
+        parseError: null,
+      }),
+
+    previewPastedPlan: () => {
+      const state = get();
+      try {
+        const { allowedElementIds, elementTypes } = buildParseContextFromState(state);
+        const parsed = parseAgentResponsePlan(state.pastedResponse, {
+          allowedElementIds,
+          elementTypes,
+        });
+        set({
+          pendingPlan: parsed.plan,
+          pendingOperations: parsed.response,
+          parseError: null,
+          error: null,
+        });
+        return true;
+      } catch (err) {
+        const message =
+          err instanceof CanvasAgentParseError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : 'Invalid agent response';
+        set({
+          pendingPlan: null,
+          pendingOperations: null,
+          parseError: message,
+          error: message,
+        });
+        return false;
+      }
+    },
 
     pasteResponseFromClipboard: async () => {
       try {
         const text = await navigator.clipboard.readText();
-        set({ pastedResponse: text });
+        set({
+          pastedResponse: text,
+          pendingPlan: null,
+          pendingOperations: null,
+          parseError: null,
+        });
         return true;
       } catch {
         set({ error: 'Could not read clipboard — paste with Ctrl+V.' });
@@ -295,28 +390,44 @@ export function createRagDebugStore() {
     },
 
     applyPastedResponse: () => {
-      const text = get().pastedResponse;
-      // Do not modify CanvasDocument until Apply — handled here only.
-      const result = handleLlmResponse(text);
-      if (!result) {
-        set({ error: 'Response cannot be empty.' });
+      const state = get();
+      // Parse if not yet previewed.
+      let ops = state.pendingOperations;
+      if (!ops) {
+        const ok = get().previewPastedPlan();
+        if (!ok) return false;
+        ops = get().pendingOperations;
+      }
+      if (!ops || ops.operations.length === 0) {
+        set({ error: 'No validated operations to apply.' });
         return false;
       }
-      set({
-        responseModalOpen: false,
-        pastedResponse: '',
-        statusMessage: 'Response added to canvas',
-        error: null,
-      });
-      useAiStore.setState({
-        status: 'success',
-        errorMessage: null,
-        statusMessage: 'Added to canvas (manual LLM)',
-        lastInsertedId: result.element.id,
-        lastPrompt: get().prompt.trim() || useAiStore.getState().lastPrompt,
-        expanded: true,
-      });
-      return true;
+
+      try {
+        const result = applyAgentOperations(ops.operations);
+        set({
+          responseModalOpen: false,
+          pastedResponse: '',
+          pendingPlan: null,
+          pendingOperations: null,
+          parseError: null,
+          statusMessage: `Applied ${ops.operations.length} operation(s)`,
+          error: null,
+        });
+        useAiStore.setState({
+          status: 'success',
+          errorMessage: null,
+          statusMessage: 'AI plan applied to canvas',
+          lastInsertedId: result.createdIds[0] ?? result.updatedIds[0] ?? null,
+          lastPrompt: get().prompt.trim() || useAiStore.getState().lastPrompt,
+          expanded: true,
+        });
+        return true;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to apply operations';
+        set({ error: message });
+        return false;
+      }
     },
 
     copyRetrievalDebugData: async () => {
@@ -425,30 +536,43 @@ export function createRagDebugStore() {
         });
 
         const result = await aiService.sendPrompt(prompt, undefined, {
-          systemInstruction: RAG_SYSTEM_INSTRUCTIONS_API,
+          systemInstruction: CANVAS_EDITOR_SYSTEM_PROMPT,
           canvasContext: context.serialized,
         });
 
-        const applied = handleLlmResponse(result.text);
-        if (!applied) {
-          set({ sending: false, error: 'Empty AI response.' });
+        const allowedElementIds = new Set(context.allElements.map((e) => e.element_id));
+        const elementTypes = new Map(
+          context.allElements.map((e) => [e.element_id, e.element_type] as const),
+        );
+        let applied;
+        try {
+          applied = handleAgentResponse(result.text, { allowedElementIds, elementTypes });
+        } catch (err) {
+          const message =
+            err instanceof CanvasAgentParseError
+              ? err.message
+              : 'LLM response was not valid canvas operations JSON.';
+          set({ sending: false, error: message });
           useAiStore.setState({
             status: 'error',
-            errorMessage: 'AI request failed. Please try again.',
+            errorMessage: message,
           });
           return;
         }
 
         set({
           sending: false,
-          statusMessage: `Sent with ${context.stats.total_unique_elements} context element(s)`,
+          statusMessage: `Applied ${applied.response.operations.length} operation(s)`,
         });
         useAiStore.setState({
           status: 'success',
           errorMessage: null,
           prompt: '',
-          statusMessage: 'Added to canvas (RAG context)',
-          lastInsertedId: applied.element.id,
+          statusMessage: 'AI plan applied to canvas',
+          lastInsertedId:
+            applied.execution?.createdIds[0] ??
+            applied.execution?.updatedIds[0] ??
+            null,
           expanded: true,
         });
       } catch (err) {
