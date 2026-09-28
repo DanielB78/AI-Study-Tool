@@ -7,6 +7,7 @@ from ...errors import AiServiceError
 from .base import EmbeddingService
 from .deterministic import DeterministicEmbeddingService
 from .openai_provider import OpenAIEmbeddingService
+from .sentence_transformers_provider import SentenceTransformersEmbeddingService
 
 
 def build_embedding_service(settings: Settings | None = None) -> EmbeddingService:
@@ -29,6 +30,9 @@ def build_embedding_service(settings: Settings | None = None) -> EmbeddingServic
 
     if provider == "openai":
         return OpenAIEmbeddingService(cfg)
+
+    if provider in {"sentence_transformers", "sentence-transformers", "st"}:
+        return SentenceTransformersEmbeddingService(cfg)
 
     raise AiServiceError(
         f"Unknown embedding provider '{provider}'.",

@@ -76,10 +76,11 @@ class PromptRetrievalService:
             else self.settings.rag_min_similarity
         )
 
+        similarity_metric = self.settings.effective_similarity_metric
         chunk_matches = rank_chunks_by_similarity(
             query_vectors,
             rows,
-            metric=self.settings.rag_similarity_metric,
+            metric=similarity_metric,
             top_k=top_k,
             min_similarity=min_sim,
         )
@@ -91,7 +92,7 @@ class PromptRetrievalService:
             query_chunk_texts=[c.text for c in query_chunks],
             embedding_model=embedder.model,
             embedding_provider=embedder.provider,
-            similarity_metric=self.settings.rag_similarity_metric,
+            similarity_metric=similarity_metric,
             top_k=top_k,
             min_similarity=min_sim,
             candidates=[

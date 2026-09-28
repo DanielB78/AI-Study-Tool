@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 from ..db.models import RagChunk
 from .embeddings.base import EmbeddingVector
+from .repository import embedding_as_list
 from .similarity import similarity
 
 
@@ -59,7 +60,9 @@ def rank_chunks_by_similarity(
     for row in rows:
         if row.embedding is None:
             continue
-        doc_vec = list(row.embedding)
+        doc_vec = embedding_as_list(row.embedding)
+        if doc_vec is None:
+            continue
         score = max(similarity(q, doc_vec, metric=metric) for q in query_vectors)
         key = str(row.id)
         existing = best.get(key)

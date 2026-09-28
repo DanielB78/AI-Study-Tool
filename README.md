@@ -5,7 +5,7 @@ Infinite-canvas study/note editor with AI chat, RAG text indexing, and semantic 
 ## Stack
 
 - React + TypeScript + Vite + Zustand + Konva
-- FastAPI + PostgreSQL (pgvector extension enabled; embeddings stored as `float[]` until model/dimension fixed)
+- FastAPI + PostgreSQL + pgvector (`vector(768)` for EmbeddingGemma)
 
 ## Quick start
 
@@ -14,9 +14,12 @@ Infinite-canvas study/note editor with AI chat, RAG text indexing, and semantic 
 cd backend
 pip install -r requirements.txt
 cp .env.example .env
-# Set DATABASE_URL, and for semantic retrieval:
-#   EMBEDDING_PROVIDER=deterministic   # or openai
-#   EMBEDDING_MODEL=deterministic-hash-v1
+# Set DATABASE_URL and EmbeddingGemma:
+#   EMBEDDING_PROVIDER=sentence_transformers
+#   EMBEDDING_MODEL=google/embeddinggemma-300m
+#   EMBEDDING_DIMENSION=768
+#   EMBEDDING_SIMILARITY=cosine
+#   HF_TOKEN=<your Hugging Face token after accepting Gemma terms>
 # Leave RAG_MIN_SIMILARITY unset.
 alembic upgrade head
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
@@ -25,10 +28,20 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 npm install && npm run dev
 ```
 
+### EmbeddingGemma (local SentenceTransformers)
+
+1. Accept terms on [`google/embeddinggemma-300m`](https://huggingface.co/google/embeddinggemma-300m)
+2. Set `HF_TOKEN` in `backend/.env`
+3. First request downloads/caches the model (CPU works; optional CUDA/MPS)
+4. `GET /api/rag/embedding/status` · `POST /api/rag/embedding/smoke`
+5. Rebuild existing chunks: `POST /api/rag/boards/{id}/embeddings/rebuild`
+
+Queries use `encode_query`; textbox chunks use `encode_document`. See `backend/README.md`.
+
 ## Semantic retrieval + Canvas Agent (structured ops)
 
 ```
-prompt → embed → cosine → ranked TextElements
+prompt → encode_query → cosine → ranked TextElements
       → pick semantic anchors → spatial radius → context budget
       → Canvas Editor Agent prompt + JSON schema → Copy LLM Prompt
       → (you) paste into ChatGPT → Paste LLM Response
@@ -47,7 +60,6 @@ The app owns IDs, coordinates, collision avoidance, history, and RAG reindex.
 
 - Semantic ranking and spatial expansion are **separate** from edit-target choice
 - Relative placement uses **world-space** coordinates
-- Leave `EMBEDDING_MODEL` blank until you choose a model; use `deterministic` only for pipeline smoke tests
 - Leave `RAG_MIN_SIMILARITY` unset
 
 Agent docs: `src/features/ai/agent/prompts/canvas_editor_system.md` (mirrored under `backend/app/agent/prompts/`).
@@ -73,4 +85,6 @@ window.__RAG_DEBUG__.openPanel()
 ```bash
 npm test
 cd backend && DATABASE_URL='...' pytest
+# Optional real model:
+# RUN_EMBEDDINGGEMMA_TESTS=1 HF_TOKEN=… pytest -m embeddinggemma
 ```
