@@ -25,5 +25,6 @@ if (import.meta.env.DEV) {
     openPanel: () => useRagDebugStore.getState().openPanel(),
     closePanel: () => useRagDebugStore.getState().closePanel(),
     getState: () => useRagDebugStore.getState(),
+    setState: (partial: Record<string, unknown>) => useRagDebugStore.setState(partial as never),
   };
 }
