@@ -1021,6 +1021,28 @@ textarea {
   font-weight: 600;
 }
 
+.rag-debug-interactions {
+  background: color-mix(in srgb, var(--surface) 88%, rgba(15, 118, 110, 0.08));
+  margin: 0 -4px;
+  padding: 8px 4px 4px;
+  border-radius: 8px;
+}
+
+.rag-debug-badge.status-applied {
+  background: rgba(15, 118, 110, 0.12);
+  color: #0f766e;
+}
+
+.rag-debug-badge.status-undone {
+  background: rgba(185, 28, 28, 0.1);
+  color: #b91c1c;
+}
+
+.rag-debug-badge.status-redone {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+}
+
 .rag-debug-modal-backdrop {
   position: absolute;
   inset: 0;

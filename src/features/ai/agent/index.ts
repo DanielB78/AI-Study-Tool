@@ -17,6 +17,11 @@ export {
   CanvasAgentParseError,
   stripCodeFences,
 } from './parser';
+export {
+  summarizeAiActions,
+  buildInteractionEmbeddingDocument,
+  describeOperationPlanLines,
+} from './actionSummary';
 export { executeCanvasOperations, type ExecuteAgentOpsResult } from './executor';
 export { executeAgentOperationsLive, createLiveAgentExecutorTarget } from './liveExecutor';
 export { resolvePlacement, DEFAULT_ELEMENT_GAP } from './placementService';

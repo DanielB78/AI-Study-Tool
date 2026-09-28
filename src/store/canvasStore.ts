@@ -54,10 +54,41 @@ export interface TransientUI {
   snapGuides: { orientation: 'h' | 'v'; position: number }[];
 }
 
+interface HistoryEntry {
+  /** Stable id for the editor transaction that moved away from this snapshot. */
+  transactionId: string;
+  document: CanvasDocument;
+}
+
 interface HistorySlice {
-  past: CanvasDocument[];
-  future: CanvasDocument[];
+  past: HistoryEntry[];
+  future: HistoryEntry[];
   historySuspended: boolean;
+  /** Transaction id opened by the latest beginInteraction (null when idle). */
+  activeTransactionId: string | null;
+}
+
+export type HistoryTransactionListener = (
+  event: 'undo' | 'redo',
+  transactionId: string,
+) => void;
+
+const historyListeners = new Set<HistoryTransactionListener>();
+
+/** Subscribe to undo/redo of identified editor transactions (AI interaction memory). */
+export function subscribeHistoryTransactions(listener: HistoryTransactionListener): () => void {
+  historyListeners.add(listener);
+  return () => historyListeners.delete(listener);
+}
+
+function emitHistoryTransaction(event: 'undo' | 'redo', transactionId: string) {
+  for (const listener of historyListeners) {
+    try {
+      listener(event, transactionId);
+    } catch (err) {
+      console.warn('[history] listener failed', err);
+    }
+  }
 }
 
 export interface CanvasStore extends TransientUI, HistorySlice {
@@ -79,10 +110,13 @@ export interface CanvasStore extends TransientUI, HistorySlice {
   setEditingShapeLabelId: (id: string | null) => void;
 
   pushHistory: () => void;
-  beginInteraction: () => void;
+  /** Begin a compound edit; returns the stable transaction id for this change. */
+  beginInteraction: () => string;
   endInteraction: () => void;
   undo: () => void;
   redo: () => void;
+  /** Most recently completed / active AI-capable transaction id. */
+  getLastTransactionId: () => string | null;
 
   addElement: (element: CanvasElement, select?: boolean) => void;
   updateElement: (id: string, updater: (el: CanvasElement) => CanvasElement) => void;
@@ -170,6 +204,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   past: [],
   future: [],
   historySuspended: false,
+  activeTransactionId: null,
 
   hydrate: () => {
     const loaded = persistence.load();
@@ -255,15 +290,29 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   pushHistory: () => {
     const { document, past, historySuspended } = get();
     if (historySuspended) return;
+    const transactionId = createId();
     set({
-      past: [...past, snapshotDoc(document)].slice(-MAX_HISTORY),
+      past: [...past, { transactionId, document: snapshotDoc(document) }].slice(-MAX_HISTORY),
       future: [],
+      activeTransactionId: transactionId,
     });
   },
 
   beginInteraction: () => {
-    get().pushHistory();
-    set({ historySuspended: true });
+    const { document, past, historySuspended, activeTransactionId } = get();
+    if (historySuspended) {
+      const existing = activeTransactionId ?? createId();
+      if (!activeTransactionId) set({ activeTransactionId: existing });
+      return existing;
+    }
+    const transactionId = createId();
+    set({
+      past: [...past, { transactionId, document: snapshotDoc(document) }].slice(-MAX_HISTORY),
+      future: [],
+      historySuspended: true,
+      activeTransactionId: transactionId,
+    });
+    return transactionId;
   },
 
   endInteraction: () => {
@@ -280,36 +329,47 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     }
   },
 
+  getLastTransactionId: () => get().activeTransactionId,
+
   undo: () => {
     const { past, document, future } = get();
     if (past.length === 0) return;
-    const previous = past[past.length - 1]!;
+    const entry = past[past.length - 1]!;
     set({
       past: past.slice(0, -1),
-      future: [snapshotDoc(document), ...future].slice(0, MAX_HISTORY),
-      document: previous,
+      future: [
+        { transactionId: entry.transactionId, document: snapshotDoc(document) },
+        ...future,
+      ].slice(0, MAX_HISTORY),
+      document: entry.document,
       selectedIds: [],
       editingTextId: null,
       editingShapeLabelId: null,
+      activeTransactionId: entry.transactionId,
     });
     get().persist();
-    ragSync.scheduleReconcile(previous.id, previous.elements);
+    ragSync.scheduleReconcile(entry.document.id, entry.document.elements);
+    emitHistoryTransaction('undo', entry.transactionId);
   },
 
   redo: () => {
     const { past, document, future } = get();
     if (future.length === 0) return;
-    const next = future[0]!;
+    const entry = future[0]!;
     set({
-      past: [...past, snapshotDoc(document)].slice(-MAX_HISTORY),
+      past: [...past, { transactionId: entry.transactionId, document: snapshotDoc(document) }].slice(
+        -MAX_HISTORY,
+      ),
       future: future.slice(1),
-      document: next,
+      document: entry.document,
       selectedIds: [],
       editingTextId: null,
       editingShapeLabelId: null,
+      activeTransactionId: entry.transactionId,
     });
     get().persist();
-    ragSync.scheduleReconcile(next.id, next.elements);
+    ragSync.scheduleReconcile(entry.document.id, entry.document.elements);
+    emitHistoryTransaction('redo', entry.transactionId);
   },
 
   nextZIndex: () => {
