@@ -1,30 +1,66 @@
 /**
- * Shared LLM response handler — used by Automatic API path and Manual paste.
- *
- * Future structured JSON ops can plug in here via a ManualResponseParser
- * without coupling the paste modal to CreateTextElement directly.
+ * Shared LLM response handler — structured canvas operations (preferred)
+ * with optional plain-text create fallback disabled for agent mode.
  */
 
-import { insertAiResponseOntoCanvas } from '../canvas/liveInsert';
+import type { CanvasAgentResponse, CanvasOperation } from '../agent/operations';
+import {
+  CanvasAgentParseError,
+  describeOperationPlan,
+  parseCanvasAgentResponse,
+  type ParseContext,
+} from '../agent/parser';
+import {
+  executeAgentOperationsLive,
+} from '../agent/liveExecutor';
+import type { ExecuteAgentOpsResult } from '../agent/executor';
 
-export interface HandleLlmResponseResult {
-  element: { id: string };
-  text: string;
+export interface HandleAgentResponseResult {
+  kind: 'operations';
+  response: CanvasAgentResponse;
+  plan: string[];
+  execution?: ExecuteAgentOpsResult;
 }
 
-export type LlmResponseInsertFn = (text: string) => { element: { id: string } } | null;
+export interface ParsedAgentPlan {
+  response: CanvasAgentResponse;
+  plan: string[];
+}
 
 /**
- * Process a plain-text LLM response the same way an API reply would be handled.
- * Returns null if the response is empty / whitespace-only.
+ * Parse + validate without applying. Use for AI Plan preview.
  */
-export function handleLlmResponse(
-  response: string,
-  insertFn: LlmResponseInsertFn = insertAiResponseOntoCanvas,
-): HandleLlmResponseResult | null {
-  const text = response.trim();
-  if (!text) return null;
-  const inserted = insertFn(text);
-  if (!inserted) return null;
-  return { element: inserted.element, text };
+export function parseAgentResponsePlan(
+  raw: string,
+  ctx: ParseContext,
+): ParsedAgentPlan {
+  const response = parseCanvasAgentResponse(raw, ctx);
+  return {
+    response,
+    plan: describeOperationPlan(response.operations),
+  };
 }
+
+/**
+ * Validate then execute operations atomically via the editor store.
+ */
+export function applyAgentOperations(
+  operations: readonly CanvasOperation[],
+): ExecuteAgentOpsResult {
+  return executeAgentOperationsLive(operations);
+}
+
+/**
+ * Parse, validate, and execute in one step (after user confirms plan).
+ */
+export function handleAgentResponse(
+  raw: string,
+  ctx: ParseContext,
+): HandleAgentResponseResult {
+  const response = parseCanvasAgentResponse(raw, ctx);
+  const plan = describeOperationPlan(response.operations);
+  const execution = applyAgentOperations(response.operations);
+  return { kind: 'operations', response, plan, execution };
+}
+
+export { CanvasAgentParseError };

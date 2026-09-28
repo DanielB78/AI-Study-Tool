@@ -1,11 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createEmptyDocument, DEFAULT_STYLE } from '../../../types/canvas';
+import { createEmptyDocument, DEFAULT_STYLE, type TextElement } from '../../../types/canvas';
 import { useCanvasStore } from '../../../store/canvasStore';
 import { createTestAiStore } from '../state/aiStore';
 import type { AiService } from '../data/aiService';
 import { setLlmExecutionModeOverride } from '../llm/executionMode';
-import { handleLlmResponse } from '../llm/handleLlmResponse';
-import { insertAiTextResponse } from '../canvas/insertAiText';
+import {
+  handleAgentResponse,
+  parseAgentResponsePlan,
+  CanvasAgentParseError,
+} from '../llm/handleLlmResponse';
+import { handlePlainTextLlmResponse } from '../llm/legacyPlainText';
 import { ragSync } from '../../rag/ragSync';
 import { createRagDebugStore } from '../../rag/ragDebugStore';
 import type { RetrievedCandidate } from '../../rag/ragRetrieval';
@@ -14,7 +18,39 @@ import { buildLlmPrompt } from '../llm/promptBuilder';
 
 function resetCanvas() {
   useCanvasStore.setState({
-    document: createEmptyDocument(),
+    document: {
+      ...createEmptyDocument(),
+      elements: [
+        {
+          id: 'textbox_18',
+          type: 'text',
+          x: 100,
+          y: 100,
+          width: 200,
+          height: 80,
+          rotation: 0,
+          zIndex: 1,
+          opacity: 1,
+          locked: false,
+          createdAt: 1,
+          updatedAt: 1,
+          metadata: {},
+          text: 'Gauss original',
+          fontSize: 16,
+          fontFamily: 'sans',
+          fontWeight: 'normal',
+          fontItalic: false,
+          underline: false,
+          strikethrough: false,
+          color: '#000',
+          alignment: 'left',
+          lineHeight: 1.3,
+          backgroundColor: '#fff',
+          padding: 12,
+          cornerRadius: 8,
+        } satisfies TextElement,
+      ],
+    },
     style: { ...DEFAULT_STYLE },
     selectedIds: [],
     activeTool: 'select',
@@ -30,6 +66,11 @@ function resetCanvas() {
     snapGuides: [],
   });
 }
+
+const parseCtx = {
+  allowedElementIds: new Set(['textbox_18']),
+  elementTypes: new Map([['textbox_18', 'text']]),
+};
 
 describe('Manual LLM Mode', () => {
   beforeEach(() => {
@@ -121,7 +162,7 @@ describe('Manual LLM Mode', () => {
   });
 });
 
-describe('handleLlmResponse / paste import', () => {
+describe('structured agent paste / apply', () => {
   beforeEach(() => {
     resetCanvas();
     vi.spyOn(ragSync, 'indexText').mockImplementation(() => {});
@@ -132,57 +173,99 @@ describe('handleLlmResponse / paste import', () => {
     vi.restoreAllMocks();
   });
 
-  it('rejects empty response', () => {
-    expect(handleLlmResponse('   ')).toBeNull();
-    expect(useCanvasStore.getState().document.elements).toHaveLength(0);
+  it('rejects empty / invalid JSON without mutating the board', () => {
+    expect(() => parseAgentResponsePlan('   ', parseCtx)).toThrow(CanvasAgentParseError);
+    expect(useCanvasStore.getState().document.elements).toHaveLength(1);
   });
 
-  it('creates one undoable TextElement via shared handler', () => {
-    const insertFn = (text: string) =>
-      insertAiTextResponse(text, {
-        getCamera: () => useCanvasStore.getState().document.camera,
-        getElements: () => useCanvasStore.getState().document.elements,
-        getStyle: () => useCanvasStore.getState().style,
-        nextZIndex: () => useCanvasStore.getState().nextZIndex(),
-        addElement: (el, select) => useCanvasStore.getState().addElement(el, select),
-        afterInsert: () =>
-          useCanvasStore.setState({
-            editingTextId: null,
-            editingShapeLabelId: null,
-            activeTool: 'select',
-          }),
-      });
-
-    const result = handleLlmResponse('ChatGPT answer about Gauss.', insertFn);
-    expect(result).not.toBeNull();
-    const els = useCanvasStore.getState().document.elements;
-    expect(els).toHaveLength(1);
-    expect(els[0]?.type).toBe('text');
-    if (els[0]?.type === 'text') {
-      expect(els[0].text).toBe('ChatGPT answer about Gauss.');
-      expect(els[0].id.length).toBeGreaterThan(4);
-    }
-    expect(useCanvasStore.getState().selectedIds).toEqual([result!.element.id]);
+  it('applies create_text as one undoable TextElement', () => {
+    const raw = JSON.stringify({
+      operations: [
+        {
+          type: 'create_text',
+          text: 'ChatGPT structured create.',
+          placement: { mode: 'viewport_default' },
+        },
+      ],
+    });
+    const result = handleAgentResponse(raw, parseCtx);
+    expect(result.execution?.createdIds).toHaveLength(1);
+    expect(useCanvasStore.getState().document.elements).toHaveLength(2);
 
     useCanvasStore.getState().undo();
-    expect(useCanvasStore.getState().document.elements).toHaveLength(0);
+    expect(useCanvasStore.getState().document.elements).toHaveLength(1);
 
     useCanvasStore.getState().redo();
+    expect(useCanvasStore.getState().document.elements).toHaveLength(2);
+  });
+
+  it('applyPastedResponse previews then applies validated operations', () => {
+    const store = createRagDebugStore();
+    store.setState({
+      prompt: 'Make the Gauss note shorter.',
+      pastedResponse: '   ',
+      responseModalOpen: true,
+      selectedAnchorIds: ['textbox_18'],
+      candidates: [
+        {
+          element_id: 'textbox_18',
+          element_type: 'text',
+          score: 0.9,
+          matched_chunks: [],
+          geometry: { x: 100, y: 100, width: 200, height: 80 },
+        },
+      ],
+    });
+    expect(store.getState().applyPastedResponse()).toBe(false);
+
+    const raw = JSON.stringify({
+      operations: [
+        {
+          type: 'update_text',
+          target_element_id: 'textbox_18',
+          text: 'Gauss short.',
+        },
+      ],
+    });
+    store.setState({ pastedResponse: raw });
+    expect(store.getState().previewPastedPlan()).toBe(true);
+    expect(store.getState().pendingPlan?.[0]).toContain('UPDATE TEXT');
+    expect(store.getState().applyPastedResponse()).toBe(true);
+
+    const el = useCanvasStore.getState().document.elements.find((e) => e.id === 'textbox_18');
+    expect(el?.type).toBe('text');
+    if (el?.type === 'text') expect(el.text).toBe('Gauss short.');
+    expect(store.getState().responseModalOpen).toBe(false);
+  });
+
+  it('invalid operation list leaves the board unchanged', () => {
+    const before = useCanvasStore.getState().document.elements.length;
+    expect(() =>
+      handleAgentResponse(
+        JSON.stringify({
+          operations: [
+            { type: 'update_text', target_element_id: 'invented', text: 'nope' },
+          ],
+        }),
+        parseCtx,
+      ),
+    ).toThrow(CanvasAgentParseError);
+    expect(useCanvasStore.getState().document.elements).toHaveLength(before);
+  });
+
+  it('legacy plain-text handler still creates text for Ask AI automatic mode', () => {
+    useCanvasStore.setState({ document: createEmptyDocument() });
+    const result = handlePlainTextLlmResponse('Plain Ask AI reply.');
+    expect(result).not.toBeNull();
     expect(useCanvasStore.getState().document.elements).toHaveLength(1);
   });
 
-  it('applyPastedResponse uses the same handler and does not apply empty', () => {
-    const store = createRagDebugStore();
-    store.setState({ pastedResponse: '   ', responseModalOpen: true });
-    expect(store.getState().applyPastedResponse()).toBe(false);
+  it('legacy plain-text handler rejects agent JSON payloads', () => {
+    useCanvasStore.setState({ document: createEmptyDocument() });
+    const result = handlePlainTextLlmResponse(
+      '{"operations":[{"type":"create_text","text":"x","placement":{"mode":"viewport_default"}}]}',
+    );
+    expect(result).toBeNull();
     expect(useCanvasStore.getState().document.elements).toHaveLength(0);
-
-    // Seed a real insert path by applying non-empty text
-    store.setState({ pastedResponse: 'Manual paste works.' });
-    // handleLlmResponse uses live insert by default — ensure rag mocks already set
-    const ok = store.getState().applyPastedResponse();
-    expect(ok).toBe(true);
-    expect(useCanvasStore.getState().document.elements).toHaveLength(1);
-    expect(store.getState().responseModalOpen).toBe(false);
   });
 });

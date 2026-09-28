@@ -1,15 +1,14 @@
 /**
  * LlmPromptBuilder — builds the COMPLETE text that would be sent to an LLM.
- *
- * Used by Manual LLM Mode (clipboard → ChatGPT) and kept reusable so Automatic
- * mode can pass the same parts as structured messages later.
+ * Now includes the Canvas Editor Agent instructions + JSON output contract.
  */
 
 import type { RagContext, RagContextElement } from '../../rag/contextBuilder';
 import {
-  RAG_RESPONSE_INSTRUCTIONS,
-  RAG_SYSTEM_INSTRUCTIONS,
-} from '../prompts/instructions';
+  CANVAS_EDITOR_RESPONSE_INSTRUCTIONS,
+  CANVAS_EDITOR_SYSTEM_PROMPT,
+} from '../agent/prompts/loadAgentPrompt';
+import { CANVAS_AGENT_OUTPUT_CONTRACT } from '../agent/operations';
 
 export interface BuiltLlmPrompt {
   /** Original user request (never overwritten by system/context). */
@@ -33,7 +32,7 @@ function formatRetrieval(el: RagContextElement): string[] {
 
   if (el.similarity !== null) {
     lines.push('');
-    lines.push('SEMANTIC SIMILARITY:');
+    lines.push('SIMILARITY:');
     lines.push(el.similarity.toFixed(4));
   }
 
@@ -50,15 +49,16 @@ function formatRetrieval(el: RagContextElement): string[] {
   return lines;
 }
 
-function formatElementBlock(el: RagContextElement, index: number): string {
+function formatElementBlock(el: RagContextElement): string {
   const g = el.geometry;
   const parts = [
-    `ELEMENT ${index}`,
+    'CANVAS ELEMENT',
     '',
     `ID: ${el.element_id}`,
     `TYPE: ${el.element_type}`,
     '',
-    ...formatRetrieval(el),
+    'TEXT:',
+    el.text || '(empty)',
     '',
     'POSITION:',
     `x: ${g.x}`,
@@ -66,8 +66,7 @@ function formatElementBlock(el: RagContextElement, index: number): string {
     `width: ${g.width}`,
     `height: ${g.height}`,
     '',
-    'TEXT:',
-    el.text || '(empty)',
+    ...formatRetrieval(el),
   ];
   return parts.join('\n');
 }
@@ -75,15 +74,19 @@ function formatElementBlock(el: RagContextElement, index: number): string {
 /**
  * Format the CANVAS CONTEXT section for the full LLM prompt.
  * Uses full TextElement text already resolved on RagContextElement.
+ * Context is USER/data — never merged into trusted system instructions.
  */
 export function formatCanvasContextSection(context: RagContext): string {
   if (context.allElements.length === 0) {
     return ['CANVAS CONTEXT', '', '(none selected)'].join('\n');
   }
 
-  const blocks = context.allElements.map((el, i) => formatElementBlock(el, i + 1));
+  const blocks = context.allElements.map((el) => formatElementBlock(el));
   return [
     'CANVAS CONTEXT',
+    '',
+    'The following elements were retrieved for relevance. IDs are stable.',
+    'POSITION values are canvas world coordinates.',
     '',
     blocks.join(`\n\n${'-'.repeat(50)}\n\n`),
   ].join('\n');
@@ -97,14 +100,16 @@ export interface BuildLlmPromptInput {
 }
 
 /**
- * Build the complete copyable LLM prompt.
+ * Build the complete copyable LLM prompt for Manual LLM Mode.
  * Deterministic: same inputs → same string.
  */
 export function buildLlmPrompt(input: BuildLlmPromptInput): BuiltLlmPrompt {
   const userPrompt = input.userPrompt.trim();
-  const systemInstructions = (input.systemInstructions ?? RAG_SYSTEM_INSTRUCTIONS).trim();
+  const systemInstructions = (
+    input.systemInstructions ?? CANVAS_EDITOR_SYSTEM_PROMPT
+  ).trim();
   const responseInstructions = (
-    input.responseInstructions ?? RAG_RESPONSE_INSTRUCTIONS
+    input.responseInstructions ?? CANVAS_EDITOR_RESPONSE_INSTRUCTIONS
   ).trim();
   const ragContextSection = formatCanvasContextSection(input.ragContext);
 
@@ -112,6 +117,12 @@ export function buildLlmPrompt(input: BuildLlmPromptInput): BuiltLlmPrompt {
     'SYSTEM INSTRUCTIONS',
     '',
     systemInstructions,
+    '',
+    '='.repeat(50),
+    '',
+    'OUTPUT CONTRACT',
+    '',
+    CANVAS_AGENT_OUTPUT_CONTRACT,
     '',
     '='.repeat(50),
     '',

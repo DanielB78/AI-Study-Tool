@@ -7,4 +7,10 @@ export {
   isAutomaticLlmMode,
 } from './executionMode';
 export { buildLlmPrompt, formatCanvasContextSection, type BuiltLlmPrompt } from './promptBuilder';
-export { handleLlmResponse, type HandleLlmResponseResult } from './handleLlmResponse';
+export {
+  parseAgentResponsePlan,
+  applyAgentOperations,
+  handleAgentResponse,
+  CanvasAgentParseError,
+} from './handleLlmResponse';
+export { handlePlainTextLlmResponse } from './legacyPlainText';
