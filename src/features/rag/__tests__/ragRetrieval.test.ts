@@ -30,6 +30,22 @@ describe('ragRetrievalService', () => {
               geometry: { x: 1, y: 2, width: 3, height: 4 },
             },
           ],
+          prompt_intent: {
+            classified_intent: 'topic_specific',
+            top_score: 0.8,
+            second_score: 0.5,
+            score_margin: 0.3,
+            embedding_model: 'det',
+            embedding_provider: 'deterministic',
+            scores: [
+              {
+                intent: 'topic_specific',
+                similarity: 0.8,
+                description: 'topic proto',
+                display_name: 'Topic Specific',
+              },
+            ],
+          },
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       ),
@@ -40,6 +56,7 @@ describe('ragRetrievalService', () => {
     const result = await svc.retrieve({ board_id: 'b1', prompt: 'gauss' });
     expect(result.candidates[0]?.element_id).toBe('el-1');
     expect(result.min_similarity).toBeNull();
+    expect(result.prompt_intent?.classified_intent).toBe('topic_specific');
     expect(fetchMock).toHaveBeenCalledWith(
       'http://example.test/api/rag/retrieve',
       expect.objectContaining({ method: 'POST' }),

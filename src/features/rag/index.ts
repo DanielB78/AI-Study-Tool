@@ -5,6 +5,12 @@ export {
   createRagRetrievalService,
   debugRetrieve,
 } from './ragRetrieval';
+export type {
+  PromptIntentClassification,
+  PromptIntentScore,
+  PromptIntentId,
+  RetrieveResponse,
+} from './ragRetrieval';
 export { boundingBoxDistance, expandRect } from './geometry';
 export {
   findElementsWithinRadius,

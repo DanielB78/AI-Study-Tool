@@ -23,6 +23,31 @@ export interface RetrievedCandidate {
   geometry: { x: number; y: number; width: number; height: number };
 }
 
+export type PromptIntentId =
+  | 'element_specific'
+  | 'topic_specific'
+  | 'board_wide'
+  | 'spatial_relational'
+  | 'interaction_reference';
+
+export interface PromptIntentScore {
+  intent: PromptIntentId | string;
+  similarity: number;
+  description: string;
+  display_name: string;
+}
+
+/** Debug-only classification — does not affect retrieval. */
+export interface PromptIntentClassification {
+  classified_intent: PromptIntentId | string;
+  scores: PromptIntentScore[];
+  top_score: number;
+  second_score: number;
+  score_margin: number;
+  embedding_model: string;
+  embedding_provider: string;
+}
+
 export interface RetrieveResponse {
   board_id: string;
   query_chunks: number;
@@ -33,6 +58,7 @@ export interface RetrieveResponse {
   top_k: number;
   min_similarity: number | null;
   candidates: RetrievedCandidate[];
+  prompt_intent?: PromptIntentClassification | null;
 }
 
 export interface RagRetrievalService {
