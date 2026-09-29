@@ -45,6 +45,7 @@ export function RagDebugPanel() {
   const pendingPlan = useRagDebugStore((s) => s.pendingPlan);
   const pendingOperations = useRagDebugStore((s) => s.pendingOperations);
   const parseError = useRagDebugStore((s) => s.parseError);
+  const parseErrorDetail = useRagDebugStore((s) => s.parseErrorDetail);
   const llmExecutionMode = useRagDebugStore((s) => s.llmExecutionMode);
   const lastQueryChunks = useRagDebugStore((s) => s.lastQueryChunks);
   const lastRetrieveMeta = useRagDebugStore((s) => s.lastRetrieveMeta);
@@ -638,7 +639,17 @@ export function RagDebugPanel() {
               </button>
             </div>
 
-            {parseError && <p className="rag-debug-error">{parseError}</p>}
+            {parseError && (
+              <div className="rag-debug-error-block">
+                <p className="rag-debug-error">{parseError}</p>
+                {parseErrorDetail && parseErrorDetail !== parseError && (
+                  <details className="rag-debug-error-detail">
+                    <summary>Parser detail</summary>
+                    <pre>{parseErrorDetail}</pre>
+                  </details>
+                )}
+              </div>
+            )}
 
             {pendingPlan && pendingPlan.length > 0 && (
               <section className="rag-debug-section">

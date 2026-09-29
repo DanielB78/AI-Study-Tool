@@ -84,6 +84,8 @@ export interface RagDebugState {
   pendingPlan: string[] | null;
   pendingOperations: CanvasAgentResponse | null;
   parseError: string | null;
+  /** Technical JSON/parser detail for debug (not the primary user message). */
+  parseErrorDetail: string | null;
   llmExecutionMode: LlmExecutionMode;
   lastCopiedPrompt: string | null;
   lastBuiltPrompt: BuiltLlmPrompt | null;
@@ -354,6 +356,7 @@ export function createRagDebugStore() {
     pendingPlan: null,
     pendingOperations: null,
     parseError: null,
+    parseErrorDetail: null,
     llmExecutionMode: DEFAULT_LLM_EXECUTION_MODE,
     lastCopiedPrompt: null,
     lastBuiltPrompt: null,
@@ -371,6 +374,7 @@ export function createRagDebugStore() {
         pendingPlan: null,
         pendingOperations: null,
         parseError: null,
+        parseErrorDetail: null,
       }),
     togglePanel: () =>
       set((s) => ({
@@ -501,6 +505,7 @@ export function createRagDebugStore() {
         pendingPlan: null,
         pendingOperations: null,
         parseError: null,
+        parseErrorDetail: null,
         error: null,
       }),
     closeResponseModal: () =>
@@ -510,6 +515,7 @@ export function createRagDebugStore() {
         pendingPlan: null,
         pendingOperations: null,
         parseError: null,
+        parseErrorDetail: null,
       }),
     setPastedResponse: (value) =>
       set({
@@ -517,6 +523,7 @@ export function createRagDebugStore() {
         pendingPlan: null,
         pendingOperations: null,
         parseError: null,
+        parseErrorDetail: null,
       }),
 
     previewPastedPlan: () => {
@@ -531,6 +538,7 @@ export function createRagDebugStore() {
           pendingPlan: parsed.plan,
           pendingOperations: parsed.response,
           parseError: null,
+          parseErrorDetail: null,
           error: null,
         });
         return true;
@@ -541,10 +549,17 @@ export function createRagDebugStore() {
             : err instanceof Error
               ? err.message
               : 'Invalid agent response';
+        const detail =
+          err instanceof CanvasAgentParseError
+            ? err.detail ?? null
+            : err instanceof Error
+              ? err.message
+              : null;
         set({
           pendingPlan: null,
           pendingOperations: null,
           parseError: message,
+          parseErrorDetail: detail,
           error: message,
         });
         return false;
@@ -559,6 +574,7 @@ export function createRagDebugStore() {
           pendingPlan: null,
           pendingOperations: null,
           parseError: null,
+          parseErrorDetail: null,
         });
         return true;
       } catch {
@@ -590,6 +606,7 @@ export function createRagDebugStore() {
           pendingPlan: null,
           pendingOperations: null,
           parseError: null,
+          parseErrorDetail: null,
           statusMessage: `Applied ${ops.operations.length} operation(s)`,
           error: null,
         });

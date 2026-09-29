@@ -402,7 +402,7 @@ update_text_style:
 create_equation:
 {
   "type": "create_equation",
-  "latex": "<KaTeX-compatible LaTeX WITHOUT $ / $$ fences>",
+  "latex": "E=\\\\frac{1}{2}mv^2",
   "placement": /* same placement modes as create_text */
 }
 
@@ -410,7 +410,7 @@ update_equation:
 {
   "type": "update_equation",
   "target_element_id": "<equation id from context>",
-  "latex": "<complete replacement LaTeX, no $ fences>"
+  "latex": "\\\\hat{H}\\\\Psi=E\\\\Psi"
 }
 
 move_equation:
@@ -440,7 +440,9 @@ Rules:
 - text_color = writing colour; background_color = textbox fill.
 - Prefer relative_to_element over absolute for spatial relationships.
 - Use create_equation for math (LaTeX). Use create_text for prose notes.
-- Never wrap LaTeX in $...$ or $$...$$ — raw source only (e.g. "E=mc^2", "\\\\nabla\\\\cdot\\\\mathbf{E}=\\\\rho/\\\\varepsilon_0").
+- JSON + LaTeX: escape EVERY LaTeX backslash as \\\\ in the JSON string
+  (write "\\\\frac", "\\\\hbar", "\\\\nabla", "\\\\partial", "\\\\mathbf" — never "\\frac" / "\\hbar").
+- Never wrap LaTeX in $...$ or $$...$$ — raw KaTeX source only.
 - anchor_operation_index must point to an earlier create_text or create_equation in the SAME plan.
 - delete_text / delete_equation only when the user clearly asks to delete/remove.
 - Do not emit shape/image/connector/group/font-size/font-family operations.

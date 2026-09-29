@@ -1135,6 +1135,34 @@ textarea {
   font-size: 0.78rem;
 }
 
+.rag-debug-error-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rag-debug-error-detail {
+  font-size: 0.72rem;
+  color: var(--muted, #64748b);
+}
+
+.rag-debug-error-detail summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.rag-debug-error-detail pre {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  overflow: auto;
+  max-height: 8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: color-mix(in srgb, var(--surface) 92%, #b91c1c);
+  border-radius: 6px;
+  font-size: 0.7rem;
+}
+
 .rag-debug-status {
   margin: 0;
   color: var(--accent);
