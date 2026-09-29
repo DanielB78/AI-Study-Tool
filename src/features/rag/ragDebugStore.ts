@@ -42,6 +42,7 @@ import {
   parseAgentResponsePlan,
 } from '../ai/llm/handleLlmResponse';
 import type { CanvasAgentResponse } from '../ai/agent/operations';
+import type { LatexJsonRepairMeta } from '../ai/agent/parser';
 import { summarizeAiActions } from '../ai/agent/actionSummary';
 import { CANVAS_EDITOR_SYSTEM_PROMPT } from '../ai/agent/prompts/loadAgentPrompt';
 import {
@@ -86,6 +87,8 @@ export interface RagDebugState {
   parseError: string | null;
   /** Technical JSON/parser detail for debug (not the primary user message). */
   parseErrorDetail: string | null;
+  /** LaTeX JSON escape repair metadata from the last preview attempt. */
+  latexRepair: LatexJsonRepairMeta | null;
   llmExecutionMode: LlmExecutionMode;
   lastCopiedPrompt: string | null;
   lastBuiltPrompt: BuiltLlmPrompt | null;
@@ -357,6 +360,7 @@ export function createRagDebugStore() {
     pendingOperations: null,
     parseError: null,
     parseErrorDetail: null,
+    latexRepair: null,
     llmExecutionMode: DEFAULT_LLM_EXECUTION_MODE,
     lastCopiedPrompt: null,
     lastBuiltPrompt: null,
@@ -375,6 +379,7 @@ export function createRagDebugStore() {
         pendingOperations: null,
         parseError: null,
         parseErrorDetail: null,
+        latexRepair: null,
       }),
     togglePanel: () =>
       set((s) => ({
@@ -506,6 +511,7 @@ export function createRagDebugStore() {
         pendingOperations: null,
         parseError: null,
         parseErrorDetail: null,
+        latexRepair: null,
         error: null,
       }),
     closeResponseModal: () =>
@@ -516,6 +522,7 @@ export function createRagDebugStore() {
         pendingOperations: null,
         parseError: null,
         parseErrorDetail: null,
+        latexRepair: null,
       }),
     setPastedResponse: (value) =>
       set({
@@ -524,6 +531,7 @@ export function createRagDebugStore() {
         pendingOperations: null,
         parseError: null,
         parseErrorDetail: null,
+        latexRepair: null,
       }),
 
     previewPastedPlan: () => {
@@ -539,6 +547,7 @@ export function createRagDebugStore() {
           pendingOperations: parsed.response,
           parseError: null,
           parseErrorDetail: null,
+          latexRepair: parsed.repair,
           error: null,
         });
         return true;
@@ -560,6 +569,7 @@ export function createRagDebugStore() {
           pendingOperations: null,
           parseError: message,
           parseErrorDetail: detail,
+          latexRepair: null,
           error: message,
         });
         return false;
@@ -575,6 +585,7 @@ export function createRagDebugStore() {
           pendingOperations: null,
           parseError: null,
           parseErrorDetail: null,
+          latexRepair: null,
         });
         return true;
       } catch {
@@ -607,6 +618,7 @@ export function createRagDebugStore() {
           pendingOperations: null,
           parseError: null,
           parseErrorDetail: null,
+          latexRepair: null,
           statusMessage: `Applied ${ops.operations.length} operation(s)`,
           error: null,
         });

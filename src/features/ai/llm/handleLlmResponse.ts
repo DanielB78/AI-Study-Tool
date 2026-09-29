@@ -8,6 +8,7 @@ import {
   CanvasAgentParseError,
   describeOperationPlan,
   parseCanvasAgentResponse,
+  type LatexJsonRepairMeta,
   type ParseContext,
 } from '../agent/parser';
 import {
@@ -20,11 +21,13 @@ export interface HandleAgentResponseResult {
   response: CanvasAgentResponse;
   plan: string[];
   execution?: ExecuteAgentOpsResult;
+  repair: LatexJsonRepairMeta;
 }
 
 export interface ParsedAgentPlan {
   response: CanvasAgentResponse;
   plan: string[];
+  repair: LatexJsonRepairMeta;
 }
 
 /**
@@ -34,10 +37,11 @@ export function parseAgentResponsePlan(
   raw: string,
   ctx: ParseContext,
 ): ParsedAgentPlan {
-  const response = parseCanvasAgentResponse(raw, ctx);
+  const { response, repair } = parseCanvasAgentResponse(raw, ctx);
   return {
     response,
     plan: describeOperationPlan(response.operations),
+    repair,
   };
 }
 
@@ -57,10 +61,10 @@ export function handleAgentResponse(
   raw: string,
   ctx: ParseContext,
 ): HandleAgentResponseResult {
-  const response = parseCanvasAgentResponse(raw, ctx);
+  const { response, repair } = parseCanvasAgentResponse(raw, ctx);
   const plan = describeOperationPlan(response.operations);
   const execution = applyAgentOperations(response.operations);
-  return { kind: 'operations', response, plan, execution };
+  return { kind: 'operations', response, plan, execution, repair };
 }
 
 export { CanvasAgentParseError };

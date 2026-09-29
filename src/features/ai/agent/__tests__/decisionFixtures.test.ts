@@ -149,7 +149,7 @@ describe('planner decision fixtures', () => {
   for (const fixture of PLANNER_DECISION_FIXTURES) {
     it(`${fixture.id}: parses as expected planner shape`, () => {
       const raw = JSON.stringify({ operations: fixture.expected });
-      const parsed = parseCanvasAgentResponse(raw, electricityCtx);
+      const parsed = parseCanvasAgentResponse(raw, electricityCtx).response;
       expect(parsed.operations).toEqual(fixture.expected);
     });
   }
@@ -169,7 +169,7 @@ describe('planner decision fixtures', () => {
         },
       ],
     });
-    const ops = parseCanvasAgentResponse(raw, electricityCtx).operations;
+    const ops = parseCanvasAgentResponse(raw, electricityCtx).response.operations;
     expect(ops.every((o) => o.type === 'create_text')).toBe(true);
     expect(ops.some((o) => o.type === 'update_text')).toBe(false);
   });
