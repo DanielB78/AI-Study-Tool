@@ -40,6 +40,7 @@ export function RagDebugPanel() {
   const llmExecutionMode = useRagDebugStore((s) => s.llmExecutionMode);
   const lastQueryChunks = useRagDebugStore((s) => s.lastQueryChunks);
   const lastRetrieveMeta = useRagDebugStore((s) => s.lastRetrieveMeta);
+  const promptIntent = useRagDebugStore((s) => s.promptIntent);
   const elements = useCanvasStore((s) => s.document.elements);
 
   const setPrompt = useRagDebugStore((s) => s.setPrompt);
@@ -170,6 +171,78 @@ export function RagDebugPanel() {
               </span>
             )}
           </div>
+
+          <section className="rag-debug-section">
+            <div className="rag-debug-section-title">Prompt intent</div>
+            {!promptIntent ? (
+              <p className="rag-debug-empty">
+                No classification yet. Run Retrieve (2-way: Spatial / Interaction —
+                observational only; does not change retrieval).
+              </p>
+            ) : (
+              <>
+                <p className="rag-debug-intent-winner">
+                  Classified as:{' '}
+                  <strong>
+                    {promptIntent.scores.find(
+                      (s) => s.intent === promptIntent.classified_intent,
+                    )?.display_name ?? promptIntent.classified_intent}
+                  </strong>
+                </p>
+                <p className="rag-debug-meta">
+                  Similarity margin (1st − 2nd):{' '}
+                  <strong>{promptIntent.score_margin.toFixed(3)}</strong>
+                  {' · '}
+                  {promptIntent.embedding_model}
+                </p>
+                <ol className="rag-debug-list rag-debug-intent-list">
+                  {promptIntent.scores.map((score, index) => {
+                    const isWinner = score.intent === promptIntent.classified_intent;
+                    const matches = score.top_matches ?? [];
+                    return (
+                      <li
+                        key={score.intent}
+                        className={`rag-debug-item${isWinner ? ' is-selected' : ''}`}
+                      >
+                        <div className="rag-debug-row tight">
+                          <span className="rag-debug-intent-rank">{index + 1}.</span>
+                          <span className="rag-debug-score">
+                            {score.similarity.toFixed(3)}
+                          </span>
+                          <span className="rag-debug-id">{score.display_name}</span>
+                          {isWinner && (
+                            <span className="rag-debug-badge both">winner</span>
+                          )}
+                        </div>
+                        {matches.length > 0 && (
+                          <details
+                            className="rag-debug-intent-proto"
+                            open={isWinner}
+                          >
+                            <summary>
+                              Top matches (k={promptIntent.exemplar_top_k ?? matches.length})
+                            </summary>
+                            <ul className="rag-debug-exemplar-list">
+                              {matches.map((m) => (
+                                <li key={`${score.intent}-${m.text}`}>
+                                  <span className="rag-debug-score">
+                                    {m.similarity.toFixed(3)}
+                                  </span>{' '}
+                                  <span className="rag-debug-exemplar-text">
+                                    &ldquo;{m.text}&rdquo;
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          </details>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ol>
+              </>
+            )}
+          </section>
 
           <section className="rag-debug-section">
             <div className="rag-debug-section-title">Semantic matches</div>

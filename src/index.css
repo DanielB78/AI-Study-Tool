@@ -938,6 +938,52 @@ textarea {
   min-width: 3.2em;
 }
 
+.rag-debug-intent-winner {
+  margin: 0 0 6px;
+  font-size: 0.85rem;
+}
+
+.rag-debug-intent-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+}
+
+.rag-debug-intent-rank {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted, #64748b);
+  min-width: 1.4em;
+}
+
+.rag-debug-intent-proto {
+  margin-top: 4px;
+  font-size: 0.72rem;
+  color: var(--muted, #64748b);
+}
+
+.rag-debug-intent-proto summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.rag-debug-intent-proto .rag-debug-preview {
+  margin: 4px 0 0;
+}
+
+.rag-debug-exemplar-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rag-debug-exemplar-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+}
+
 .rag-debug-id {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.72rem;

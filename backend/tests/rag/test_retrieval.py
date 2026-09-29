@@ -110,6 +110,13 @@ async def test_retrieval_ranks_gauss_above_others(
     # Geometry returned but must not affect ranking (B is far away).
     ids = [c.element_id for c in result.candidates]
     assert ids.index("A") < ids.index("B")
+    # Classification is attached but must not alter candidate ranking.
+    assert result.prompt_intent is not None
+    assert len(result.prompt_intent.scores) == 2
+    assert result.prompt_intent.classified_intent
+    assert result.prompt_intent.score_margin == (
+        result.prompt_intent.top_score - result.prompt_intent.second_score
+    )
 
 
 @pytest.mark.asyncio

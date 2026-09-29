@@ -30,6 +30,27 @@ describe('ragRetrievalService', () => {
               geometry: { x: 1, y: 2, width: 3, height: 4 },
             },
           ],
+          prompt_intent: {
+            classified_intent: 'spatial_relational',
+            top_score: 0.8,
+            second_score: 0.5,
+            score_margin: 0.3,
+            embedding_model: 'det',
+            embedding_provider: 'deterministic',
+            exemplar_top_k: 3,
+            scores: [
+              {
+                intent: 'spatial_relational',
+                similarity: 0.8,
+                display_name: 'Spatial / Relational',
+                top_matches: [
+                  { text: 'move below', similarity: 0.9 },
+                  { text: 'put beside', similarity: 0.8 },
+                  { text: 'near this', similarity: 0.7 },
+                ],
+              },
+            ],
+          },
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       ),
@@ -40,6 +61,7 @@ describe('ragRetrievalService', () => {
     const result = await svc.retrieve({ board_id: 'b1', prompt: 'gauss' });
     expect(result.candidates[0]?.element_id).toBe('el-1');
     expect(result.min_similarity).toBeNull();
+    expect(result.prompt_intent?.classified_intent).toBe('spatial_relational');
     expect(fetchMock).toHaveBeenCalledWith(
       'http://example.test/api/rag/retrieve',
       expect.objectContaining({ method: 'POST' }),

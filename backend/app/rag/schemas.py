@@ -130,6 +130,35 @@ class RetrievedElementResponse(BaseModel):
     geometry: dict[str, float]
 
 
+class PromptIntentExemplarMatchResponse(BaseModel):
+    text: str
+    similarity: float
+
+
+class PromptIntentScoreResponse(BaseModel):
+    intent: str
+    similarity: float
+    display_name: str
+    top_matches: list[PromptIntentExemplarMatchResponse] = Field(default_factory=list)
+
+
+class PromptIntentClassificationResponse(BaseModel):
+    """Debug-only 2-way prompt-intent classification — does not affect retrieval.
+
+    Intents: spatial_relational | interaction_reference.
+    Intent score = mean of top-K abstract exemplar similarities.
+    """
+
+    classified_intent: str
+    scores: list[PromptIntentScoreResponse]
+    top_score: float
+    second_score: float
+    score_margin: float
+    embedding_model: str
+    embedding_provider: str
+    exemplar_top_k: int = 3
+
+
 class RetrieveResponse(BaseModel):
     board_id: str
     query_chunks: int
@@ -140,3 +169,5 @@ class RetrieveResponse(BaseModel):
     top_k: int
     min_similarity: float | None
     candidates: list[RetrievedElementResponse]
+    # Observational only — never used to change top_k / cutoff / radius / budgets.
+    prompt_intent: PromptIntentClassificationResponse | None = None

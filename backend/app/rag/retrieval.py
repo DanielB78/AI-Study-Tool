@@ -6,21 +6,56 @@ from ..config import Settings, get_settings
 from ..errors import AiServiceError
 from .embeddings.base import EmbeddingService
 from .embeddings.factory import build_embedding_service
+from .intent.classifier import EmbeddingPromptIntentClassifier
+from .intent.types import PromptIntentClassification
 from .query_processor import QueryChunk, process_prompt
 from .ranking import ElementCandidate, group_chunks_by_element, rank_chunks_by_similarity
 from .repository import RagChunkRepository
 from .schemas import (
     MatchedChunkResponse,
+    PromptIntentClassificationResponse,
+    PromptIntentExemplarMatchResponse,
+    PromptIntentScoreResponse,
     RetrieveRequest,
     RetrieveResponse,
     RetrievedElementResponse,
 )
 
 
+def _classification_to_response(
+    result: PromptIntentClassification,
+) -> PromptIntentClassificationResponse:
+    return PromptIntentClassificationResponse(
+        classified_intent=result.classified_intent.value,
+        scores=[
+            PromptIntentScoreResponse(
+                intent=s.intent.value,
+                similarity=s.similarity,
+                display_name=s.display_name,
+                top_matches=[
+                    PromptIntentExemplarMatchResponse(
+                        text=m.text,
+                        similarity=m.similarity,
+                    )
+                    for m in s.top_matches
+                ],
+            )
+            for s in result.scores
+        ],
+        top_score=result.top_score,
+        second_score=result.second_score,
+        score_margin=result.score_margin,
+        embedding_model=result.embedding_model,
+        embedding_provider=result.embedding_provider,
+        exemplar_top_k=result.exemplar_top_k,
+    )
+
+
 class PromptRetrievalService:
     """Semantic-only retrieval: prompt → embed → cosine → group by element.
 
     Geometry is returned but never used for ranking in this phase.
+    Prompt-intent classification is observational and does not alter ranking.
     """
 
     def __init__(
@@ -28,16 +63,25 @@ class PromptRetrievalService:
         session: Session,
         settings: Settings | None = None,
         embedding: EmbeddingService | None = None,
+        intent_classifier: EmbeddingPromptIntentClassifier | None = None,
     ) -> None:
         self.session = session
         self.settings = settings or get_settings()
         self.repo = RagChunkRepository(session)
         self.embedding = embedding
+        self.intent_classifier = intent_classifier
 
     def _require_embedding(self) -> EmbeddingService:
         if self.embedding is not None:
             return self.embedding
         return build_embedding_service(self.settings)
+
+    def _require_intent_classifier(
+        self, embedder: EmbeddingService
+    ) -> EmbeddingPromptIntentClassifier:
+        if self.intent_classifier is not None:
+            return self.intent_classifier
+        return EmbeddingPromptIntentClassifier(embedder)
 
     async def retrieve(self, request: RetrieveRequest) -> RetrieveResponse:
         prompt = request.prompt.strip()
@@ -62,7 +106,11 @@ class PromptRetrievalService:
                 status_code=422,
             )
 
+        # Single query-embedding pass shared by canvas retrieval + intent classifier.
         query_vectors = await embedder.embed_queries([c.text for c in query_chunks])
+
+        classifier = self._require_intent_classifier(embedder)
+        intent_result = await classifier.classify_from_query_vectors(prompt, query_vectors)
 
         rows = self.repo.list_embedded_for_board(
             request.board_id,
@@ -113,4 +161,5 @@ class PromptRetrievalService:
                 )
                 for c in candidates
             ],
+            prompt_intent=_classification_to_response(intent_result),
         )

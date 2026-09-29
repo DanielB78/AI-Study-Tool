@@ -15,7 +15,11 @@ import {
   buildRagContext,
   type RagContext,
 } from './contextBuilder';
-import { ragRetrievalService, type RetrievedCandidate } from './ragRetrieval';
+import {
+  ragRetrievalService,
+  type PromptIntentClassification,
+  type RetrievedCandidate,
+} from './ragRetrieval';
 import {
   canvasElementsAsSpatial,
   findElementsNearAnchors,
@@ -68,6 +72,8 @@ export interface RagDebugState {
     embedding_provider: string;
     min_similarity: number | null;
   } | null;
+  /** Observational prompt-intent classification from the last Retrieve. */
+  promptIntent: PromptIntentClassification | null;
 
   openPanel: () => void;
   closePanel: () => void;
@@ -222,6 +228,7 @@ export function createRagDebugStore() {
     lastBuiltPrompt: null,
     lastQueryChunks: 0,
     lastRetrieveMeta: null,
+    promptIntent: null,
 
     openPanel: () => set({ open: true }),
     closePanel: () =>
@@ -439,6 +446,7 @@ export function createRagDebugStore() {
       const payload = {
         userPrompt: state.prompt,
         llmExecutionMode: state.llmExecutionMode,
+        promptIntent: state.promptIntent,
         candidates: state.candidates,
         selectedAnchorIds: state.selectedAnchorIds,
         radius: state.radius,
@@ -486,12 +494,19 @@ export function createRagDebugStore() {
             embedding_provider: result.embedding_provider,
             min_similarity: result.min_similarity,
           },
+          promptIntent: result.prompt_intent ?? null,
           retrieving: false,
           statusMessage: `${result.candidates.length} semantic candidate(s)`,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Retrieve failed';
-        set({ retrieving: false, error: message, candidates: [], selectedAnchorIds: [] });
+        set({
+          retrieving: false,
+          error: message,
+          candidates: [],
+          selectedAnchorIds: [],
+          promptIntent: null,
+        });
       }
     },
 
