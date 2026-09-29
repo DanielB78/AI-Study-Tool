@@ -73,6 +73,17 @@ function formatElementBlock(el: RagContextElement): string {
     `width: ${g.width}`,
     `height: ${g.height}`,
     '',
+    ...(el.style
+      ? [
+          'STYLE:',
+          `text_color: ${el.style.text_color}`,
+          `background_color: ${el.style.background_color ?? 'transparent'}`,
+          `bold: ${el.style.bold}`,
+          `italic: ${el.style.italic}`,
+          `underline: ${el.style.underline}`,
+          '',
+        ]
+      : []),
     ...formatRetrieval(el),
   ];
   return parts.join('\n');

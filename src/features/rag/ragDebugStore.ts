@@ -165,6 +165,13 @@ export function computeDebugContext(
         text: el.text,
         type: el.type,
         geometry: { x: el.x, y: el.y, width: el.width, height: el.height },
+        style: {
+          text_color: el.color,
+          background_color: el.backgroundColor,
+          bold: el.fontWeight === 'bold',
+          italic: el.fontItalic,
+          underline: el.underline,
+        },
       };
     }
     if (el.type === 'shape' && el.label) {
@@ -204,6 +211,21 @@ export function computeDebugContext(
     maxElements: RAG_MAX_CONTEXT_ELEMENTS,
     maxCharacters: RAG_MAX_CONTEXT_CHARACTERS,
   });
+
+  // Attach live TextElement style for spatial additions (anchors already carry style).
+  for (const ctxEl of context.allElements) {
+    if (ctxEl.style) continue;
+    const live = docElements.find((e) => e.id === ctxEl.element_id);
+    if (live?.type === 'text') {
+      ctxEl.style = {
+        text_color: live.color,
+        background_color: live.backgroundColor,
+        bold: live.fontWeight === 'bold',
+        italic: live.fontItalic,
+        underline: live.underline,
+      };
+    }
+  }
 
   return { context, spatialHits };
 }

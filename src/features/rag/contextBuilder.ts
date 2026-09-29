@@ -39,6 +39,14 @@ export interface RagContextElement {
   similarity: number | null;
   /** Nearest distance to any selected anchor (spatial); null if semantic-only */
   nearest_distance: number | null;
+  /** Current visual style when known (TextElements). */
+  style?: {
+    text_color: string;
+    background_color: string | null;
+    bold: boolean;
+    italic: boolean;
+    underline: boolean;
+  };
 }
 
 export interface RagContextStats {
@@ -69,6 +77,7 @@ export interface SemanticAnchorInput {
   geometry: WorldRect;
   /** Full TextElement text from CanvasDocument */
   text: string;
+  style?: RagContextElement['style'];
 }
 
 export interface BuildRagContextOptions {
@@ -121,6 +130,11 @@ function formatElementBlock(el: RagContextElement): string {
   lines.push(
     `POSITION: x=${el.geometry.x}, y=${el.geometry.y}, width=${el.geometry.width}, height=${el.geometry.height}`,
   );
+  if (el.style) {
+    lines.push(
+      `STYLE: text_color=${el.style.text_color}, background_color=${el.style.background_color ?? 'transparent'}, bold=${el.style.bold}, italic=${el.style.italic}, underline=${el.style.underline}`,
+    );
+  }
   lines.push('TEXT:');
   lines.push(el.text || '(empty)');
   return lines.join('\n');
@@ -178,6 +192,7 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
       inclusion: 'semantic',
       similarity: anchor.similarity,
       nearest_distance: null,
+      ...(anchor.style ? { style: anchor.style } : {}),
     });
   }
 
@@ -310,7 +325,14 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
 export function anchorsFromCandidates(
   candidates: readonly RetrievedCandidate[],
   selectedIds: ReadonlySet<string>,
-  resolveText: (elementId: string) => { text: string; type: string; geometry: WorldRect } | null,
+  resolveText: (
+    elementId: string,
+  ) => {
+    text: string;
+    type: string;
+    geometry: WorldRect;
+    style?: RagContextElement['style'];
+  } | null,
 ): SemanticAnchorInput[] {
   const out: SemanticAnchorInput[] = [];
   for (const c of candidates) {
@@ -323,6 +345,7 @@ export function anchorsFromCandidates(
       matched_chunks: c.matched_chunks,
       geometry: live?.geometry ?? c.geometry,
       text: live?.text ?? c.matched_chunks[0]?.text ?? '',
+      ...(live?.style ? { style: live.style } : {}),
     });
   }
   return out;

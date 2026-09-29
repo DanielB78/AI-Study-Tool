@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  CanvasAgentParseError,
-  describeOperationPlan,
-  parseCanvasAgentResponse,
-} from '../parser';
+import { describeOperationPlan, parseCanvasAgentResponse } from '../parser';
 
 const ctx = {
   allowedElementIds: new Set(['textbox_18', 'textbox_42', 'textbox_12']),
@@ -75,7 +71,113 @@ describe('parseCanvasAgentResponse', () => {
         JSON.stringify({ operations: [{ type: 'delete_element', target_element_id: 'x' }] }),
         ctx,
       ),
-    ).toThrow(/Allowed: create_text, update_text, move_text, resize_text, delete_text/);
+    ).toThrow(
+      /Allowed: create_text, update_text, move_text, resize_text, delete_text, update_text_style/,
+    );
+  });
+
+  it('parses valid update_text_style', () => {
+    const raw = JSON.stringify({
+      operations: [
+        {
+          type: 'update_text_style',
+          target_element_id: 'textbox_18',
+          style: { text_color: 'blue', bold: true },
+        },
+      ],
+    });
+    const res = parseCanvasAgentResponse(raw, ctx);
+    expect(res.operations[0]).toMatchObject({
+      type: 'update_text_style',
+      target_element_id: 'textbox_18',
+      style: { text_color: '#0000FF', bold: true },
+    });
+  });
+
+  it('parses create_text with optional style', () => {
+    const raw = JSON.stringify({
+      operations: [
+        {
+          type: 'create_text',
+          text: 'Styled note',
+          placement: { mode: 'viewport_default' },
+          style: { italic: true, background_color: '#FFFF00' },
+        },
+      ],
+    });
+    const res = parseCanvasAgentResponse(raw, ctx);
+    expect(res.operations[0]).toMatchObject({
+      type: 'create_text',
+      style: { italic: true, background_color: '#FFFF00' },
+    });
+  });
+
+  it('rejects empty style on update_text_style', () => {
+    expect(() =>
+      parseCanvasAgentResponse(
+        JSON.stringify({
+          operations: [
+            {
+              type: 'update_text_style',
+              target_element_id: 'textbox_18',
+              style: {},
+            },
+          ],
+        }),
+        ctx,
+      ),
+    ).toThrow(/at least one property/i);
+  });
+
+  it('rejects unknown style property', () => {
+    expect(() =>
+      parseCanvasAgentResponse(
+        JSON.stringify({
+          operations: [
+            {
+              type: 'update_text_style',
+              target_element_id: 'textbox_18',
+              style: { font_size: 20 },
+            },
+          ],
+        }),
+        ctx,
+      ),
+    ).toThrow(/Unknown style property/i);
+  });
+
+  it('rejects invalid colour in style', () => {
+    expect(() =>
+      parseCanvasAgentResponse(
+        JSON.stringify({
+          operations: [
+            {
+              type: 'update_text_style',
+              target_element_id: 'textbox_18',
+              style: { text_color: 'not-a-colour' },
+            },
+          ],
+        }),
+        ctx,
+      ),
+    ).toThrow(/Unsupported colour|Invalid hex|invalid/i);
+  });
+
+  it('rejects invented target on update_text_style', () => {
+    expect(() =>
+      parseCanvasAgentResponse(
+        JSON.stringify({
+          operations: [
+            {
+              type: 'update_text_style',
+              target_element_id: 'invented_99',
+              style: { bold: true },
+            },
+          ],
+        }),
+        ctx,
+      ),
+    ).toThrow(/not in the supplied canvas context/i);
   });
 
   it('parses valid move_text', () => {
@@ -312,6 +414,11 @@ describe('parseCanvasAgentResponse', () => {
         type: 'delete_text',
         target_element_id: 'textbox_12',
       },
+      {
+        type: 'update_text_style',
+        target_element_id: 'textbox_18',
+        style: { bold: true, text_color: '#0000FF' },
+      },
     ]);
     expect(lines[0]).toContain('UPDATE TEXT');
     expect(lines[0]).toContain('textbox_18');
@@ -319,5 +426,8 @@ describe('parseCanvasAgentResponse', () => {
     expect(lines[1]).toContain('right_of textbox_42');
     expect(lines[2]).toContain('⚠ DELETE TEXTBOX');
     expect(lines[2]).toContain('textbox_12');
+    expect(lines[3]).toContain('STYLE TEXTBOX');
+    expect(lines[3]).toContain('Bold: yes');
+    expect(lines[3]).toContain('#0000FF');
   });
 });

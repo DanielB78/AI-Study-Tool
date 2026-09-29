@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, Field, TypeAdapter, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 
 class ViewportDefaultPlacement(BaseModel):
@@ -32,10 +32,23 @@ Placement = Annotated[
 ]
 
 
+class TextStylePatch(BaseModel):
+    """Optional PATCH fields for text colour / fill / weight / decoration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text_color: str | None = None
+    background_color: str | None = None
+    bold: bool | None = None
+    italic: bool | None = None
+    underline: bool | None = None
+
+
 class CreateTextOperation(BaseModel):
     type: Literal["create_text"] = "create_text"
     text: str = Field(..., min_length=1)
     placement: Placement
+    style: TextStylePatch | None = None
 
 
 class UpdateTextOperation(BaseModel):
@@ -68,6 +81,18 @@ class DeleteTextOperation(BaseModel):
     target_element_id: str = Field(..., min_length=1)
 
 
+class UpdateTextStyleOperation(BaseModel):
+    type: Literal["update_text_style"] = "update_text_style"
+    target_element_id: str = Field(..., min_length=1)
+    style: TextStylePatch
+
+    @model_validator(mode="after")
+    def require_non_empty_style(self) -> UpdateTextStyleOperation:
+        if not self.style.model_fields_set:
+            raise ValueError("update_text_style.style must include at least one property")
+        return self
+
+
 CanvasOperation = Annotated[
     Union[
         CreateTextOperation,
@@ -75,6 +100,7 @@ CanvasOperation = Annotated[
         MoveTextOperation,
         ResizeTextOperation,
         DeleteTextOperation,
+        UpdateTextStyleOperation,
     ],
     Field(discriminator="type"),
 ]
