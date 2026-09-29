@@ -176,7 +176,8 @@ export function RagDebugPanel() {
             <div className="rag-debug-section-title">Prompt intent</div>
             {!promptIntent ? (
               <p className="rag-debug-empty">
-                No classification yet. Run Retrieve (observational only — does not change retrieval).
+                No classification yet. Run Retrieve (3-way: General / Spatial / Interaction —
+                observational only; does not change retrieval).
               </p>
             ) : (
               <>

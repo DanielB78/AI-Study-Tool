@@ -138,7 +138,11 @@ class PromptIntentScoreResponse(BaseModel):
 
 
 class PromptIntentClassificationResponse(BaseModel):
-    """Debug-only prompt-intent classification — does not affect retrieval."""
+    """Debug-only 3-way prompt-intent classification — does not affect retrieval.
+
+    Intents: general | spatial_relational | interaction_reference.
+    GENERAL means no special spatial/interaction signal — not canvas scope.
+    """
 
     classified_intent: str
     scores: list[PromptIntentScoreResponse]

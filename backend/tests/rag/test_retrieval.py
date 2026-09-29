@@ -112,7 +112,7 @@ async def test_retrieval_ranks_gauss_above_others(
     assert ids.index("A") < ids.index("B")
     # Classification is attached but must not alter candidate ranking.
     assert result.prompt_intent is not None
-    assert len(result.prompt_intent.scores) == 5
+    assert len(result.prompt_intent.scores) == 3
     assert result.prompt_intent.classified_intent
     assert result.prompt_intent.score_margin == (
         result.prompt_intent.top_score - result.prompt_intent.second_score

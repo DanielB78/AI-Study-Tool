@@ -1,6 +1,10 @@
 """Embedding-based prompt-intent classifier (local, no LLM).
 
 Observational only — does not change retrieval policies.
+
+Answers: does this request need a special spatial or interaction-history
+interpretation? It does NOT decide how much canvas context to retrieve.
+GENERAL means neither special signal was strongest — not element/topic/board scope.
 """
 
 from __future__ import annotations
@@ -59,6 +63,8 @@ class EmbeddingPromptIntentClassifier:
 
         texts = [d.description for d in INTENT_DEFINITIONS]
         # Prototypes are retrieval targets → document encoding.
+        # Changing INTENT_DEFINITIONS (count or text) changes the cache key
+        # and rebuilds these vectors (e.g. 5-way → 3-way migration).
         vectors = await self._embedding.embed_documents(texts)
         if len(vectors) != len(INTENT_DEFINITIONS):
             raise RuntimeError("prototype embedding count mismatch")

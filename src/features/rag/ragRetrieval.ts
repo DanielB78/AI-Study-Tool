@@ -24,9 +24,7 @@ export interface RetrievedCandidate {
 }
 
 export type PromptIntentId =
-  | 'element_specific'
-  | 'topic_specific'
-  | 'board_wide'
+  | 'general'
   | 'spatial_relational'
   | 'interaction_reference';
 

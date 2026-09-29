@@ -1,9 +1,9 @@
-"""Optional real EmbeddingGemma integration for prompt-intent classification.
+"""Optional real EmbeddingGemma integration for 3-way prompt-intent classification.
 
 Enable with: RUN_EMBEDDINGGEMMA_TESTS=1
 
-Exploratory: always asserts structure (5 scores, margin, sorted).
-Winner assertions are soft — ambiguous prompts log rankings instead of failing CI.
+Exploratory: always asserts structure (3 scores, margin, sorted).
+Winner checks are soft for ambiguous cases.
 """
 
 from __future__ import annotations
@@ -44,18 +44,15 @@ def _rank(result) -> list[tuple[str, float]]:
 
 
 @pytest.mark.asyncio
-async def test_gemma_returns_full_ranking_for_representative_prompts(
+async def test_gemma_returns_three_way_ranking(
     classifier: EmbeddingPromptIntentClassifier,
 ) -> None:
     cases: list[tuple[str, PromptIntent]] = [
-        ("Make the electric flux note shorter.", PromptIntent.ELEMENT_SPECIFIC),
+        ("Make the electric flux note shorter.", PromptIntent.GENERAL),
+        ("Check everything about electricity.", PromptIntent.GENERAL),
+        ("Check all the notes on this canvas for mistakes.", PromptIntent.GENERAL),
         (
-            "Check everything I've written about electricity.",
-            PromptIntent.TOPIC_SPECIFIC,
-        ),
-        ("Summarise this entire canvas.", PromptIntent.BOARD_WIDE),
-        (
-            "What is written next to the electricity note?",
+            "What is written around the electricity note?",
             PromptIntent.SPATIAL_RELATIONAL,
         ),
         ("Make the one you just created shorter.", PromptIntent.INTERACTION_REFERENCE),
@@ -68,14 +65,13 @@ async def test_gemma_returns_full_ranking_for_representative_prompts(
             f"margin={result.score_margin:.4f}\n  expected={expected.value}\n"
             f"  ranking={ranking}"
         )
-        assert len(result.scores) == 5
+        assert len(result.scores) == 3
         assert result.scores == sorted(
             result.scores, key=lambda s: s.similarity, reverse=True
         )
         assert result.score_margin == pytest.approx(
             result.top_score - result.second_score
         )
-        # Soft check: expected should appear in the top two (prototype tuning ongoing).
         top_two = {result.scores[0].intent, result.scores[1].intent}
         assert expected in top_two or result.classified_intent is expected, (
             f"prompt={prompt!r} expected={expected.value} in top-2; ranking={ranking}"
