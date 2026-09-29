@@ -149,7 +149,10 @@ export function resolvePlacement(request: PlacementRequest): Rect {
   }
 
   // relative_to_element
-  const anchorEl = request.elements.find((el) => el.id === placement.anchor_element_id);
+  const anchorId = placement.anchor_element_id;
+  const anchorEl = anchorId
+    ? request.elements.find((el) => el.id === anchorId)
+    : undefined;
   if (!anchorEl) {
     // Fallback to viewport if anchor vanished between plan and apply.
     return placeAiTextRect({

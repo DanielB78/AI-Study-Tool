@@ -11,6 +11,8 @@ import { useCanvasStore, type DraftShapeKind } from '../store/canvasStore';
 import { ElementRenderer } from './elements/ElementRenderer';
 import { SelectionTransformer } from './elements/SelectionTransformer';
 import { TextEditorOverlay } from './TextEditorOverlay';
+import { EquationEditorOverlay } from './EquationEditorOverlay';
+import { EquationHtmlLayer } from './EquationHtmlLayer';
 import { DraftShapePreview } from './DraftShapePreview';
 import {
   normalizeRect,
@@ -19,8 +21,9 @@ import {
   zoomAtPoint,
 } from '../utils/coordinates';
 import { snapPosition } from '../utils/snap';
-import { ZOOM_STEP, isShapeTool } from '../types/canvas';
+import { ZOOM_STEP, isShapeTool, type EquationElement } from '../types/canvas';
 import { ragSync } from '../features/rag/ragSync';
+import { measureEquationSize } from '../features/equations/latex';
 import { RagDebugOverlay } from '../features/rag/ui/RagDebugOverlay';
 
 function getCursor(
@@ -31,7 +34,7 @@ function getCursor(
   if (isSpacePanning || tool === 'pan' || isPanning) {
     return isPanning ? 'grabbing' : 'grab';
   }
-  if (tool === 'text') return 'text';
+  if (tool === 'text' || tool === 'equation') return 'text';
   if (
     tool === 'pen' ||
     tool === 'line' ||
@@ -61,6 +64,8 @@ export function InfiniteCanvas() {
   } | null>(null);
   const pendingTextCreate = useRef<{ x: number; y: number } | null>(null);
   const pendingTextEdit = useRef<string | null>(null);
+  const pendingEquationCreate = useRef<{ x: number; y: number } | null>(null);
+  const pendingEquationEdit = useRef<string | null>(null);
   const marqueeState = useRef<{
     startX: number;
     startY: number;
@@ -78,6 +83,7 @@ export function InfiniteCanvas() {
   const selectedIds = useCanvasStore((s) => s.selectedIds);
   const activeTool = useCanvasStore((s) => s.activeTool);
   const editingTextId = useCanvasStore((s) => s.editingTextId);
+  const editingEquationId = useCanvasStore((s) => s.editingEquationId);
   const editingShapeLabelId = useCanvasStore((s) => s.editingShapeLabelId);
   const isSpacePanning = useCanvasStore((s) => s.isSpacePanning);
   const marquee = useCanvasStore((s) => s.marquee);
@@ -90,6 +96,7 @@ export function InfiniteCanvas() {
   const select = useCanvasStore((s) => s.select);
   const clearSelection = useCanvasStore((s) => s.clearSelection);
   const setEditingTextId = useCanvasStore((s) => s.setEditingTextId);
+  const setEditingEquationId = useCanvasStore((s) => s.setEditingEquationId);
   const setEditingShapeLabelId = useCanvasStore((s) => s.setEditingShapeLabelId);
   const setMarquee = useCanvasStore((s) => s.setMarquee);
   const setDraftPoints = useCanvasStore((s) => s.setDraftPoints);
@@ -100,6 +107,7 @@ export function InfiniteCanvas() {
   const updateElement = useCanvasStore((s) => s.updateElement);
   const updateElements = useCanvasStore((s) => s.updateElements);
   const createTextAt = useCanvasStore((s) => s.createTextAt);
+  const createEquationAt = useCanvasStore((s) => s.createEquationAt);
   const commitDrawing = useCanvasStore((s) => s.commitDrawing);
   const commitShape = useCanvasStore((s) => s.commitShape);
   const addImageFromFile = useCanvasStore((s) => s.addImageFromFile);
@@ -228,6 +236,29 @@ export function InfiniteCanvas() {
       return;
     }
 
+    if (tool === 'equation') {
+      const hitEq = [...useCanvasStore.getState().document.elements]
+        .reverse()
+        .find((el) => {
+          if (el.type !== 'equation') return false;
+          const pad = 12;
+          return (
+            world.x >= el.x - pad &&
+            world.x <= el.x + Math.max(el.width, 24) + pad &&
+            world.y >= el.y - pad &&
+            world.y <= el.y + Math.max(el.height, el.fontSize * 1.4) + pad
+          );
+        });
+      if (hitEq) {
+        pendingEquationEdit.current = hitEq.id;
+        pendingEquationCreate.current = null;
+        return;
+      }
+      pendingEquationEdit.current = null;
+      pendingEquationCreate.current = { x: world.x, y: world.y };
+      return;
+    }
+
     if (tool === 'select' && clickedEmpty) {
       marqueeState.current = {
         startX: world.x,
@@ -321,6 +352,25 @@ export function InfiniteCanvas() {
       pendingTextCreate.current = null;
       // Defer so the creating pointerup cannot immediately blur the overlay.
       window.setTimeout(() => createTextAt(x, y), 0);
+      return;
+    }
+
+    if (pendingEquationEdit.current) {
+      const id = pendingEquationEdit.current;
+      pendingEquationEdit.current = null;
+      pendingEquationCreate.current = null;
+      window.setTimeout(() => {
+        select([id]);
+        pushHistory();
+        setEditingEquationId(id);
+      }, 0);
+      return;
+    }
+
+    if (pendingEquationCreate.current) {
+      const { x, y } = pendingEquationCreate.current;
+      pendingEquationCreate.current = null;
+      window.setTimeout(() => createEquationAt(x, y), 0);
       return;
     }
 
@@ -478,6 +528,17 @@ export function InfiniteCanvas() {
     [select, setEditingTextId, pushHistory],
   );
 
+  const onEditEquation = useCallback(
+    (id: string) => {
+      const el = useCanvasStore.getState().document.elements.find((e) => e.id === id);
+      if (!el || el.type !== 'equation' || el.locked) return;
+      select([id]);
+      pushHistory();
+      setEditingEquationId(id);
+    },
+    [select, setEditingEquationId, pushHistory],
+  );
+
   const onEditShapeLabel = useCallback(
     (id: string) => {
       const el = useCanvasStore.getState().document.elements.find((e) => e.id === id);
@@ -506,6 +567,20 @@ export function InfiniteCanvas() {
     }
     return null;
   }, [editingTextId, editingShapeLabelId, elements]);
+
+  const editingEquation = useMemo((): EquationElement | null => {
+    if (!editingEquationId) return null;
+    const el = elements.find(
+      (item): item is EquationElement =>
+        item.id === editingEquationId && item.type === 'equation',
+    );
+    return el ?? null;
+  }, [editingEquationId, elements]);
+
+  const equationElements = useMemo(
+    () => elements.filter((el): el is EquationElement => el.type === 'equation'),
+    [elements],
+  );
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
@@ -559,14 +634,17 @@ export function InfiniteCanvas() {
               element={el}
               listening={
                 canInteractWithObjects ||
-                (activeTool === 'text' && el.type === 'text')
+                (activeTool === 'text' && el.type === 'text') ||
+                (activeTool === 'equation' && el.type === 'equation')
               }
               isEditingText={editingTextId === el.id}
+              isEditingEquation={editingEquationId === el.id}
               onSelect={onSelectElement}
               onDragStart={onDragStartElement}
               onDragMove={onDragMoveElement}
               onDragEnd={onDragEndElement}
               onEditText={onEditText}
+              onEditEquation={onEditEquation}
               onEditShapeLabel={onEditShapeLabel}
             />
           ))}
@@ -630,11 +708,48 @@ export function InfiniteCanvas() {
             })}
             elements={elements}
             enabled={
-              canInteractWithObjects && !editingTextId && !editingShapeLabelId
+              canInteractWithObjects &&
+              !editingTextId &&
+              !editingEquationId &&
+              !editingShapeLabelId
             }
           />
         </Layer>
       </Stage>
+
+      <EquationHtmlLayer
+        equations={equationElements}
+        camera={camera}
+        editingId={editingEquationId}
+      />
+
+      {editingEquation && (
+        <EquationEditorOverlay
+          element={editingEquation}
+          camera={camera}
+          onCommit={(latex) => {
+            const size = measureEquationSize(latex, {
+              fontSize: editingEquation.fontSize,
+              displayMode: editingEquation.displayMode !== 'inline',
+            });
+            updateElement(editingEquation.id, (el) =>
+              el.type === 'equation'
+                ? { ...el, latex, width: size.width, height: size.height }
+                : el,
+            );
+            setEditingEquationId(null);
+            persist();
+            const state = useCanvasStore.getState();
+            const latest = state.document.elements.find(
+              (el) => el.id === editingEquation.id,
+            );
+            if (latest?.type === 'equation') {
+              ragSync.indexEquation(state.document.id, latest);
+            }
+          }}
+          onCancel={() => setEditingEquationId(null)}
+        />
+      )}
 
       {editingTarget && (
         <TextEditorOverlay

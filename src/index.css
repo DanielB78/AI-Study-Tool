@@ -375,6 +375,133 @@ textarea {
   outline: none;
 }
 
+/* —— Equation HTML overlays (KaTeX) —— */
+
+.equation-html-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.equation-html-item {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  transform-origin: top left;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  overflow: hidden;
+}
+
+.equation-html-item--error {
+  background: rgba(255, 240, 240, 0.92);
+  border: 1px solid #c0392b;
+  border-radius: 6px;
+}
+
+.equation-html-math {
+  line-height: 1.2;
+  overflow: hidden;
+}
+
+.equation-html-error {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #c0392b;
+  padding: 4px;
+  max-width: 100%;
+}
+
+.equation-html-error code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.equation-editor-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1.5px solid #2563eb;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.18);
+  box-sizing: border-box;
+}
+
+.equation-editor-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.equation-editor-textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.4;
+  outline: none;
+  background: #f8fafc;
+}
+
+.equation-editor-textarea:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.equation-editor-preview {
+  min-height: 40px;
+  padding: 8px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  overflow: auto;
+}
+
+.equation-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.equation-editor-btn {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.equation-editor-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.equation-editor-btn--primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
 @keyframes pop-in {
   from {
     opacity: 0;

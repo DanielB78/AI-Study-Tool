@@ -96,7 +96,43 @@ def test_system_prompt_loads() -> None:
     assert "resize_text" in text
     assert "delete_text" in text
     assert "update_text_style" in text
+    assert "create_equation" in text
+    assert "update_equation" in text
+    assert "TEXT VS EQUATION" in text
+    assert "anchor_operation_index" in text
     assert "TEXT STYLING" in text
+
+
+def test_valid_create_equation() -> None:
+    payload = {
+        "operations": [
+            {
+                "type": "create_equation",
+                "latex": r"E=mc^2",
+                "placement": {"mode": "viewport_default"},
+            }
+        ]
+    }
+    model = CanvasAgentResponse.model_validate(payload)
+    assert model.operations[0].type == "create_equation"
+
+
+def test_relative_placement_with_operation_index() -> None:
+    payload = {
+        "operations": [
+            {
+                "type": "create_equation",
+                "latex": r"F=ma",
+                "placement": {
+                    "mode": "relative_to_element",
+                    "relation": "below",
+                    "anchor_operation_index": 0,
+                },
+            }
+        ]
+    }
+    model = CanvasAgentResponse.model_validate(payload)
+    assert model.operations[0].placement.mode == "relative_to_element"
 
 
 def test_valid_move_text() -> None:

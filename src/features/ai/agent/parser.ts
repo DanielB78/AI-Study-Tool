@@ -13,13 +13,18 @@ import {
   type AbsolutePlacement,
   type CanvasAgentResponse,
   type CanvasOperation,
+  type CreateEquationOperation,
   type CreateTextOperation,
+  type DeleteEquationOperation,
   type DeleteTextOperation,
+  type MoveEquationOperation,
   type MoveTextOperation,
   type Placement,
   type PlacementRelation,
   type RelativePlacement,
+  type ResizeEquationOperation,
   type ResizeTextOperation,
+  type UpdateEquationOperation,
   type UpdateTextOperation,
   type UpdateTextStyleOperation,
 } from './operations';
@@ -30,6 +35,10 @@ import {
   normalizeTextStylePatch,
   type TextStylePatch,
 } from './textStyle';
+import {
+  sanitizeLatexSource,
+  validateLatex,
+} from '../../equations/latex';
 
 export type ParseErrorCode =
   | 'empty'
@@ -37,11 +46,15 @@ export type ParseErrorCode =
   | 'schema'
   | 'unknown_operation'
   | 'empty_text'
+  | 'empty_latex'
+  | 'invalid_latex'
   | 'missing_target'
   | 'target_not_in_context'
   | 'target_not_text'
+  | 'target_not_equation'
   | 'missing_anchor'
   | 'anchor_not_in_context'
+  | 'invalid_anchor_operation_index'
   | 'invalid_relation'
   | 'invalid_coordinates'
   | 'invalid_size'
@@ -66,7 +79,7 @@ export class CanvasAgentParseError extends Error {
 export interface ParseContext {
   /** Element IDs included in the RAG context sent to the model. */
   allowedElementIds: ReadonlySet<string>;
-  /** Optional: map id → type for TextElement checks. */
+  /** Optional: map id → type for TextElement / EquationElement checks. */
   elementTypes?: ReadonlyMap<string, string>;
 }
 
@@ -79,7 +92,9 @@ const ALLOWED_STYLE_KEYS = new Set([
 ]);
 
 const ALLOWED_OPERATIONS =
-  'create_text, update_text, move_text, resize_text, delete_text, update_text_style';
+  'create_text, update_text, move_text, resize_text, delete_text, update_text_style, create_equation, update_equation, move_equation, resize_equation, delete_equation';
+
+const CREATE_OPS_FOR_SAME_PLAN_ANCHOR = new Set(['create_text', 'create_equation']);
 
 /** Strip optional ```json fences; still require JSON object body. */
 export function stripCodeFences(raw: string): string {
@@ -98,6 +113,25 @@ function requireNonEmptyString(v: unknown, field: string): string {
     throw new CanvasAgentParseError('empty_text', `${field} must be a non-empty string.`);
   }
   return v;
+}
+
+function requireValidLatex(raw: unknown, field: string): string {
+  if (typeof raw !== 'string' || !raw.trim()) {
+    throw new CanvasAgentParseError('empty_latex', `${field} must be a non-empty LaTeX string.`);
+  }
+  const cleaned = sanitizeLatexSource(raw);
+  if (!cleaned) {
+    throw new CanvasAgentParseError('empty_latex', `${field} must be a non-empty LaTeX string.`);
+  }
+  const validation = validateLatex(cleaned, true);
+  if (!validation.ok) {
+    throw new CanvasAgentParseError(
+      'invalid_latex',
+      `${field} is not valid KaTeX LaTeX: ${validation.error ?? 'unknown error'}`,
+      validation.error ?? undefined,
+    );
+  }
+  return cleaned;
 }
 
 function requireTargetId(raw: Record<string, unknown>, opName: string): string {
@@ -183,10 +217,6 @@ function parsePlacement(raw: unknown): Placement {
     return { mode: 'viewport_default' };
   }
   if (raw.mode === 'relative_to_element') {
-    const anchor = raw.anchor_element_id;
-    if (typeof anchor !== 'string' || !anchor.trim()) {
-      throw new CanvasAgentParseError('missing_anchor', 'relative placement needs anchor_element_id.');
-    }
     const relation = raw.relation;
     if (typeof relation !== 'string' || !PLACEMENT_RELATIONS.includes(relation as PlacementRelation)) {
       throw new CanvasAgentParseError(
@@ -195,11 +225,39 @@ function parsePlacement(raw: unknown): Placement {
         String(relation),
       );
     }
-    return {
+
+    const hasElementId =
+      typeof raw.anchor_element_id === 'string' && raw.anchor_element_id.trim().length > 0;
+    const hasOpIndex =
+      typeof raw.anchor_operation_index === 'number' &&
+      Number.isInteger(raw.anchor_operation_index);
+
+    if (!hasElementId && raw.anchor_operation_index !== undefined && !hasOpIndex) {
+      throw new CanvasAgentParseError(
+        'invalid_anchor_operation_index',
+        'anchor_operation_index must be a non-negative integer.',
+        String(raw.anchor_operation_index),
+      );
+    }
+
+    if (!hasElementId && !hasOpIndex) {
+      throw new CanvasAgentParseError(
+        'missing_anchor',
+        'relative placement needs anchor_element_id or anchor_operation_index.',
+      );
+    }
+
+    const placement: RelativePlacement = {
       mode: 'relative_to_element',
-      anchor_element_id: anchor.trim(),
       relation: relation as PlacementRelation,
-    } satisfies RelativePlacement;
+    };
+    if (hasElementId) {
+      placement.anchor_element_id = (raw.anchor_element_id as string).trim();
+    }
+    if (hasOpIndex) {
+      placement.anchor_operation_index = raw.anchor_operation_index as number;
+    }
+    return placement;
   }
   if (raw.mode === 'absolute') {
     const x = raw.x;
@@ -218,11 +276,12 @@ function parsePlacement(raw: unknown): Placement {
 function validateDimension(
   value: unknown,
   field: 'width' | 'height',
+  opName: string,
 ): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new CanvasAgentParseError(
       'invalid_size',
-      `resize_text.${field} must be a finite number.`,
+      `${opName}.${field} must be a finite number.`,
       String(value),
     );
   }
@@ -231,7 +290,7 @@ function validateDimension(
   if (value < min || value > max) {
     throw new CanvasAgentParseError(
       'invalid_size',
-      `resize_text.${field} must be between ${min} and ${max}.`,
+      `${opName}.${field} must be between ${min} and ${max}.`,
       String(value),
     );
   }
@@ -276,8 +335,8 @@ function parseOperation(raw: unknown): CanvasOperation {
       );
     }
     const op: ResizeTextOperation = { type: 'resize_text', target_element_id };
-    if (hasWidth) op.width = validateDimension(raw.width, 'width');
-    if (hasHeight) op.height = validateDimension(raw.height, 'height');
+    if (hasWidth) op.width = validateDimension(raw.width, 'width', 'resize_text');
+    if (hasHeight) op.height = validateDimension(raw.height, 'height', 'resize_text');
     return op;
   }
   if (raw.type === 'delete_text') {
@@ -299,6 +358,48 @@ function parseOperation(raw: unknown): CanvasOperation {
       style,
     } satisfies UpdateTextStyleOperation;
   }
+  if (raw.type === 'create_equation') {
+    const latex = requireValidLatex(raw.latex, 'create_equation.latex');
+    const placement = parsePlacement(raw.placement);
+    return { type: 'create_equation', latex, placement } satisfies CreateEquationOperation;
+  }
+  if (raw.type === 'update_equation') {
+    const target_element_id = requireTargetId(raw, 'update_equation');
+    const latex = requireValidLatex(raw.latex, 'update_equation.latex');
+    return {
+      type: 'update_equation',
+      target_element_id,
+      latex,
+    } satisfies UpdateEquationOperation;
+  }
+  if (raw.type === 'move_equation') {
+    const target_element_id = requireTargetId(raw, 'move_equation');
+    const placement = parsePlacement(raw.placement);
+    return {
+      type: 'move_equation',
+      target_element_id,
+      placement,
+    } satisfies MoveEquationOperation;
+  }
+  if (raw.type === 'resize_equation') {
+    const target_element_id = requireTargetId(raw, 'resize_equation');
+    const hasWidth = raw.width !== undefined;
+    const hasHeight = raw.height !== undefined;
+    if (!hasWidth && !hasHeight) {
+      throw new CanvasAgentParseError(
+        'missing_size',
+        'resize_equation requires width and/or height.',
+      );
+    }
+    const op: ResizeEquationOperation = { type: 'resize_equation', target_element_id };
+    if (hasWidth) op.width = validateDimension(raw.width, 'width', 'resize_equation');
+    if (hasHeight) op.height = validateDimension(raw.height, 'height', 'resize_equation');
+    return op;
+  }
+  if (raw.type === 'delete_equation') {
+    const target_element_id = requireTargetId(raw, 'delete_equation');
+    return { type: 'delete_equation', target_element_id } satisfies DeleteEquationOperation;
+  }
   throw new CanvasAgentParseError(
     'unknown_operation',
     `Unsupported operation type "${raw.type}". Allowed: ${ALLOWED_OPERATIONS}.`,
@@ -306,7 +407,11 @@ function parseOperation(raw: unknown): CanvasOperation {
   );
 }
 
-function assertTargetInContext(id: string, ctx: ParseContext): void {
+function assertTargetInContext(
+  id: string,
+  ctx: ParseContext,
+  expectedType: 'text' | 'equation',
+): void {
   if (!ctx.allowedElementIds.has(id)) {
     throw new CanvasAgentParseError(
       'target_not_in_context',
@@ -315,10 +420,18 @@ function assertTargetInContext(id: string, ctx: ParseContext): void {
     );
   }
   const t = ctx.elementTypes?.get(id);
-  if (t !== undefined && t !== 'text') {
+  if (t === undefined) return;
+  if (expectedType === 'text' && t !== 'text') {
     throw new CanvasAgentParseError(
       'target_not_text',
       `target_element_id "${id}" is not a TextElement.`,
+      id,
+    );
+  }
+  if (expectedType === 'equation' && t !== 'equation') {
+    throw new CanvasAgentParseError(
+      'target_not_equation',
+      `target_element_id "${id}" is not an EquationElement.`,
       id,
     );
   }
@@ -327,27 +440,63 @@ function assertTargetInContext(id: string, ctx: ParseContext): void {
 function assertRelativePlacement(
   placement: Placement,
   ctx: ParseContext,
+  ops: readonly CanvasOperation[],
+  opIndex: number,
   targetId?: string,
 ): void {
   if (placement.mode !== 'relative_to_element') return;
-  const id = placement.anchor_element_id;
-  if (!ctx.allowedElementIds.has(id)) {
-    throw new CanvasAgentParseError(
-      'anchor_not_in_context',
-      `anchor_element_id "${id}" was not in the supplied canvas context.`,
-      id,
-    );
+
+  if (placement.anchor_element_id) {
+    const id = placement.anchor_element_id;
+    if (!ctx.allowedElementIds.has(id)) {
+      throw new CanvasAgentParseError(
+        'anchor_not_in_context',
+        `anchor_element_id "${id}" was not in the supplied canvas context.`,
+        id,
+      );
+    }
+    if (targetId && id === targetId) {
+      throw new CanvasAgentParseError(
+        'self_anchor',
+        'Cannot use the target as its own placement anchor.',
+        id,
+      );
+    }
   }
-  if (targetId && id === targetId) {
+
+  if (placement.anchor_operation_index !== undefined) {
+    const j = placement.anchor_operation_index;
+    if (!Number.isInteger(j) || j < 0 || j >= opIndex) {
+      throw new CanvasAgentParseError(
+        'invalid_anchor_operation_index',
+        `anchor_operation_index ${j} must be an integer in [0, ${opIndex}) for operation ${opIndex}.`,
+        String(j),
+      );
+    }
+    const anchorOp = ops[j];
+    if (!anchorOp || !CREATE_OPS_FOR_SAME_PLAN_ANCHOR.has(anchorOp.type)) {
+      throw new CanvasAgentParseError(
+        'invalid_anchor_operation_index',
+        `anchor_operation_index ${j} must refer to an earlier create_text or create_equation.`,
+        String(j),
+      );
+    }
+  }
+
+  if (!placement.anchor_element_id && placement.anchor_operation_index === undefined) {
     throw new CanvasAgentParseError(
-      'self_anchor',
-      'move_text cannot use the target as its own placement anchor.',
-      id,
+      'missing_anchor',
+      'relative placement needs anchor_element_id or anchor_operation_index.',
     );
   }
 }
 
-function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
+function semanticValidate(
+  op: CanvasOperation,
+  ctx: ParseContext,
+  ops: readonly CanvasOperation[],
+  opIndex: number,
+): void {
   if (
     op.type === 'update_text' ||
     op.type === 'move_text' ||
@@ -355,13 +504,21 @@ function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
     op.type === 'delete_text' ||
     op.type === 'update_text_style'
   ) {
-    assertTargetInContext(op.target_element_id, ctx);
+    assertTargetInContext(op.target_element_id, ctx, 'text');
   }
-  if (op.type === 'create_text') {
-    assertRelativePlacement(op.placement, ctx);
+  if (
+    op.type === 'update_equation' ||
+    op.type === 'move_equation' ||
+    op.type === 'resize_equation' ||
+    op.type === 'delete_equation'
+  ) {
+    assertTargetInContext(op.target_element_id, ctx, 'equation');
   }
-  if (op.type === 'move_text') {
-    assertRelativePlacement(op.placement, ctx, op.target_element_id);
+  if (op.type === 'create_text' || op.type === 'create_equation') {
+    assertRelativePlacement(op.placement, ctx, ops, opIndex);
+  }
+  if (op.type === 'move_text' || op.type === 'move_equation') {
+    assertRelativePlacement(op.placement, ctx, ops, opIndex, op.target_element_id);
   }
 }
 
@@ -399,11 +556,15 @@ export function parseCanvasAgentResponse(
     throw new CanvasAgentParseError('schema', 'operations must contain at least one item.');
   }
 
+  // First pass: structural parse of every op (all-or-nothing).
   const operations: CanvasOperation[] = [];
   for (const item of parsed.operations) {
-    const op = parseOperation(item);
-    semanticValidate(op, ctx);
-    operations.push(op);
+    operations.push(parseOperation(item));
+  }
+
+  // Second pass: semantic validation with same-plan index awareness.
+  for (let i = 0; i < operations.length; i++) {
+    semanticValidate(operations[i]!, ctx, operations, i);
   }
 
   return { operations };

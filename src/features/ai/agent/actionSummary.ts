@@ -5,6 +5,7 @@
 
 import type { CanvasOperation, Placement } from './operations';
 import { describeStylePatch, summarizeStylePatch, type TextStylePatch } from './textStyle';
+import { validateLatex } from '../../equations/latex';
 
 export interface SummaryElementPreview {
   id: string;
@@ -34,10 +35,16 @@ function topicFromPrompt(userPrompt: string): string | undefined {
   return undefined;
 }
 
-function placementPhrase(placement: Placement): string {
+function placementPhrase(placement: Placement, noun = 'textbox'): string {
   if (placement.mode === 'viewport_default') return 'to the viewport default position';
   if (placement.mode === 'absolute') return `to (${placement.x}, ${placement.y})`;
-  return `${placement.relation.replace(/_/g, ' ')} textbox ${placement.anchor_element_id}`;
+  if (placement.anchor_element_id) {
+    return `${placement.relation.replace(/_/g, ' ')} ${noun} ${placement.anchor_element_id}`;
+  }
+  if (placement.anchor_operation_index !== undefined) {
+    return `${placement.relation.replace(/_/g, ' ')} operation ${placement.anchor_operation_index}`;
+  }
+  return `${placement.relation.replace(/_/g, ' ')} unknown anchor`;
 }
 
 function joinAnd(parts: string[]): string {
@@ -45,6 +52,16 @@ function joinAnd(parts: string[]): string {
   if (parts.length === 1) return parts[0]!;
   if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
   return `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`;
+}
+
+function formatPlacementLine(p: Placement): string {
+  if (p.mode === 'viewport_default') return 'viewport_default';
+  if (p.mode === 'absolute') return `absolute (${p.x}, ${p.y})`;
+  if (p.anchor_element_id) return `${p.relation} ${p.anchor_element_id}`;
+  if (p.anchor_operation_index !== undefined) {
+    return `${p.relation} op[${p.anchor_operation_index}]`;
+  }
+  return p.relation;
 }
 
 /** Natural one-line phrasing for a single update_text_style. */
@@ -103,9 +120,18 @@ export function summarizeAiActions(input: {
       const topic = topicFromPrompt(userPrompt) || previewPhrase(op.text);
       const placement = op.placement;
       if (placement.mode === 'relative_to_element') {
-        return `Created textbox ${id} ${placement.relation.replace(/_/g, ' ')} textbox ${placement.anchor_element_id} about ${topic}.`;
+        return `Created textbox ${id} ${placementPhrase(placement)} about ${topic}.`;
       }
       return `Created textbox ${id} about ${topic}.`;
+    }
+    if (op.type === 'create_equation') {
+      const id = createdIds[0] ?? 'new equation';
+      const topic = topicFromPrompt(userPrompt) || previewPhrase(op.latex);
+      const placement = op.placement;
+      if (placement.mode === 'relative_to_element') {
+        return `Created equation ${id} ${placementPhrase(placement, 'element')} (${topic}).`;
+      }
+      return `Created equation ${id} (${topic}).`;
     }
     if (op.type === 'update_text') {
       const prev = previews[op.target_element_id];
@@ -115,8 +141,15 @@ export function summarizeAiActions(input: {
       const missing = prev && prev.exists === false ? ' (element no longer exists)' : '';
       return `Updated textbox ${op.target_element_id}${missing}${aboutSuffix(topic)}.`;
     }
+    if (op.type === 'update_equation') {
+      const topic = topicFromPrompt(userPrompt) || previewPhrase(op.latex);
+      return `Updated equation ${op.target_element_id}${aboutSuffix(topic)}.`;
+    }
     if (op.type === 'move_text') {
       return `Moved textbox ${op.target_element_id} ${placementPhrase(op.placement)}.`;
+    }
+    if (op.type === 'move_equation') {
+      return `Moved equation ${op.target_element_id} ${placementPhrase(op.placement, 'element')}.`;
     }
     if (op.type === 'resize_text') {
       const parts: string[] = [];
@@ -128,10 +161,25 @@ export function summarizeAiActions(input: {
           : parts.join(', ');
       return `Resized textbox ${op.target_element_id} to ${dims}.`;
     }
+    if (op.type === 'resize_equation') {
+      const parts: string[] = [];
+      if (op.width != null) parts.push(`width ${op.width}`);
+      if (op.height != null) parts.push(`height ${op.height}`);
+      const dims =
+        op.width != null && op.height != null
+          ? `${op.width} × ${op.height}`
+          : parts.join(', ');
+      return `Resized equation ${op.target_element_id} to ${dims}.`;
+    }
     if (op.type === 'delete_text') {
       const prev = previews[op.target_element_id];
       const topic = previewPhrase(prev?.text);
       return `Deleted textbox ${op.target_element_id}${aboutSuffix(topic)}.`;
+    }
+    if (op.type === 'delete_equation') {
+      const prev = previews[op.target_element_id];
+      const topic = previewPhrase(prev?.text);
+      return `Deleted equation ${op.target_element_id}${aboutSuffix(topic)}.`;
     }
     if (op.type === 'update_text_style') {
       return summarizeStyleUpdate(op.target_element_id, op.style);
@@ -144,14 +192,25 @@ export function summarizeAiActions(input: {
     if (op.type === 'create_text') {
       const id = createdIds[createIdx++] ?? 'new textbox';
       parts.push(`created ${id}`);
+    } else if (op.type === 'create_equation') {
+      const id = createdIds[createIdx++] ?? 'new equation';
+      parts.push(`created equation ${id}`);
     } else if (op.type === 'update_text') {
       parts.push(`updated ${op.target_element_id}`);
+    } else if (op.type === 'update_equation') {
+      parts.push(`updated equation ${op.target_element_id}`);
     } else if (op.type === 'move_text') {
       parts.push(`moved ${op.target_element_id}`);
+    } else if (op.type === 'move_equation') {
+      parts.push(`moved equation ${op.target_element_id}`);
     } else if (op.type === 'resize_text') {
       parts.push(`resized ${op.target_element_id}`);
+    } else if (op.type === 'resize_equation') {
+      parts.push(`resized equation ${op.target_element_id}`);
     } else if (op.type === 'delete_text') {
       parts.push(`deleted ${op.target_element_id}`);
+    } else if (op.type === 'delete_equation') {
+      parts.push(`deleted equation ${op.target_element_id}`);
     } else if (op.type === 'update_text_style') {
       parts.push(`styled ${op.target_element_id}`);
     }
@@ -187,13 +246,24 @@ export function describeOperationPlanLines(ops: readonly CanvasOperation[]): str
       const preview = op.text.replace(/\s+/g, ' ').slice(0, 80);
       return `${n}. UPDATE TEXT\n   Target: ${op.target_element_id}\n   Text: ${preview}${op.text.length > 80 ? '…' : ''}`;
     }
+    if (op.type === 'update_equation') {
+      const preview = op.latex.replace(/\s+/g, ' ').slice(0, 80);
+      const validation = validateLatex(op.latex, true);
+      const lines = [
+        `${n}. UPDATE EQUATION`,
+        `   Target: ${op.target_element_id}`,
+        `   LaTeX: ${preview}${op.latex.length > 80 ? '…' : ''}`,
+      ];
+      if (!validation.ok) {
+        lines.push(`   ⚠ Validation: ${validation.error ?? 'invalid LaTeX'}`);
+      }
+      return lines.join('\n');
+    }
     if (op.type === 'move_text') {
-      const p = op.placement;
-      let placementLine = '';
-      if (p.mode === 'viewport_default') placementLine = 'viewport_default';
-      else if (p.mode === 'absolute') placementLine = `absolute (${p.x}, ${p.y})`;
-      else placementLine = `${p.relation} ${p.anchor_element_id}`;
-      return `${n}. MOVE TEXTBOX\n   Target: ${op.target_element_id}\n   Placement: ${placementLine}`;
+      return `${n}. MOVE TEXTBOX\n   Target: ${op.target_element_id}\n   Placement: ${formatPlacementLine(op.placement)}`;
+    }
+    if (op.type === 'move_equation') {
+      return `${n}. MOVE EQUATION\n   Target: ${op.target_element_id}\n   Placement: ${formatPlacementLine(op.placement)}`;
     }
     if (op.type === 'resize_text') {
       const dims = [
@@ -204,8 +274,20 @@ export function describeOperationPlanLines(ops: readonly CanvasOperation[]): str
         .join(', ');
       return `${n}. RESIZE TEXTBOX\n   Target: ${op.target_element_id}\n   New size: ${dims}`;
     }
+    if (op.type === 'resize_equation') {
+      const dims = [
+        op.width != null ? `width ${op.width}` : null,
+        op.height != null ? `height ${op.height}` : null,
+      ]
+        .filter(Boolean)
+        .join(', ');
+      return `${n}. RESIZE EQUATION\n   Target: ${op.target_element_id}\n   New size: ${dims}`;
+    }
     if (op.type === 'delete_text') {
       return `${n}. ⚠ DELETE TEXTBOX\n   Target: ${op.target_element_id}`;
+    }
+    if (op.type === 'delete_equation') {
+      return `${n}. ⚠ DELETE EQUATION\n   Target: ${op.target_element_id}`;
     }
     if (op.type === 'update_text_style') {
       const styleLines = describeStylePatch(op.style)
@@ -213,16 +295,24 @@ export function describeOperationPlanLines(ops: readonly CanvasOperation[]): str
         .join('\n');
       return `${n}. STYLE TEXTBOX\n   Target: ${op.target_element_id}\n${styleLines}`;
     }
+    if (op.type === 'create_equation') {
+      const preview = op.latex.replace(/\s+/g, ' ').slice(0, 80);
+      const validation = validateLatex(op.latex, true);
+      const lines = [
+        `${n}. CREATE EQUATION`,
+        `   Placement: ${formatPlacementLine(op.placement)}`,
+        `   LaTeX: ${preview}${op.latex.length > 80 ? '…' : ''}`,
+      ];
+      if (!validation.ok) {
+        lines.push(`   ⚠ Validation: ${validation.error ?? 'invalid LaTeX'}`);
+      }
+      return lines.join('\n');
+    }
     // create_text
-    const p = op.placement;
-    let placementLine = '';
-    if (p.mode === 'viewport_default') placementLine = 'viewport_default';
-    else if (p.mode === 'absolute') placementLine = `absolute (${p.x}, ${p.y})`;
-    else placementLine = `${p.relation} ${p.anchor_element_id}`;
     const preview = op.text.replace(/\s+/g, ' ').slice(0, 80);
     const lines = [
       `${n}. CREATE TEXT`,
-      `   Placement: ${placementLine}`,
+      `   Placement: ${formatPlacementLine(op.placement)}`,
       `   Text: ${preview}${op.text.length > 80 ? '…' : ''}`,
     ];
     if (op.style) {

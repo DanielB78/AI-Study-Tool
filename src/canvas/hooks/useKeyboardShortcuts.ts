@@ -8,7 +8,8 @@ function isTypingTarget(target: EventTarget | null): boolean {
     tag === 'INPUT' ||
     tag === 'TEXTAREA' ||
     target.isContentEditable ||
-    target.classList.contains('text-editor-overlay')
+    target.classList.contains('text-editor-overlay') ||
+    Boolean(target.closest('.equation-editor-overlay'))
   );
 }
 
@@ -33,7 +34,12 @@ export function useKeyboardShortcuts(fileInputRef: React.RefObject<HTMLInputElem
         return;
       }
 
-      if (isTypingTarget(e.target) || store.editingTextId || store.editingShapeLabelId) {
+      if (
+        isTypingTarget(e.target) ||
+        store.editingTextId ||
+        store.editingEquationId ||
+        store.editingShapeLabelId
+      ) {
         return;
       }
 
@@ -85,6 +91,12 @@ export function useKeyboardShortcuts(fileInputRef: React.RefObject<HTMLInputElem
           store.setEditingTextId(el.id);
           return;
         }
+        if (el?.type === 'equation') {
+          e.preventDefault();
+          store.pushHistory();
+          store.setEditingEquationId(el.id);
+          return;
+        }
       }
 
       if (e.key === 'Escape') {
@@ -92,6 +104,7 @@ export function useKeyboardShortcuts(fileInputRef: React.RefObject<HTMLInputElem
         store.setDraftPoints(null);
         store.setDraftShape(null);
         store.setEditingTextId(null);
+        store.setEditingEquationId(null);
         store.setEditingShapeLabelId(null);
         store.setTool('select');
         return;
@@ -107,6 +120,9 @@ export function useKeyboardShortcuts(fileInputRef: React.RefObject<HTMLInputElem
           break;
         case 't':
           store.setTool('text');
+          break;
+        case 'e':
+          store.setTool('equation');
           break;
         case 'p':
           store.setTool('pen');
@@ -138,7 +154,12 @@ export function useKeyboardShortcuts(fileInputRef: React.RefObject<HTMLInputElem
     };
 
     const onPaste = async (e: ClipboardEvent) => {
-      if (isTypingTarget(e.target) || useCanvasStore.getState().editingTextId) return;
+      if (
+        isTypingTarget(e.target) ||
+        useCanvasStore.getState().editingTextId ||
+        useCanvasStore.getState().editingEquationId
+      )
+        return;
       const items = e.clipboardData?.items;
       if (!items) return;
       for (const item of items) {

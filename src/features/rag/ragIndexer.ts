@@ -1,16 +1,22 @@
-import type { TextElement } from '../../types/canvas';
+import type { EquationElement, TextElement } from '../../types/canvas';
 import { RAG_API_BASE_URL } from './config';
 
-export interface TextIndexPayload {
+export type IndexableCanvasElement = TextElement | EquationElement;
+
+export interface ElementIndexPayload {
   board_id: string;
   element_id: string;
-  element_type: 'text';
+  element_type: 'text' | 'equation';
+  /** Prose for text; LaTeX source for equations. */
   text: string;
   x: number;
   y: number;
   width: number;
   height: number;
 }
+
+/** @deprecated Prefer ElementIndexPayload — kept for existing call sites. */
+export type TextIndexPayload = ElementIndexPayload;
 
 export interface IndexResult {
   element_id: string;
@@ -19,22 +25,25 @@ export interface IndexResult {
 }
 
 export interface RagIndexer {
-  indexTextElement(payload: TextIndexPayload): Promise<IndexResult>;
+  indexTextElement(payload: ElementIndexPayload): Promise<IndexResult>;
   updateGeometry(
     boardId: string,
     elementId: string,
     geometry: { x: number; y: number; width: number; height: number },
   ): Promise<void>;
   deleteElement(boardId: string, elementId: string): Promise<void>;
-  reindexBoard(boardId: string, elements: TextIndexPayload[]): Promise<void>;
+  reindexBoard(boardId: string, elements: ElementIndexPayload[]): Promise<void>;
 }
 
-function toPayload(boardId: string, el: TextElement): TextIndexPayload {
+export function toPayload(
+  boardId: string,
+  el: IndexableCanvasElement,
+): ElementIndexPayload {
   return {
     board_id: boardId,
     element_id: el.id,
-    element_type: 'text',
-    text: el.text,
+    element_type: el.type,
+    text: el.type === 'text' ? el.text : el.latex,
     x: el.x,
     y: el.y,
     width: el.width,
@@ -101,5 +110,3 @@ export function createRagIndexer(baseUrl: string = RAG_API_BASE_URL): RagIndexer
 }
 
 export const ragIndexer: RagIndexer = createRagIndexer();
-
-export { toPayload };

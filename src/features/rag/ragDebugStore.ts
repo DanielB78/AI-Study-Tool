@@ -174,6 +174,13 @@ export function computeDebugContext(
         },
       };
     }
+    if (el.type === 'equation') {
+      return {
+        text: el.latex,
+        type: el.type,
+        geometry: { x: el.x, y: el.y, width: el.width, height: el.height },
+      };
+    }
     if (el.type === 'shape' && el.label) {
       return {
         text: el.label,
@@ -299,6 +306,9 @@ function elementPreviewMaps(ids: string[]): {
     if (el?.type === 'text') {
       stringPreviews[id] = el.text;
       summaryPreviews[id] = { id, text: el.text, exists: true };
+    } else if (el?.type === 'equation') {
+      stringPreviews[id] = el.latex;
+      summaryPreviews[id] = { id, text: el.latex, exists: true };
     } else if (el) {
       stringPreviews[id] = el.type === 'shape' ? el.label ?? '' : '';
       summaryPreviews[id] = { id, text: stringPreviews[id], exists: true };

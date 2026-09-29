@@ -58,13 +58,14 @@ function formatRetrieval(el: RagContextElement): string[] {
 
 function formatElementBlock(el: RagContextElement): string {
   const g = el.geometry;
+  const contentLabel = el.element_type === 'equation' ? 'LATEX:' : 'TEXT:';
   const parts = [
     'CANVAS ELEMENT',
     '',
     `ID: ${el.element_id}`,
     `TYPE: ${el.element_type}`,
     '',
-    'TEXT:',
+    contentLabel,
     el.text || '(empty)',
     '',
     'POSITION:',
