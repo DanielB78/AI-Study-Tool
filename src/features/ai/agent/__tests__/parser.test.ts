@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  CanvasAgentParseError,
-  describeOperationPlan,
-  parseCanvasAgentResponse,
-} from '../parser';
+import { describeOperationPlan, parseCanvasAgentResponse } from '../parser';
 
 const ctx = {
   allowedElementIds: new Set(['textbox_18', 'textbox_42', 'textbox_12']),
