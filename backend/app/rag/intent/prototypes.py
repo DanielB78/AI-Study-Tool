@@ -1,7 +1,8 @@
-"""Centralized, easy-to-edit semantic prototypes for prompt intents.
+"""Centralized abstract exemplar fragments for prompt-intent classification.
 
-Tune these natural-language descriptions during development; changing the
-text invalidates the in-memory prototype embedding cache automatically.
+Each fragment is embedded separately. Intent score = mean of top-K exemplar
+similarities. Tune these lists during development — changing text invalidates
+the in-memory exemplar embedding cache.
 
 GENERAL does NOT encode element / topic / board-wide scope — only that the
 prompt lacks a special spatial or interaction-history signal.
@@ -13,39 +14,91 @@ from dataclasses import dataclass
 
 from .types import PromptIntent
 
+# Mean of the top-K exemplar similarities per intent.
+INTENT_EXEMPLAR_TOP_K = 3
+
 
 @dataclass(frozen=True, slots=True)
 class PromptIntentDefinition:
     intent: PromptIntent
-    description: str
+    examples: tuple[str, ...]
 
 
-# Exactly three intents — edit descriptions here only.
+# Exactly three intents — short, subject-free interaction-pattern fragments.
 INTENT_DEFINITIONS: tuple[PromptIntentDefinition, ...] = (
     PromptIntentDefinition(
         intent=PromptIntent.GENERAL,
-        description=(
-            "A normal request about the content or elements on the current canvas "
-            "— such as editing, inspecting, summarising, checking, deleting, formatting, "
-            "or explaining notes or equations — that does not primarily depend on "
-            "spatial relationships or references to previous interactions."
+        examples=(
+            "make shorter",
+            "rewrite clearly",
+            "check for mistakes",
+            "check correctness",
+            "explain simply",
+            "summarise content",
+            "summarise everything",
+            "make more detailed",
+            "make easier to understand",
+            "change colour",
+            "make bold",
+            "make italic",
+            "underline",
+            "remove content",
+            "create an explanation",
+            "rewrite this",
+            "improve wording",
+            "correct this",
+            "review everything",
+            "add more detail",
         ),
     ),
     PromptIntentDefinition(
         intent=PromptIntent.SPATIAL_RELATIONAL,
-        description=(
-            "A request about canvas elements based on their physical position or "
-            "relationship to other elements, such as nearby, around, above, below, "
-            "beside, next to, left of, or right of something."
+        examples=(
+            "move below",
+            "place above",
+            "put beside",
+            "move to the right",
+            "move to the left",
+            "put underneath",
+            "place nearby",
+            "move closer",
+            "move farther away",
+            "what is around this",
+            "what is beside this",
+            "what is above this",
+            "what is below this",
+            "what is next to this",
+            "place between",
+            "move underneath this",
+            "put on the right",
+            "put on the left",
+            "surrounding this",
+            "near this",
         ),
     ),
     PromptIntentDefinition(
         intent=PromptIntent.INTERACTION_REFERENCE,
-        description=(
-            "A request referring to something created, edited, moved, deleted, or "
-            "discussed in a previous interaction, often using references such as "
-            "it, that, the one you created, what you changed, what you just did, "
-            "or something added earlier."
+        examples=(
+            "the one you just made",
+            "what you just changed",
+            "undo that",
+            "redo that",
+            "change what you added",
+            "remove what you created",
+            "the previous one",
+            "what you did earlier",
+            "go back to before",
+            "change that again",
+            "the last thing you changed",
+            "what you created earlier",
+            "what you added before",
+            "the thing you just made",
+            "restore the previous version",
+            "undo the last change",
+            "redo the last change",
+            "the one from earlier",
+            "change what you did",
+            "remove what you just added",
         ),
     ),
 )
@@ -58,7 +111,14 @@ def get_intent_definition(intent: PromptIntent) -> PromptIntentDefinition:
     raise KeyError(f"No prototype definition for {intent!r}")
 
 
-def prototype_content_fingerprint() -> str:
-    """Stable content hash key for cache invalidation when prototypes change."""
-    parts = [f"{d.intent.value}\0{d.description}" for d in INTENT_DEFINITIONS]
+def exemplar_content_fingerprint() -> str:
+    """Stable content hash key for cache invalidation when exemplars change."""
+    parts: list[str] = [f"top_k={INTENT_EXEMPLAR_TOP_K}"]
+    for definition in INTENT_DEFINITIONS:
+        parts.append(definition.intent.value)
+        parts.extend(definition.examples)
     return "\n".join(parts)
+
+
+# Back-compat alias used by older imports / tests during migration.
+prototype_content_fingerprint = exemplar_content_fingerprint

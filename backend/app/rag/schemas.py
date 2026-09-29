@@ -130,11 +130,16 @@ class RetrievedElementResponse(BaseModel):
     geometry: dict[str, float]
 
 
+class PromptIntentExemplarMatchResponse(BaseModel):
+    text: str
+    similarity: float
+
+
 class PromptIntentScoreResponse(BaseModel):
     intent: str
     similarity: float
-    description: str
     display_name: str
+    top_matches: list[PromptIntentExemplarMatchResponse] = Field(default_factory=list)
 
 
 class PromptIntentClassificationResponse(BaseModel):
@@ -142,6 +147,7 @@ class PromptIntentClassificationResponse(BaseModel):
 
     Intents: general | spatial_relational | interaction_reference.
     GENERAL means no special spatial/interaction signal — not canvas scope.
+    Intent score = mean of top-K abstract exemplar similarities.
     """
 
     classified_intent: str
@@ -151,6 +157,7 @@ class PromptIntentClassificationResponse(BaseModel):
     score_margin: float
     embedding_model: str
     embedding_provider: str
+    exemplar_top_k: int = 3
 
 
 class RetrieveResponse(BaseModel):

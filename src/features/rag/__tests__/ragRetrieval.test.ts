@@ -37,12 +37,17 @@ describe('ragRetrievalService', () => {
             score_margin: 0.3,
             embedding_model: 'det',
             embedding_provider: 'deterministic',
+            exemplar_top_k: 3,
             scores: [
               {
                 intent: 'general',
                 similarity: 0.8,
-                description: 'general proto',
                 display_name: 'General',
+                top_matches: [
+                  { text: 'make shorter', similarity: 0.9 },
+                  { text: 'rewrite clearly', similarity: 0.8 },
+                  { text: 'check for mistakes', similarity: 0.7 },
+                ],
               },
             ],
           },

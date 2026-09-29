@@ -14,6 +14,7 @@ from .repository import RagChunkRepository
 from .schemas import (
     MatchedChunkResponse,
     PromptIntentClassificationResponse,
+    PromptIntentExemplarMatchResponse,
     PromptIntentScoreResponse,
     RetrieveRequest,
     RetrieveResponse,
@@ -30,8 +31,14 @@ def _classification_to_response(
             PromptIntentScoreResponse(
                 intent=s.intent.value,
                 similarity=s.similarity,
-                description=s.description,
                 display_name=s.display_name,
+                top_matches=[
+                    PromptIntentExemplarMatchResponse(
+                        text=m.text,
+                        similarity=m.similarity,
+                    )
+                    for m in s.top_matches
+                ],
             )
             for s in result.scores
         ],
@@ -40,6 +47,7 @@ def _classification_to_response(
         score_margin=result.score_margin,
         embedding_model=result.embedding_model,
         embedding_provider=result.embedding_provider,
+        exemplar_top_k=result.exemplar_top_k,
     )
 
 

@@ -198,6 +198,7 @@ export function RagDebugPanel() {
                 <ol className="rag-debug-list rag-debug-intent-list">
                   {promptIntent.scores.map((score, index) => {
                     const isWinner = score.intent === promptIntent.classified_intent;
+                    const matches = score.top_matches ?? [];
                     return (
                       <li
                         key={score.intent}
@@ -213,10 +214,28 @@ export function RagDebugPanel() {
                             <span className="rag-debug-badge both">winner</span>
                           )}
                         </div>
-                        <details className="rag-debug-intent-proto">
-                          <summary>Prototype</summary>
-                          <p className="rag-debug-preview">{score.description}</p>
-                        </details>
+                        {matches.length > 0 && (
+                          <details
+                            className="rag-debug-intent-proto"
+                            open={isWinner}
+                          >
+                            <summary>
+                              Top matches (k={promptIntent.exemplar_top_k ?? matches.length})
+                            </summary>
+                            <ul className="rag-debug-exemplar-list">
+                              {matches.map((m) => (
+                                <li key={`${score.intent}-${m.text}`}>
+                                  <span className="rag-debug-score">
+                                    {m.similarity.toFixed(3)}
+                                  </span>{' '}
+                                  <span className="rag-debug-exemplar-text">
+                                    &ldquo;{m.text}&rdquo;
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          </details>
+                        )}
                       </li>
                     );
                   })}

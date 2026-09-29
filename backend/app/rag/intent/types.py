@@ -30,11 +30,24 @@ class PromptIntent(str, Enum):
         }[self]
 
 
+class PromptIntentExemplarMatch(BaseModel):
+    """One exemplar fragment and its cosine similarity to the prompt."""
+
+    text: str
+    similarity: float
+
+
 class PromptIntentScore(BaseModel):
     intent: PromptIntent
-    similarity: float
-    description: str
+    similarity: float = Field(
+        ...,
+        description="Mean of top-K exemplar similarities for this intent.",
+    )
     display_name: str
+    top_matches: list[PromptIntentExemplarMatch] = Field(
+        default_factory=list,
+        description="Top matching exemplar fragments (highest similarity first).",
+    )
 
 
 class PromptIntentClassification(BaseModel):
@@ -43,7 +56,7 @@ class PromptIntentClassification(BaseModel):
     classified_intent: PromptIntent
     scores: list[PromptIntentScore] = Field(
         ...,
-        description="All three intents ranked by similarity descending.",
+        description="All three intents ranked by intent score descending.",
     )
     top_score: float
     second_score: float
@@ -53,3 +66,7 @@ class PromptIntentClassification(BaseModel):
     )
     embedding_model: str
     embedding_provider: str
+    exemplar_top_k: int = Field(
+        ...,
+        description="K used when averaging top exemplar similarities per intent.",
+    )

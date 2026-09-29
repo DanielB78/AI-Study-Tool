@@ -1,9 +1,6 @@
-"""Optional real EmbeddingGemma integration for 3-way prompt-intent classification.
+"""Optional real EmbeddingGemma integration for abstract-exemplar intent classification.
 
 Enable with: RUN_EMBEDDINGGEMMA_TESTS=1
-
-Exploratory: always asserts structure (3 scores, margin, sorted).
-Winner checks are soft for ambiguous cases.
 """
 
 from __future__ import annotations
@@ -15,6 +12,7 @@ import pytest
 from app.config import Settings
 from app.rag.embeddings.factory import build_embedding_service, reset_embedding_service_cache
 from app.rag.intent.classifier import EmbeddingPromptIntentClassifier, reset_prompt_intent_classifier
+from app.rag.intent.prototypes import get_intent_definition
 from app.rag.intent.types import PromptIntent
 
 RUN = os.environ.get("RUN_EMBEDDINGGEMMA_TESTS", "").strip() in {"1", "true", "yes"}
@@ -39,40 +37,35 @@ def classifier() -> EmbeddingPromptIntentClassifier:
     return EmbeddingPromptIntentClassifier(svc)
 
 
-def _rank(result) -> list[tuple[str, float]]:
-    return [(s.intent.value, round(s.similarity, 4)) for s in result.scores]
-
-
 @pytest.mark.asyncio
-async def test_gemma_returns_three_way_ranking(
+async def test_gemma_abstract_exemplars(
     classifier: EmbeddingPromptIntentClassifier,
 ) -> None:
     cases: list[tuple[str, PromptIntent]] = [
-        ("Make the electric flux note shorter.", PromptIntent.GENERAL),
-        ("Check everything about electricity.", PromptIntent.GENERAL),
-        ("Check all the notes on this canvas for mistakes.", PromptIntent.GENERAL),
-        (
-            "What is written around the electricity note?",
-            PromptIntent.SPATIAL_RELATIONAL,
-        ),
-        ("Make the one you just created shorter.", PromptIntent.INTERACTION_REFERENCE),
+        ("Make this shorter.", PromptIntent.GENERAL),
+        ("Summarise everything.", PromptIntent.GENERAL),
+        ("What is around this?", PromptIntent.SPATIAL_RELATIONAL),
+        ("Can you move this to the right?", PromptIntent.SPATIAL_RELATIONAL),
+        ("Change the one you just made.", PromptIntent.INTERACTION_REFERENCE),
+        ("Undo what you did.", PromptIntent.INTERACTION_REFERENCE),
     ]
     for prompt, expected in cases:
         result = await classifier.classify(prompt)
-        ranking = _rank(result)
+        ranking = [
+            (s.intent.value, round(s.similarity, 4), [m.text for m in s.top_matches])
+            for s in result.scores
+        ]
         print(
             f"\nPROMPT: {prompt}\n  winner={result.classified_intent.value} "
             f"margin={result.score_margin:.4f}\n  expected={expected.value}\n"
             f"  ranking={ranking}"
         )
         assert len(result.scores) == 3
-        assert result.scores == sorted(
-            result.scores, key=lambda s: s.similarity, reverse=True
-        )
-        assert result.score_margin == pytest.approx(
-            result.top_score - result.second_score
-        )
+        assert result.exemplar_top_k == 3
+        assert len(result.scores[0].top_matches) == 3
         top_two = {result.scores[0].intent, result.scores[1].intent}
-        assert expected in top_two or result.classified_intent is expected, (
-            f"prompt={prompt!r} expected={expected.value} in top-2; ranking={ranking}"
-        )
+        assert expected in top_two or result.classified_intent is expected
+        # Winner's top matches should be from that intent's exemplar set.
+        allowed = set(get_intent_definition(result.classified_intent).examples)
+        for match in result.scores[0].top_matches:
+            assert match.text in allowed

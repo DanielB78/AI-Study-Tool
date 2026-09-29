@@ -2,6 +2,9 @@
 
 Observational only — does not change retrieval policies.
 
+Compares the prompt query embedding to short abstract exemplar fragments
+(embedded separately). Intent score = mean of top-K exemplar similarities.
+
 Answers: does this request need a special spatial or interaction-history
 interpretation? It does NOT decide how much canvas context to retrieve.
 GENERAL means neither special signal was strongest — not element/topic/board scope.
@@ -16,8 +19,17 @@ from typing import Sequence
 from ..embeddings.base import EmbeddingService, EmbeddingVector
 from ..embeddings.factory import get_embedding_service
 from ..similarity import cosine_similarity
-from .prototypes import INTENT_DEFINITIONS, prototype_content_fingerprint
-from .types import PromptIntent, PromptIntentClassification, PromptIntentScore
+from .prototypes import (
+    INTENT_DEFINITIONS,
+    INTENT_EXEMPLAR_TOP_K,
+    exemplar_content_fingerprint,
+)
+from .types import (
+    PromptIntent,
+    PromptIntentClassification,
+    PromptIntentExemplarMatch,
+    PromptIntentScore,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,52 +50,89 @@ def _mean_vector(vectors: Sequence[EmbeddingVector]) -> EmbeddingVector:
     return [x / n for x in acc]
 
 
-class EmbeddingPromptIntentClassifier:
-    """Compare a query embedding against cached intent prototype embeddings."""
+def _mean_top_k(similarities: list[float], k: int) -> float:
+    if not similarities:
+        return 0.0
+    ranked = sorted(similarities, reverse=True)
+    take = ranked[: max(1, min(k, len(ranked)))]
+    return sum(take) / float(len(take))
 
-    def __init__(self, embedding: EmbeddingService) -> None:
+
+class EmbeddingPromptIntentClassifier:
+    """Compare a query embedding against cached per-exemplar embeddings."""
+
+    def __init__(
+        self,
+        embedding: EmbeddingService,
+        *,
+        top_k: int = INTENT_EXEMPLAR_TOP_K,
+    ) -> None:
         self._embedding = embedding
+        self._top_k = max(1, top_k)
         self._cache_key: str | None = None
-        self._prototype_vectors: dict[PromptIntent, EmbeddingVector] | None = None
+        # intent → list of (exemplar_text, vector) in definition order
+        self._exemplar_vectors: dict[
+            PromptIntent, list[tuple[str, EmbeddingVector]]
+        ] | None = None
 
     @property
     def embedding(self) -> EmbeddingService:
         return self._embedding
 
+    @property
+    def top_k(self) -> int:
+        return self._top_k
+
     def _build_cache_key(self) -> str:
-        fingerprint = prototype_content_fingerprint()
+        fingerprint = exemplar_content_fingerprint()
         digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:16]
-        return f"{self._embedding.provider}:{self._embedding.model}:{digest}"
+        return f"{self._embedding.provider}:{self._embedding.model}:k{self._top_k}:{digest}"
 
-    async def ensure_prototypes(self) -> dict[PromptIntent, EmbeddingVector]:
-        """Embed all intent descriptions once; rebuild if model/text changes."""
+    async def ensure_exemplars(
+        self,
+    ) -> dict[PromptIntent, list[tuple[str, EmbeddingVector]]]:
+        """Embed every exemplar fragment once; rebuild if model/text changes."""
         key = self._build_cache_key()
-        if self._prototype_vectors is not None and self._cache_key == key:
-            return self._prototype_vectors
+        if self._exemplar_vectors is not None and self._cache_key == key:
+            return self._exemplar_vectors
 
-        texts = [d.description for d in INTENT_DEFINITIONS]
-        # Prototypes are retrieval targets → document encoding.
-        # Changing INTENT_DEFINITIONS (count or text) changes the cache key
-        # and rebuilds these vectors (e.g. 5-way → 3-way migration).
-        vectors = await self._embedding.embed_documents(texts)
-        if len(vectors) != len(INTENT_DEFINITIONS):
-            raise RuntimeError("prototype embedding count mismatch")
+        # Flatten all fragments — each is embedded separately (never concatenated).
+        flat_texts: list[str] = []
+        ownership: list[PromptIntent] = []
+        for definition in INTENT_DEFINITIONS:
+            for example in definition.examples:
+                flat_texts.append(example)
+                ownership.append(definition.intent)
 
-        mapping = {
-            definition.intent: vector
-            for definition, vector in zip(INTENT_DEFINITIONS, vectors, strict=True)
+        vectors = await self._embedding.embed_documents(flat_texts)
+        if len(vectors) != len(flat_texts):
+            raise RuntimeError("exemplar embedding count mismatch")
+
+        mapping: dict[PromptIntent, list[tuple[str, EmbeddingVector]]] = {
+            d.intent: [] for d in INTENT_DEFINITIONS
         }
-        self._prototype_vectors = mapping
+        for intent, text, vector in zip(ownership, flat_texts, vectors, strict=True):
+            mapping[intent].append((text, vector))
+
+        self._exemplar_vectors = mapping
         self._cache_key = key
         logger.debug(
-            "prompt-intent prototypes embedded model=%s count=%s",
+            "prompt-intent exemplars embedded model=%s intents=%s fragments=%s top_k=%s",
             self._embedding.model,
             len(mapping),
+            len(flat_texts),
+            self._top_k,
         )
         return mapping
 
+    # Alias kept for call sites / tests that still say "prototypes".
+    async def ensure_prototypes(
+        self,
+    ) -> dict[PromptIntent, list[tuple[str, EmbeddingVector]]]:
+        return await self.ensure_exemplars()
+
     def invalidate_cache(self) -> None:
-        self._prototype_vectors = None
+        self._exemplar_vectors = None
         self._cache_key = None
 
     async def classify_from_embedding(
@@ -93,17 +142,29 @@ class EmbeddingPromptIntentClassifier:
     ) -> PromptIntentClassification:
         """Classify using an existing query vector (no re-embed of the prompt)."""
         _ = prompt  # retained for API clarity / future logging
-        prototypes = await self.ensure_prototypes()
+        exemplars = await self.ensure_exemplars()
 
         scored: list[PromptIntentScore] = []
         for definition in INTENT_DEFINITIONS:
-            sim = cosine_similarity(query_embedding, prototypes[definition.intent])
+            pairs = exemplars[definition.intent]
+            matches = [
+                PromptIntentExemplarMatch(
+                    text=text,
+                    similarity=cosine_similarity(query_embedding, vector),
+                )
+                for text, vector in pairs
+            ]
+            matches.sort(key=lambda m: m.similarity, reverse=True)
+            intent_score = _mean_top_k(
+                [m.similarity for m in matches],
+                self._top_k,
+            )
             scored.append(
                 PromptIntentScore(
                     intent=definition.intent,
-                    similarity=sim,
-                    description=definition.description,
+                    similarity=intent_score,
                     display_name=definition.intent.display_name,
+                    top_matches=matches[: self._top_k],
                 )
             )
 
@@ -120,6 +181,7 @@ class EmbeddingPromptIntentClassifier:
             score_margin=margin,
             embedding_model=self._embedding.model,
             embedding_provider=self._embedding.provider,
+            exemplar_top_k=self._top_k,
         )
 
     async def classify(self, prompt: str) -> PromptIntentClassification:

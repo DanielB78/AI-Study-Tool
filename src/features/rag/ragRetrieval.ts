@@ -28,11 +28,17 @@ export type PromptIntentId =
   | 'spatial_relational'
   | 'interaction_reference';
 
+export interface PromptIntentExemplarMatch {
+  text: string;
+  similarity: number;
+}
+
 export interface PromptIntentScore {
   intent: PromptIntentId | string;
+  /** Mean of top-K exemplar similarities for this intent. */
   similarity: number;
-  description: string;
   display_name: string;
+  top_matches: PromptIntentExemplarMatch[];
 }
 
 /** Debug-only classification — does not affect retrieval. */
@@ -44,6 +50,7 @@ export interface PromptIntentClassification {
   score_margin: number;
   embedding_model: string;
   embedding_provider: string;
+  exemplar_top_k?: number;
 }
 
 export interface RetrieveResponse {
