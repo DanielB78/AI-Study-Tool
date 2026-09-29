@@ -32,7 +32,14 @@ import { describeOperationPlanLines } from './actionSummary';
 import {
   detectSilentLatexJsonCorruption,
   explainJsonParseFailure,
+  parsedLatexLooksCorrupted,
 } from './latexJsonEscaping';
+import {
+  LATEX_JSON_REPAIR_INDICATOR,
+  collectLatexStrings,
+  repairLatexJsonFields,
+  type LatexJsonRepairMeta,
+} from './latexJsonRepair';
 import {
   ColorNormalizeFailure,
   isEmptyStylePatch,
@@ -43,6 +50,9 @@ import {
   sanitizeLatexSource,
   validateLatex,
 } from '../../equations/latex';
+
+export type { LatexJsonRepairMeta } from './latexJsonRepair';
+export { LATEX_JSON_REPAIR_INDICATOR } from './latexJsonRepair';
 
 export type ParseErrorCode =
   | 'empty'
@@ -530,29 +540,103 @@ function semanticValidate(
   }
 }
 
+export interface ParseCanvasAgentResult {
+  response: CanvasAgentResponse;
+  repair: LatexJsonRepairMeta;
+}
+
+function tryJsonParse(text: string): { ok: true; value: unknown } | { ok: false; error: unknown } {
+  try {
+    return { ok: true, value: JSON.parse(text) };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
+function emptyRepairMeta(rawResponse: string): LatexJsonRepairMeta {
+  return {
+    applied: false,
+    rawResponse,
+    repairedResponse: null,
+    repairCount: 0,
+    message: null,
+  };
+}
+
 /**
- * Parse + validate a pasted LLM response.
- * Validates ALL operations before returning — never partially accepts.
+ * Manual-LLM ingestion path:
+ *   raw → try JSON.parse → if fail OR silent latex corruption →
+ *   targeted latex-field repair on ORIGINAL → JSON.parse again →
+ *   schema → latex validation.
+ *
+ * Does not invent ops or touch non-latex fields. System prompt rules for
+ * correct escaping remain in force; repair is a recovery layer only.
  */
 export function parseCanvasAgentResponse(
   raw: string,
   ctx: ParseContext,
-): CanvasAgentResponse {
+): ParseCanvasAgentResult {
   const trimmed = raw.trim();
   if (!trimmed) {
     throw new CanvasAgentParseError('empty', 'Response cannot be empty.');
   }
 
+  const source = stripCodeFences(trimmed);
+  let repair = emptyRepairMeta(source);
   let parsed: unknown;
-  try {
-    parsed = JSON.parse(stripCodeFences(trimmed));
-  } catch (err) {
-    const explained = explainJsonParseFailure(trimmed, err);
-    throw new CanvasAgentParseError(
-      'invalid_json',
-      explained.message,
-      explained.detail,
-    );
+
+  const first = tryJsonParse(source);
+  const needsRepair =
+    !first.ok ||
+    (first.ok && parsedLatexLooksCorrupted(collectLatexStrings(first.value)));
+
+  if (!needsRepair && first.ok) {
+    parsed = first.value;
+  } else {
+    const { repaired, changed, repairCount } = repairLatexJsonFields(source);
+    repair = {
+      applied: changed,
+      rawResponse: source,
+      repairedResponse: repaired,
+      repairCount,
+      message: changed ? LATEX_JSON_REPAIR_INDICATOR : null,
+    };
+
+    const second = tryJsonParse(repaired);
+    if (!second.ok) {
+      const firstDetail =
+        !first.ok
+          ? explainJsonParseFailure(source, first.error).detail
+          : 'JSON parsed but latex fields contained control-character corruption.';
+      const secondDetail = explainJsonParseFailure(repaired, second.error).detail;
+      throw new CanvasAgentParseError(
+        'invalid_json',
+        'Could not parse the LLM response as structured JSON.',
+        [
+          firstDetail,
+          `After latex-field repair: ${secondDetail}`,
+          '--- RAW RESPONSE ---',
+          source,
+          '--- REPAIRED RESPONSE ---',
+          repaired,
+        ].join('\n'),
+      );
+    }
+
+    if (parsedLatexLooksCorrupted(collectLatexStrings(second.value))) {
+      throw new CanvasAgentParseError(
+        'invalid_latex',
+        'LaTeX fields still look corrupted after escape recovery.',
+        [
+          '--- RAW RESPONSE ---',
+          source,
+          '--- REPAIRED RESPONSE ---',
+          repaired,
+        ].join('\n'),
+      );
+    }
+
+    parsed = second.value;
   }
 
   if (!isRecord(parsed) || !Array.isArray(parsed.operations)) {
@@ -576,7 +660,7 @@ export function parseCanvasAgentResponse(
     semanticValidate(operations[i]!, ctx, operations, i);
   }
 
-  return { operations };
+  return { response: { operations }, repair };
 }
 
 /** Human-readable plan lines for the debug UI. */

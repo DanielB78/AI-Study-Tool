@@ -22,8 +22,8 @@ describe('parseCanvasAgentResponse', () => {
       ],
     });
     const res = parseCanvasAgentResponse(raw, ctx);
-    expect(res.operations).toHaveLength(1);
-    expect(res.operations[0]).toMatchObject({ type: 'create_text' });
+    expect(res.response.operations).toHaveLength(1);
+    expect(res.response.operations[0]).toMatchObject({ type: 'create_text' });
   });
 
   it('parses valid update_text', () => {
@@ -37,7 +37,7 @@ describe('parseCanvasAgentResponse', () => {
       ],
     });
     const res = parseCanvasAgentResponse(raw, ctx);
-    expect(res.operations[0]).toMatchObject({
+    expect(res.response.operations[0]).toMatchObject({
       type: 'update_text',
       target_element_id: 'textbox_18',
     });
@@ -62,7 +62,7 @@ describe('parseCanvasAgentResponse', () => {
         },
       ],
     });
-    expect(parseCanvasAgentResponse(raw, ctx).operations).toHaveLength(2);
+    expect(parseCanvasAgentResponse(raw, ctx).response.operations).toHaveLength(2);
   });
 
   it('rejects unknown operation', () => {
@@ -87,7 +87,7 @@ describe('parseCanvasAgentResponse', () => {
       ],
     });
     const res = parseCanvasAgentResponse(raw, ctx);
-    expect(res.operations[0]).toMatchObject({
+    expect(res.response.operations[0]).toMatchObject({
       type: 'update_text_style',
       target_element_id: 'textbox_18',
       style: { text_color: '#0000FF', bold: true },
@@ -106,7 +106,7 @@ describe('parseCanvasAgentResponse', () => {
       ],
     });
     const res = parseCanvasAgentResponse(raw, ctx);
-    expect(res.operations[0]).toMatchObject({
+    expect(res.response.operations[0]).toMatchObject({
       type: 'create_text',
       style: { italic: true, background_color: '#FFFF00' },
     });
@@ -195,7 +195,7 @@ describe('parseCanvasAgentResponse', () => {
       ],
     });
     const res = parseCanvasAgentResponse(raw, ctx);
-    expect(res.operations[0]).toMatchObject({
+    expect(res.response.operations[0]).toMatchObject({
       type: 'move_text',
       target_element_id: 'textbox_18',
     });
@@ -212,7 +212,7 @@ describe('parseCanvasAgentResponse', () => {
       ],
     });
     const res = parseCanvasAgentResponse(raw, ctx);
-    expect(res.operations[0]).toMatchObject({
+    expect(res.response.operations[0]).toMatchObject({
       type: 'resize_text',
       target_element_id: 'textbox_18',
       width: 360,
@@ -229,7 +229,7 @@ describe('parseCanvasAgentResponse', () => {
       ],
     });
     const res = parseCanvasAgentResponse(raw, ctx);
-    expect(res.operations[0]).toMatchObject({
+    expect(res.response.operations[0]).toMatchObject({
       type: 'delete_text',
       target_element_id: 'textbox_18',
     });
@@ -292,7 +292,7 @@ describe('parseCanvasAgentResponse', () => {
   });
 
   it('rejects invalid JSON', () => {
-    expect(() => parseCanvasAgentResponse('not json', ctx)).toThrow(/valid JSON/i);
+    expect(() => parseCanvasAgentResponse('not json', ctx)).toThrow(/structured JSON|valid JSON/i);
   });
 
   it('rejects missing required property', () => {
@@ -391,7 +391,7 @@ describe('parseCanvasAgentResponse', () => {
 
   it('strips markdown fences', () => {
     const raw = '```json\n{"operations":[{"type":"create_text","text":"ok","placement":{"mode":"viewport_default"}}]}\n```';
-    expect(parseCanvasAgentResponse(raw, ctx).operations).toHaveLength(1);
+    expect(parseCanvasAgentResponse(raw, ctx).response.operations).toHaveLength(1);
   });
 
   it('describeOperationPlan is human readable', () => {
@@ -442,7 +442,7 @@ describe('parseCanvasAgentResponse', () => {
       ],
     });
     const res = parseCanvasAgentResponse(raw, ctx);
-    expect(res.operations[0]).toMatchObject({
+    expect(res.response.operations[0]).toMatchObject({
       type: 'create_equation',
       latex: 'E=mc^2',
     });
@@ -465,7 +465,7 @@ describe('parseCanvasAgentResponse', () => {
         },
       ],
     });
-    expect(parseCanvasAgentResponse(raw, eqCtx).operations[0]).toMatchObject({
+    expect(parseCanvasAgentResponse(raw, eqCtx).response.operations[0]).toMatchObject({
       type: 'update_equation',
       latex: 'F=ma',
     });
@@ -525,8 +525,8 @@ describe('parseCanvasAgentResponse', () => {
       ],
     });
     const res = parseCanvasAgentResponse(raw, ctx);
-    expect(res.operations).toHaveLength(2);
-    expect(res.operations[1]).toMatchObject({
+    expect(res.response.operations).toHaveLength(2);
+    expect(res.response.operations[1]).toMatchObject({
       type: 'create_equation',
       placement: {
         mode: 'relative_to_element',

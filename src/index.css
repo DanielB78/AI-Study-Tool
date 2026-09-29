@@ -1163,6 +1163,16 @@ textarea {
   font-size: 0.7rem;
 }
 
+.rag-debug-repair-indicator {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  color: #0f766e;
+  background: rgba(15, 118, 110, 0.1);
+  border: 1px solid rgba(15, 118, 110, 0.25);
+}
+
 .rag-debug-status {
   margin: 0;
   color: var(--accent);

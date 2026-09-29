@@ -28,22 +28,17 @@ describe('latex JSON escaping diagnostics', () => {
     expect(explained.detail.length).toBeGreaterThan(0);
   });
 
-  it('parseCanvasAgentResponse surfaces LaTeX escape hint for \\hbar', () => {
+  it('parseCanvasAgentResponse recovers unescaped \\hbar via repair', () => {
     const raw = `{"operations":[{"type":"create_equation","latex":"i\\hbar\\psi","placement":{"mode":"viewport_default"}}]}`;
-    try {
-      parseCanvasAgentResponse(raw, ctx);
-      expect.unreachable('should throw');
-    } catch (err) {
-      expect(err).toBeInstanceOf(CanvasAgentParseError);
-      const e = err as CanvasAgentParseError;
-      expect(e.code).toBe('invalid_json');
-      expect(e.message).toContain('unescaped backslash');
-      expect(e.message).toContain('\\\\frac');
-      expect(e.detail).toBeTruthy();
-    }
+    const { response, repair } = parseCanvasAgentResponse(raw, ctx);
+    expect(repair.applied).toBe(true);
+    expect(response.operations[0]).toMatchObject({
+      type: 'create_equation',
+      latex: 'i\\hbar\\psi',
+    });
   });
 
-  it('accepts correctly double-escaped LaTeX JSON', () => {
+  it('accepts correctly double-escaped LaTeX JSON without repair', () => {
     const raw = JSON.stringify({
       operations: [
         {
@@ -53,15 +48,15 @@ describe('latex JSON escaping diagnostics', () => {
         },
       ],
     });
-    const parsed = parseCanvasAgentResponse(raw, ctx);
-    expect(parsed.operations[0]).toMatchObject({
+    const { response, repair } = parseCanvasAgentResponse(raw, ctx);
+    expect(repair.applied).toBe(false);
+    expect(response.operations[0]).toMatchObject({
       type: 'create_equation',
       latex: 'E=\\frac{1}{2}mv^2',
     });
   });
 
   it('detects silent \\frac → form-feed corruption after JSON.parse', () => {
-    // Simulate what JSON.parse does to an unescaped \frac in a JSON string.
     const corrupted = JSON.parse('"\\frac{a}{b}"') as string;
     expect(corrupted.charCodeAt(0)).toBe(0x0c); // form feed
     const msg = detectSilentLatexJsonCorruption(corrupted);
@@ -70,7 +65,6 @@ describe('latex JSON escaping diagnostics', () => {
   });
 
   it('detects silent \\nabla → newline corruption', () => {
-    // Only \\nabla (\\n → newline); avoid \\cdot which is a hard JSON failure.
     const corrupted = JSON.parse('"\\nabla E"') as string;
     expect(corrupted.startsWith('\n')).toBe(true);
     expect(detectSilentLatexJsonCorruption(corrupted)).toMatch(/nabla|newline|JSON/i);
@@ -82,8 +76,25 @@ describe('latex JSON escaping diagnostics', () => {
     expect(detectSilentLatexJsonCorruption(corrupted)).toMatch(/times|tab|JSON/i);
   });
 
-  it('rejects corrupted latex via requireValidLatex path', () => {
-    // Build ops object as if JSON.parse already succeeded with corruption.
+  it('fails closed when latex already contains literal control chars (unrecoverable)', () => {
+    // Literal form-feed inside the JSON string (not the two-char sequence \ f).
+    // JSON.parse rejects this; repair cannot invent missing backslashes.
+    const raw =
+      '{"operations":[{"type":"update_equation","target_element_id":"eq_1","latex":"' +
+      '\f' +
+      'rac{a}{b}"}]}';
+    expect(() => parseCanvasAgentResponse(raw, ctx)).toThrow(CanvasAgentParseError);
+    try {
+      parseCanvasAgentResponse(raw, ctx);
+    } catch (err) {
+      const e = err as CanvasAgentParseError;
+      expect(e.code).toBe('invalid_json');
+      expect(e.message).toMatch(/Could not parse the LLM response as structured JSON/i);
+      expect(e.detail).toMatch(/RAW RESPONSE|REPAIRED/i);
+    }
+  });
+
+  it('recovers when JSON.stringify re-encoded silent corruption as \\f', () => {
     const corruptedLatex = JSON.parse('"\\frac{a}{b}"') as string;
     const raw = JSON.stringify({
       operations: [
@@ -94,14 +105,9 @@ describe('latex JSON escaping diagnostics', () => {
         },
       ],
     });
-    expect(() => parseCanvasAgentResponse(raw, ctx)).toThrow(CanvasAgentParseError);
-    try {
-      parseCanvasAgentResponse(raw, ctx);
-    } catch (err) {
-      const e = err as CanvasAgentParseError;
-      expect(e.code).toBe('invalid_latex');
-      expect(e.message).toMatch(/\\\\frac|JSON|corrupted/i);
-    }
+    const { response, repair } = parseCanvasAgentResponse(raw, ctx);
+    expect(repair.applied).toBe(true);
+    expect(response.operations[0]).toMatchObject({ latex: '\\frac{a}{b}' });
   });
 
   it('does not flag unrelated JSON errors as latex escapes', () => {

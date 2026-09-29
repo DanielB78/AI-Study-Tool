@@ -17,9 +17,12 @@ const JSON_SINGLE_ESCAPES = new Set(['"', '\\', '/', 'b', 'f', 'n', 'r', 't']);
 const SILENT_CORRUPTION_COMMANDS = [
   { cmd: 'frac', escape: 'f', char: '\f', hint: '\\frac' },
   { cmd: 'nabla', escape: 'n', char: '\n', hint: '\\nabla' },
+  { cmd: 'nu', escape: 'n', char: '\n', hint: '\\nu' },
   { cmd: 'times', escape: 't', char: '\t', hint: '\\times' },
+  { cmd: 'theta', escape: 't', char: '\t', hint: '\\theta' },
   { cmd: 'rightarrow', escape: 'r', char: '\r', hint: '\\rightarrow' },
-  { cmd: 'mathbf', escape: 'b', char: '\b', hint: '\\mathbf' }, // rare but possible
+  { cmd: 'mathrm', escape: 'r', char: '\r', hint: '\\mathrm' },
+  { cmd: 'mathbf', escape: 'b', char: '\b', hint: '\\mathbf' },
 ] as const;
 
 /** Common LaTeX commands whose leading letter is NOT a valid JSON escape → parse throws. */
@@ -89,14 +92,20 @@ export function detectSilentLatexJsonCorruption(latex: string): string | null {
       );
     }
   }
-  // Generic: any C0 control chars other than ordinary spaces are suspicious in LaTeX
-  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(latex)) {
+  // Any C0 control char (incl. tab/newline/CR/form-feed/backspace) is suspicious in equation LaTeX.
+  if (/[\u0000-\u001f]/.test(latex)) {
     return (
       'LaTeX contains control characters that usually mean JSON ate a backslash escape ' +
-      '(`\\\\frac` / `\\\\nabla` / `\\\\times`). Double every LaTeX backslash in the JSON string.'
+      '(`\\\\frac` / `\\\\nabla` / `\\\\times` / `\\\\theta` / `\\\\mathbf`). ' +
+      'Double every LaTeX backslash in the JSON string.'
     );
   }
   return null;
+}
+
+/** True when any parsed latex string looks silently corrupted by JSON escapes. */
+export function parsedLatexLooksCorrupted(latexValues: readonly string[]): boolean {
+  return latexValues.some((v) => detectSilentLatexJsonCorruption(v) !== null);
 }
 
 /** True if `\\X` would be a valid JSON single-char escape (for docs/tests). */

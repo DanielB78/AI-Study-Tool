@@ -31,13 +31,21 @@ export {
   describeOperationPlan,
   CanvasAgentParseError,
   stripCodeFences,
+  LATEX_JSON_REPAIR_INDICATOR,
 } from './parser';
+export type { ParseCanvasAgentResult, LatexJsonRepairMeta } from './parser';
 export {
   explainJsonParseFailure,
   detectSilentLatexJsonCorruption,
   isLikelyLatexJsonEscapeIssue,
   LATEX_JSON_ESCAPE_HINT,
 } from './latexJsonEscaping';
+export {
+  repairLatexJsonFields,
+  collectLatexStrings,
+  LATEX_JSON_FIELDS,
+} from './latexJsonRepair';
+export type { LatexJsonRepairResult } from './latexJsonRepair';
 export {
   summarizeAiActions,
   summarizeStyleUpdate,

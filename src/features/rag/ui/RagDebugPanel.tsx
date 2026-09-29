@@ -46,6 +46,7 @@ export function RagDebugPanel() {
   const pendingOperations = useRagDebugStore((s) => s.pendingOperations);
   const parseError = useRagDebugStore((s) => s.parseError);
   const parseErrorDetail = useRagDebugStore((s) => s.parseErrorDetail);
+  const latexRepair = useRagDebugStore((s) => s.latexRepair);
   const llmExecutionMode = useRagDebugStore((s) => s.llmExecutionMode);
   const lastQueryChunks = useRagDebugStore((s) => s.lastQueryChunks);
   const lastRetrieveMeta = useRagDebugStore((s) => s.lastRetrieveMeta);
@@ -643,12 +644,16 @@ export function RagDebugPanel() {
               <div className="rag-debug-error-block">
                 <p className="rag-debug-error">{parseError}</p>
                 {parseErrorDetail && parseErrorDetail !== parseError && (
-                  <details className="rag-debug-error-detail">
-                    <summary>Parser detail</summary>
+                  <details className="rag-debug-error-detail" open>
+                    <summary>Parser detail (raw + repaired)</summary>
                     <pre>{parseErrorDetail}</pre>
                   </details>
                 )}
               </div>
+            )}
+
+            {latexRepair?.applied && latexRepair.message && !parseError && (
+              <p className="rag-debug-repair-indicator">{latexRepair.message}</p>
             )}
 
             {pendingPlan && pendingPlan.length > 0 && (
@@ -663,9 +668,17 @@ export function RagDebugPanel() {
                 >
                   {pendingPlan.join('\n\n')}
                 </pre>
+                {latexRepair?.applied && latexRepair.repairedResponse && (
+                  <>
+                    <div className="rag-debug-section-title">RAW RESPONSE</div>
+                    <pre className="rag-debug-plan">{latexRepair.rawResponse}</pre>
+                    <div className="rag-debug-section-title">REPAIRED JSON</div>
+                    <pre className="rag-debug-plan">{latexRepair.repairedResponse}</pre>
+                  </>
+                )}
                 {pendingOperations && (
                   <>
-                    <div className="rag-debug-section-title">Raw JSON</div>
+                    <div className="rag-debug-section-title">Parsed operations</div>
                     <pre className="rag-debug-plan">
                       {JSON.stringify(pendingOperations, null, 2)}
                     </pre>
