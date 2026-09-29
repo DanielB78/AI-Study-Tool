@@ -19,6 +19,7 @@ export function createLiveAgentExecutorTarget(): AgentExecutorTarget {
     endInteraction: () => useCanvasStore.getState().endInteraction(),
     addElement: (element, select) => useCanvasStore.getState().addElement(element, select),
     updateElement: (id, updater) => useCanvasStore.getState().updateElement(id, updater),
+    deleteElements: (ids) => useCanvasStore.getState().deleteElements(ids),
     setSelection: (ids) => useCanvasStore.getState().select(ids),
     persist: () => useCanvasStore.getState().persist(),
     getViewportSize: getDefaultViewportSize,

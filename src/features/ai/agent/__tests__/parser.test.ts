@@ -75,7 +75,118 @@ describe('parseCanvasAgentResponse', () => {
         JSON.stringify({ operations: [{ type: 'delete_element', target_element_id: 'x' }] }),
         ctx,
       ),
-    ).toThrow(CanvasAgentParseError);
+    ).toThrow(/Allowed: create_text, update_text, move_text, resize_text, delete_text/);
+  });
+
+  it('parses valid move_text', () => {
+    const raw = JSON.stringify({
+      operations: [
+        {
+          type: 'move_text',
+          target_element_id: 'textbox_18',
+          placement: {
+            mode: 'relative_to_element',
+            anchor_element_id: 'textbox_42',
+            relation: 'below',
+          },
+        },
+      ],
+    });
+    const res = parseCanvasAgentResponse(raw, ctx);
+    expect(res.operations[0]).toMatchObject({
+      type: 'move_text',
+      target_element_id: 'textbox_18',
+    });
+  });
+
+  it('parses valid resize_text', () => {
+    const raw = JSON.stringify({
+      operations: [
+        {
+          type: 'resize_text',
+          target_element_id: 'textbox_18',
+          width: 360,
+        },
+      ],
+    });
+    const res = parseCanvasAgentResponse(raw, ctx);
+    expect(res.operations[0]).toMatchObject({
+      type: 'resize_text',
+      target_element_id: 'textbox_18',
+      width: 360,
+    });
+  });
+
+  it('parses valid delete_text', () => {
+    const raw = JSON.stringify({
+      operations: [
+        {
+          type: 'delete_text',
+          target_element_id: 'textbox_18',
+        },
+      ],
+    });
+    const res = parseCanvasAgentResponse(raw, ctx);
+    expect(res.operations[0]).toMatchObject({
+      type: 'delete_text',
+      target_element_id: 'textbox_18',
+    });
+  });
+
+  it('rejects move_text self_anchor', () => {
+    expect(() =>
+      parseCanvasAgentResponse(
+        JSON.stringify({
+          operations: [
+            {
+              type: 'move_text',
+              target_element_id: 'textbox_18',
+              placement: {
+                mode: 'relative_to_element',
+                anchor_element_id: 'textbox_18',
+                relation: 'near',
+              },
+            },
+          ],
+        }),
+        ctx,
+      ),
+    ).toThrow(/own placement anchor/i);
+  });
+
+  it('rejects resize_text without width or height', () => {
+    expect(() =>
+      parseCanvasAgentResponse(
+        JSON.stringify({
+          operations: [{ type: 'resize_text', target_element_id: 'textbox_18' }],
+        }),
+        ctx,
+      ),
+    ).toThrow(/width and\/or height/i);
+  });
+
+  it('rejects resize_text with invalid size', () => {
+    expect(() =>
+      parseCanvasAgentResponse(
+        JSON.stringify({
+          operations: [
+            { type: 'resize_text', target_element_id: 'textbox_18', width: 10 },
+          ],
+        }),
+        ctx,
+      ),
+    ).toThrow(/between/i);
+  });
+
+  it('rejects delete_text with invented target', () => {
+    expect(() =>
+      parseCanvasAgentResponse(
+        JSON.stringify({
+          operations: [{ type: 'delete_text', target_element_id: 'invented_99' }],
+        }),
+        ctx,
+      ),
+    ).toThrow(/not in the supplied canvas context/i);
   });
 
   it('rejects invalid JSON', () => {
@@ -197,10 +308,16 @@ describe('parseCanvasAgentResponse', () => {
           relation: 'right_of',
         },
       },
+      {
+        type: 'delete_text',
+        target_element_id: 'textbox_12',
+      },
     ]);
     expect(lines[0]).toContain('UPDATE TEXT');
     expect(lines[0]).toContain('textbox_18');
     expect(lines[1]).toContain('CREATE TEXT');
     expect(lines[1]).toContain('right_of textbox_42');
+    expect(lines[2]).toContain('⚠ DELETE TEXTBOX');
+    expect(lines[2]).toContain('textbox_12');
   });
 });

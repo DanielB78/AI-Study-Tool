@@ -92,3 +92,66 @@ def test_system_prompt_loads() -> None:
     assert "editing planner" in text.lower()
     assert "create_text" in text
     assert "update_text" in text
+    assert "move_text" in text
+    assert "resize_text" in text
+    assert "delete_text" in text
+
+
+def test_valid_move_text() -> None:
+    payload = {
+        "operations": [
+            {
+                "type": "move_text",
+                "target_element_id": "textbox_18",
+                "placement": {
+                    "mode": "relative_to_element",
+                    "anchor_element_id": "textbox_42",
+                    "relation": "below",
+                },
+            }
+        ]
+    }
+    model = CanvasAgentResponse.model_validate(payload)
+    assert model.operations[0].type == "move_text"
+
+
+def test_valid_resize_text() -> None:
+    payload = {
+        "operations": [
+            {
+                "type": "resize_text",
+                "target_element_id": "textbox_18",
+                "width": 360,
+            }
+        ]
+    }
+    model = CanvasAgentResponse.model_validate(payload)
+    assert model.operations[0].type == "resize_text"
+    assert model.operations[0].width == 360
+
+
+def test_valid_delete_text() -> None:
+    payload = {
+        "operations": [
+            {
+                "type": "delete_text",
+                "target_element_id": "textbox_18",
+            }
+        ]
+    }
+    model = CanvasAgentResponse.model_validate(payload)
+    assert model.operations[0].type == "delete_text"
+
+
+def test_rejects_resize_without_dimensions() -> None:
+    with pytest.raises(ValidationError):
+        CanvasAgentResponse.model_validate(
+            {
+                "operations": [
+                    {
+                        "type": "resize_text",
+                        "target_element_id": "textbox_18",
+                    }
+                ]
+            }
+        )

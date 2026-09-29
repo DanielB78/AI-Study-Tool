@@ -104,6 +104,45 @@ export const PLANNER_DECISION_FIXTURES: Array<{
       },
     ],
   },
+  {
+    id: 'move-below',
+    user: 'Move the electric field note below the potential note.',
+    notes: 'Explicit move → move_text relative below.',
+    expected: [
+      {
+        type: 'move_text',
+        target_element_id: 'textbox_1',
+        placement: {
+          mode: 'relative_to_element',
+          anchor_element_id: 'textbox_3',
+          relation: 'below',
+        },
+      },
+    ],
+  },
+  {
+    id: 'resize-wider',
+    user: 'Make the electricity note wider.',
+    notes: 'Qualitative resize → resize_text with a larger width.',
+    expected: [
+      {
+        type: 'resize_text',
+        target_element_id: 'textbox_1',
+        width: 360,
+      },
+    ],
+  },
+  {
+    id: 'delete-note',
+    user: 'Delete the electric potential textbox.',
+    notes: 'Clear delete intent → delete_text.',
+    expected: [
+      {
+        type: 'delete_text',
+        target_element_id: 'textbox_3',
+      },
+    ],
+  },
 ];
 
 describe('planner decision fixtures', () => {

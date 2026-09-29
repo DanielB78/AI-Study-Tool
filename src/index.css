@@ -1086,3 +1086,8 @@ textarea {
   max-height: 200px;
   overflow: auto;
 }
+
+.rag-debug-plan-destructive {
+  border-color: #c45c5c;
+  background: #fff8f8;
+}

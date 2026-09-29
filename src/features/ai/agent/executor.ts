@@ -24,16 +24,23 @@ export interface AgentExecutorTarget {
   endInteraction: () => void;
   addElement: (element: CanvasElement, select?: boolean) => void;
   updateElement: (id: string, updater: (el: CanvasElement) => CanvasElement) => void;
+  /** Delete elements by id (skips locked). Must update RAG for removed text. */
+  deleteElements: (ids: string[]) => void;
   setSelection: (ids: string[]) => void;
   persist?: () => void;
   getViewportSize?: () => ViewportSize;
   /** Override RAG hook for tests. */
   indexText?: (boardId: string, element: TextElement) => void;
+  updateGeometry?: (boardId: string, element: TextElement) => void;
+  deleteIndexed?: (boardId: string, elementIds: string[]) => void;
 }
 
 export interface ExecuteAgentOpsResult {
   createdIds: string[];
   updatedIds: string[];
+  movedIds: string[];
+  resizedIds: string[];
+  deletedIds: string[];
   affectedIds: string[];
   transactionId: string | null;
 }
@@ -41,29 +48,45 @@ export interface ExecuteAgentOpsResult {
 /**
  * Execute ALL operations atomically after prior validation.
  * Call only with a fully validated operation list.
+ * Order is preserved.
  */
 export function executeCanvasOperations(
   operations: readonly CanvasOperation[],
   target: AgentExecutorTarget,
 ): ExecuteAgentOpsResult {
   if (operations.length === 0) {
-    return { createdIds: [], updatedIds: [], affectedIds: [], transactionId: null };
+    return {
+      createdIds: [],
+      updatedIds: [],
+      movedIds: [],
+      resizedIds: [],
+      deletedIds: [],
+      affectedIds: [],
+      transactionId: null,
+    };
   }
 
   const style = target.getStyle();
   const viewport = target.getViewportSize?.() ?? getDefaultViewportSize();
   const boardId = target.getBoardId();
   const indexText = target.indexText ?? ((b, el) => ragSync.indexText(b, el));
+  const updateGeometry =
+    target.updateGeometry ?? ((b, el) => ragSync.updateGeometry(b, el));
+  const deleteIndexed =
+    target.deleteIndexed ?? ((b, ids) => ragSync.deleteMany(b, ids));
 
   const createdIds: string[] = [];
   const updatedIds: string[] = [];
+  const movedIds: string[] = [];
+  const resizedIds: string[] = [];
+  const deletedIds: string[] = [];
+  const geometryDirty = new Set<string>();
 
   const transactionId = target.beginInteraction();
   try {
     for (const op of operations) {
       if (op.type === 'create_text') {
         const camera = target.getCamera();
-        // Include elements created earlier in this same batch for collision.
         const elements = target.getElements();
         const width = AI_TEXT_DEFAULT_WIDTH;
         const height = estimateTextHeight(op.text, width, {
@@ -112,6 +135,61 @@ export function executeCanvasOperations(
           };
         });
         updatedIds.push(id);
+      } else if (op.type === 'move_text') {
+        const id = op.target_element_id;
+        const elements = target.getElements();
+        const current = elements.find((e) => e.id === id);
+        if (!current || current.type !== 'text') continue;
+        const others = elements.filter((e) => e.id !== id);
+        const placed = resolvePlacement({
+          placement: op.placement,
+          width: current.width,
+          height: current.height,
+          camera: target.getCamera(),
+          elements: others,
+          viewport,
+        });
+        target.updateElement(id, (el) => {
+          if (el.type !== 'text') return el;
+          return {
+            ...el,
+            x: placed.x,
+            y: placed.y,
+            metadata: {
+              ...el.metadata,
+              lastEditedBy: 'ai',
+              source: 'agent',
+              operation: 'move_text',
+            },
+          };
+        });
+        movedIds.push(id);
+        geometryDirty.add(id);
+      } else if (op.type === 'resize_text') {
+        const id = op.target_element_id;
+        target.updateElement(id, (el) => {
+          if (el.type !== 'text') return el;
+          const width = op.width ?? el.width;
+          const height = op.height ?? el.height;
+          return {
+            ...el,
+            width,
+            height,
+            metadata: {
+              ...el.metadata,
+              lastEditedBy: 'ai',
+              source: 'agent',
+              operation: 'resize_text',
+            },
+          };
+        });
+        resizedIds.push(id);
+        geometryDirty.add(id);
+      } else if (op.type === 'delete_text') {
+        const id = op.target_element_id;
+        target.deleteElements([id]);
+        deletedIds.push(id);
+        geometryDirty.delete(id);
       }
     }
   } finally {
@@ -127,11 +205,38 @@ export function executeCanvasOperations(
     }
   }
 
-  const affectedIds = [...createdIds, ...updatedIds];
-  if (affectedIds.length > 0) {
-    target.setSelection(affectedIds);
+  // Move / resize: geometry only — no re-embed.
+  for (const id of geometryDirty) {
+    const el = latest.find((e) => e.id === id);
+    if (el?.type === 'text') {
+      updateGeometry(boardId, el);
+    }
+  }
+
+  // Delete: ensure index removed (store deleteElements should also call RAG;
+  // call again for test overrides / safety).
+  if (deletedIds.length > 0) {
+    deleteIndexed(boardId, deletedIds);
+  }
+
+  const affectedIds = [
+    ...new Set([...createdIds, ...updatedIds, ...movedIds, ...resizedIds, ...deletedIds]),
+  ];
+  const remaining = affectedIds.filter((id) => !deletedIds.includes(id));
+  if (remaining.length > 0) {
+    target.setSelection(remaining);
+  } else {
+    target.setSelection([]);
   }
   target.persist?.();
 
-  return { createdIds, updatedIds, affectedIds, transactionId };
+  return {
+    createdIds,
+    updatedIds,
+    movedIds,
+    resizedIds,
+    deletedIds,
+    affectedIds,
+    transactionId,
+  };
 }

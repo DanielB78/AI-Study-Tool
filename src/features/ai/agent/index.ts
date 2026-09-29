@@ -3,6 +3,9 @@ export type {
   CanvasAgentResponse,
   CreateTextOperation,
   UpdateTextOperation,
+  MoveTextOperation,
+  ResizeTextOperation,
+  DeleteTextOperation,
   Placement,
   PlacementRelation,
 } from './operations';
@@ -10,6 +13,10 @@ export {
   CANVAS_AGENT_JSON_SCHEMA,
   CANVAS_AGENT_OUTPUT_CONTRACT,
   PLACEMENT_RELATIONS,
+  AI_TEXT_MIN_WIDTH,
+  AI_TEXT_MIN_HEIGHT,
+  AI_TEXT_MAX_WIDTH,
+  AI_TEXT_MAX_HEIGHT,
 } from './operations';
 export {
   parseCanvasAgentResponse,

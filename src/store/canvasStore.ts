@@ -125,6 +125,8 @@ export interface CanvasStore extends TransientUI, HistorySlice {
     updater: (el: CanvasElement) => CanvasElement,
   ) => void;
   deleteSelected: () => void;
+  /** Delete specific elements by id (skips locked). Used by AI delete_text. */
+  deleteElements: (ids: string[]) => void;
   replaceElements: (elements: CanvasElement[]) => void;
 
   nextZIndex: () => number;
@@ -410,28 +412,39 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   },
 
   deleteSelected: () => {
-    const { selectedIds, document } = get();
+    const { selectedIds } = get();
     if (selectedIds.length === 0) return;
-    const idSet = new Set(selectedIds);
-    const locked = document.elements.some((el) => idSet.has(el.id) && el.locked);
-    if (locked && selectedIds.every((id) => document.elements.find((e) => e.id === id)?.locked)) {
-      return;
-    }
-    const removedTextIds = document.elements
-      .filter((el) => idSet.has(el.id) && !el.locked && el.type === 'text')
+    get().deleteElements(selectedIds);
+  },
+
+  deleteElements: (ids) => {
+    if (ids.length === 0) return;
+    const { document, historySuspended } = get();
+    const idSet = new Set(ids);
+    const unlockedTargets = document.elements.filter(
+      (el) => idSet.has(el.id) && !el.locked,
+    );
+    if (unlockedTargets.length === 0) return;
+
+    const removedTextIds = unlockedTargets
+      .filter((el) => el.type === 'text')
       .map((el) => el.id);
-    get().pushHistory();
-    set({
+    const removeSet = new Set(unlockedTargets.map((el) => el.id));
+
+    if (!historySuspended) get().pushHistory();
+    set((s) => ({
       document: withUpdatedElements(
-        document,
-        document.elements.filter((el) => !idSet.has(el.id) || el.locked),
+        s.document,
+        s.document.elements.filter((el) => !removeSet.has(el.id)),
       ),
-      selectedIds: selectedIds.filter(
-        (id) => document.elements.find((e) => e.id === id)?.locked,
-      ),
-      editingTextId: null,
-      editingShapeLabelId: null,
-    });
+      selectedIds: s.selectedIds.filter((id) => !removeSet.has(id)),
+      editingTextId:
+        s.editingTextId && removeSet.has(s.editingTextId) ? null : s.editingTextId,
+      editingShapeLabelId:
+        s.editingShapeLabelId && removeSet.has(s.editingShapeLabelId)
+          ? null
+          : s.editingShapeLabelId,
+    }));
     get().persist();
     if (removedTextIds.length > 0) {
       ragSync.deleteMany(document.id, removedTextIds);

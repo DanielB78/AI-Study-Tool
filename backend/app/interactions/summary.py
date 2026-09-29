@@ -28,6 +28,13 @@ def _about_suffix(text: str | None) -> str:
     return f" about {phrase}"
 
 
+def _about_suffix_from_topic(topic: str | None) -> str:
+    """Like frontend aboutSuffix — topic is already a preview phrase."""
+    if not topic or topic == "a note":
+        return ""
+    return f" about {topic}"
+
+
 def _topic_from_prompt(user_prompt: str) -> str | None:
     trimmed = user_prompt.strip()
     if not trimmed:
@@ -40,6 +47,17 @@ def _topic_from_prompt(user_prompt: str) -> str | None:
 
 def _relation_phrase(relation: str) -> str:
     return relation.replace("_", " ")
+
+
+def _placement_phrase(placement: dict[str, Any]) -> str:
+    mode = placement.get("mode")
+    if mode == "viewport_default":
+        return "to the viewport default position"
+    if mode == "absolute":
+        return f"to ({placement.get('x')}, {placement.get('y')})"
+    relation = _relation_phrase(str(placement.get("relation", "near")))
+    anchor = placement.get("anchor_element_id", "unknown")
+    return f"{relation} textbox {anchor}"
 
 
 def _normalize_op(op: Any) -> dict[str, Any]:
@@ -87,7 +105,34 @@ def summarize_operations(
                 topic = _preview_phrase(previews.get(target))
             if not topic:
                 topic = _preview_phrase(op.get("text"))
-            return f"Updated textbox {target}{_about_suffix(topic)}."
+            return f"Updated textbox {target}{_about_suffix_from_topic(topic)}."
+
+        if op_type == "move_text":
+            target = str(op.get("target_element_id", "unknown"))
+            placement = op.get("placement") or {}
+            if not isinstance(placement, dict):
+                placement = {}
+            return f"Moved textbox {target} {_placement_phrase(placement)}."
+
+        if op_type == "resize_text":
+            target = str(op.get("target_element_id", "unknown"))
+            width = op.get("width")
+            height = op.get("height")
+            if width is not None and height is not None:
+                dims = f"{width} × {height}"
+            else:
+                parts: list[str] = []
+                if width is not None:
+                    parts.append(f"width {width}")
+                if height is not None:
+                    parts.append(f"height {height}")
+                dims = ", ".join(parts)
+            return f"Resized textbox {target} to {dims}."
+
+        if op_type == "delete_text":
+            target = str(op.get("target_element_id", "unknown"))
+            prev = previews.get(target)
+            return f"Deleted textbox {target}{_about_suffix(prev)}."
 
     parts: list[str] = []
     create_idx = 0
@@ -99,6 +144,12 @@ def summarize_operations(
             parts.append(f"created {element_id}")
         elif op_type == "update_text":
             parts.append(f"updated {op.get('target_element_id', 'unknown')}")
+        elif op_type == "move_text":
+            parts.append(f"moved {op.get('target_element_id', 'unknown')}")
+        elif op_type == "resize_text":
+            parts.append(f"resized {op.get('target_element_id', 'unknown')}")
+        elif op_type == "delete_text":
+            parts.append(f"deleted {op.get('target_element_id', 'unknown')}")
 
     if not parts:
         return "Applied canvas operations."
