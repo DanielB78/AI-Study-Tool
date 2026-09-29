@@ -35,7 +35,32 @@ export type UpdateTextOperation = {
   text: string;
 };
 
-export type CanvasOperation = CreateTextOperation | UpdateTextOperation;
+export type MoveTextOperation = {
+  type: 'move_text';
+  target_element_id: string;
+  placement: Placement;
+};
+
+export type ResizeTextOperation = {
+  type: 'resize_text';
+  target_element_id: string;
+  /** New width in world units (omit to keep current). */
+  width?: number;
+  /** New height in world units (omit to keep current). */
+  height?: number;
+};
+
+export type DeleteTextOperation = {
+  type: 'delete_text';
+  target_element_id: string;
+};
+
+export type CanvasOperation =
+  | CreateTextOperation
+  | UpdateTextOperation
+  | MoveTextOperation
+  | ResizeTextOperation
+  | DeleteTextOperation;
 
 export type CanvasAgentResponse = {
   operations: CanvasOperation[];
@@ -48,6 +73,12 @@ export const PLACEMENT_RELATIONS: readonly PlacementRelation[] = [
   'below',
   'near',
 ] as const;
+
+/** Centralized AI textbox size limits (world units). */
+export const AI_TEXT_MIN_WIDTH = 80;
+export const AI_TEXT_MIN_HEIGHT = 40;
+export const AI_TEXT_MAX_WIDTH = 2400;
+export const AI_TEXT_MAX_HEIGHT = 2400;
 
 /** Authoritative JSON Schema for LLM Structured Outputs / prompt contract. */
 export const CANVAS_AGENT_JSON_SCHEMA = {
@@ -69,41 +100,7 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
             properties: {
               type: { const: 'create_text' },
               text: { type: 'string', minLength: 1 },
-              placement: {
-                oneOf: [
-                  {
-                    type: 'object',
-                    additionalProperties: false,
-                    required: ['mode'],
-                    properties: {
-                      mode: { const: 'viewport_default' },
-                    },
-                  },
-                  {
-                    type: 'object',
-                    additionalProperties: false,
-                    required: ['mode', 'anchor_element_id', 'relation'],
-                    properties: {
-                      mode: { const: 'relative_to_element' },
-                      anchor_element_id: { type: 'string', minLength: 1 },
-                      relation: {
-                        type: 'string',
-                        enum: ['left_of', 'right_of', 'above', 'below', 'near'],
-                      },
-                    },
-                  },
-                  {
-                    type: 'object',
-                    additionalProperties: false,
-                    required: ['mode', 'x', 'y'],
-                    properties: {
-                      mode: { const: 'absolute' },
-                      x: { type: 'number' },
-                      y: { type: 'number' },
-                    },
-                  },
-                ],
-              },
+              placement: { $ref: '#/$defs/placement' },
             },
           },
           {
@@ -116,8 +113,75 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               text: { type: 'string', minLength: 1 },
             },
           },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'placement'],
+            properties: {
+              type: { const: 'move_text' },
+              target_element_id: { type: 'string', minLength: 1 },
+              placement: { $ref: '#/$defs/placement' },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id'],
+            properties: {
+              type: { const: 'resize_text' },
+              target_element_id: { type: 'string', minLength: 1 },
+              width: { type: 'number' },
+              height: { type: 'number' },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id'],
+            properties: {
+              type: { const: 'delete_text' },
+              target_element_id: { type: 'string', minLength: 1 },
+            },
+          },
         ],
       },
+    },
+  },
+  $defs: {
+    placement: {
+      oneOf: [
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['mode'],
+          properties: {
+            mode: { const: 'viewport_default' },
+          },
+        },
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['mode', 'anchor_element_id', 'relation'],
+          properties: {
+            mode: { const: 'relative_to_element' },
+            anchor_element_id: { type: 'string', minLength: 1 },
+            relation: {
+              type: 'string',
+              enum: ['left_of', 'right_of', 'above', 'below', 'near'],
+            },
+          },
+        },
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['mode', 'x', 'y'],
+          properties: {
+            mode: { const: 'absolute' },
+            x: { type: 'number' },
+            y: { type: 'number' },
+          },
+        },
+      ],
     },
   },
 } as const;
@@ -148,9 +212,33 @@ update_text:
   "text": "<complete replacement text>"
 }
 
+move_text:
+{
+  "type": "move_text",
+  "target_element_id": "<id from context>",
+  "placement": /* same placement modes as create_text */
+}
+
+resize_text:
+{
+  "type": "resize_text",
+  "target_element_id": "<id from context>",
+  "width": <positive number, optional>,
+  "height": <positive number, optional>
+}
+(At least one of width/height required. Omitting one preserves the current value.)
+
+delete_text:
+{
+  "type": "delete_text",
+  "target_element_id": "<id from context>"
+}
+
 Rules:
 - Never invent element IDs.
 - Prefer relative_to_element over absolute for "next to / below / above / left / right".
-- Prefer viewport_default when the user gives no location.
-- Do not emit delete/move/resize/style/shape/connector operations.
+- Prefer viewport_default when creating with no location.
+- Prefer relative placement for moves when the user describes a relationship.
+- delete_text only when the user clearly asks to delete/remove/get rid of a textbox.
+- Do not emit shape/image/connector/style/group operations.
 `.trim();

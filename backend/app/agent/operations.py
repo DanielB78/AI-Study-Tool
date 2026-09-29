@@ -1,14 +1,13 @@
-"""Pydantic models for canvas agent operations (create_text / update_text).
+"""Pydantic models for canvas agent operations.
 
-Mirrors the frontend TypeScript schema in src/features/ai/agent/operations.ts
-for future Structured Outputs / tool calling.
+Mirrors src/features/ai/agent/operations.ts for Structured Outputs.
 """
 
 from __future__ import annotations
 
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field, TypeAdapter, model_validator
 
 
 class ViewportDefaultPlacement(BaseModel):
@@ -45,8 +44,38 @@ class UpdateTextOperation(BaseModel):
     text: str = Field(..., min_length=1)
 
 
+class MoveTextOperation(BaseModel):
+    type: Literal["move_text"] = "move_text"
+    target_element_id: str = Field(..., min_length=1)
+    placement: Placement
+
+
+class ResizeTextOperation(BaseModel):
+    type: Literal["resize_text"] = "resize_text"
+    target_element_id: str = Field(..., min_length=1)
+    width: float | None = None
+    height: float | None = None
+
+    @model_validator(mode="after")
+    def require_dimension(self) -> ResizeTextOperation:
+        if self.width is None and self.height is None:
+            raise ValueError("resize_text requires width and/or height")
+        return self
+
+
+class DeleteTextOperation(BaseModel):
+    type: Literal["delete_text"] = "delete_text"
+    target_element_id: str = Field(..., min_length=1)
+
+
 CanvasOperation = Annotated[
-    Union[CreateTextOperation, UpdateTextOperation],
+    Union[
+        CreateTextOperation,
+        UpdateTextOperation,
+        MoveTextOperation,
+        ResizeTextOperation,
+        DeleteTextOperation,
+    ],
     Field(discriminator="type"),
 ]
 

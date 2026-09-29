@@ -643,7 +643,15 @@ export function RagDebugPanel() {
             {pendingPlan && pendingPlan.length > 0 && (
               <section className="rag-debug-section">
                 <div className="rag-debug-section-title">AI plan</div>
-                <pre className="rag-debug-plan">{pendingPlan.join('\n\n')}</pre>
+                <pre
+                  className={
+                    pendingPlan.some((line) => line.includes('DELETE'))
+                      ? 'rag-debug-plan rag-debug-plan-destructive'
+                      : 'rag-debug-plan'
+                  }
+                >
+                  {pendingPlan.join('\n\n')}
+                </pre>
                 {pendingOperations && (
                   <>
                     <div className="rag-debug-section-title">Raw JSON</div>

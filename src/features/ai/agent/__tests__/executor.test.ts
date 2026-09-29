@@ -62,6 +62,7 @@ describe('executeCanvasOperations', () => {
     resetCanvas();
     vi.spyOn(ragSync, 'indexText').mockImplementation(() => {});
     vi.spyOn(ragSync, 'updateGeometry').mockImplementation(() => {});
+    vi.spyOn(ragSync, 'deleteMany').mockImplementation(() => {});
     vi.spyOn(ragSync, 'scheduleReconcile').mockImplementation(() => {});
   });
 
@@ -160,5 +161,128 @@ describe('executeCanvasOperations', () => {
     )!;
     const anchor = useCanvasStore.getState().document.elements.find((e) => e.id === 'textbox_18')!;
     expect(created.x).toBeGreaterThan(anchor.x + anchor.width);
+  });
+
+  it('move_text preserves text and size', () => {
+    const before = useCanvasStore.getState().document.elements.find((e) => e.id === 'textbox_18')!;
+    expect(before.type).toBe('text');
+    const result = executeCanvasOperations(
+      [
+        {
+          type: 'move_text',
+          target_element_id: 'textbox_18',
+          placement: { mode: 'absolute', x: 400, y: 250 },
+        },
+      ],
+      target(),
+    );
+    expect(result.movedIds).toEqual(['textbox_18']);
+    const el = useCanvasStore.getState().document.elements.find((e) => e.id === 'textbox_18')!;
+    expect(el.x).toBe(400);
+    expect(el.y).toBe(250);
+    expect(el.width).toBe(before.width);
+    expect(el.height).toBe(before.height);
+    if (el.type === 'text' && before.type === 'text') {
+      expect(el.text).toBe(before.text);
+    }
+    expect(ragSync.updateGeometry).toHaveBeenCalled();
+  });
+
+  it('resize_text preserves text and position', () => {
+    const before = useCanvasStore.getState().document.elements.find((e) => e.id === 'textbox_18')!;
+    const result = executeCanvasOperations(
+      [
+        {
+          type: 'resize_text',
+          target_element_id: 'textbox_18',
+          width: 360,
+          height: 120,
+        },
+      ],
+      target(),
+    );
+    expect(result.resizedIds).toEqual(['textbox_18']);
+    const el = useCanvasStore.getState().document.elements.find((e) => e.id === 'textbox_18')!;
+    expect(el.x).toBe(before.x);
+    expect(el.y).toBe(before.y);
+    expect(el.width).toBe(360);
+    expect(el.height).toBe(120);
+    if (el.type === 'text' && before.type === 'text') {
+      expect(el.text).toBe(before.text);
+    }
+    expect(ragSync.updateGeometry).toHaveBeenCalled();
+  });
+
+  it('delete_text removes the element', () => {
+    const result = executeCanvasOperations(
+      [{ type: 'delete_text', target_element_id: 'textbox_18' }],
+      target(),
+    );
+    expect(result.deletedIds).toEqual(['textbox_18']);
+    expect(useCanvasStore.getState().document.elements).toHaveLength(0);
+    expect(ragSync.deleteMany).toHaveBeenCalled();
+  });
+
+  it('move + delete are one undo transaction', () => {
+    // Seed a second element as move anchor
+    useCanvasStore.getState().addElement(
+      {
+        id: 'textbox_42',
+        type: 'text',
+        x: 400,
+        y: 100,
+        width: 200,
+        height: 80,
+        rotation: 0,
+        zIndex: 2,
+        opacity: 1,
+        locked: false,
+        createdAt: 2,
+        updatedAt: 2,
+        metadata: {},
+        text: 'Anchor',
+        fontSize: 16,
+        fontFamily: 'sans',
+        fontWeight: 'normal',
+        fontItalic: false,
+        underline: false,
+        strikethrough: false,
+        color: '#000',
+        alignment: 'left',
+        lineHeight: 1.3,
+        backgroundColor: '#fff',
+        padding: 12,
+        cornerRadius: 8,
+      } satisfies TextElement,
+      false,
+    );
+
+    executeCanvasOperations(
+      [
+        {
+          type: 'move_text',
+          target_element_id: 'textbox_18',
+          placement: {
+            mode: 'relative_to_element',
+            anchor_element_id: 'textbox_42',
+            relation: 'below',
+          },
+        },
+        { type: 'delete_text', target_element_id: 'textbox_42' },
+      ],
+      target(),
+    );
+
+    expect(useCanvasStore.getState().document.elements).toHaveLength(1);
+    expect(
+      useCanvasStore.getState().document.elements.find((e) => e.id === 'textbox_42'),
+    ).toBeUndefined();
+
+    useCanvasStore.getState().undo();
+    const afterUndo = useCanvasStore.getState().document.elements;
+    expect(afterUndo).toHaveLength(2);
+    const restored = afterUndo.find((e) => e.id === 'textbox_18')!;
+    expect(restored.x).toBe(100);
+    expect(restored.y).toBe(100);
   });
 });

@@ -82,3 +82,62 @@ def test_multiple_operations() -> None:
 
 def test_empty_operations() -> None:
     assert summarize_operations("hi", []) == "No canvas changes were applied."
+
+
+def test_move_text() -> None:
+    summary = summarize_operations(
+        "Move the Gauss note below the other one",
+        [
+            {
+                "type": "move_text",
+                "target_element_id": "textbox_18",
+                "placement": {
+                    "mode": "relative_to_element",
+                    "anchor_element_id": "textbox_42",
+                    "relation": "below",
+                },
+            }
+        ],
+    )
+    assert summary == "Moved textbox textbox_18 below textbox textbox_42."
+
+
+def test_resize_text() -> None:
+    summary = summarize_operations(
+        "Make it bigger",
+        [
+            {
+                "type": "resize_text",
+                "target_element_id": "textbox_18",
+                "width": 360,
+                "height": 120,
+            }
+        ],
+    )
+    assert summary == "Resized textbox textbox_18 to 360 × 120."
+
+
+def test_delete_text() -> None:
+    summary = summarize_operations(
+        "Delete the Gauss note",
+        [{"type": "delete_text", "target_element_id": "textbox_18"}],
+        element_previews={"textbox_18": "Old Gauss law notes"},
+    )
+    assert summary.startswith("Deleted textbox textbox_18")
+    assert "Old Gauss law notes" in summary
+
+
+def test_multiple_move_resize_delete() -> None:
+    summary = summarize_operations(
+        "rearrange",
+        [
+            {
+                "type": "move_text",
+                "target_element_id": "textbox_1",
+                "placement": {"mode": "absolute", "x": 10, "y": 20},
+            },
+            {"type": "resize_text", "target_element_id": "textbox_2", "width": 300},
+            {"type": "delete_text", "target_element_id": "textbox_3"},
+        ],
+    )
+    assert summary == "Moved textbox_1, resized textbox_2 and deleted textbox_3."

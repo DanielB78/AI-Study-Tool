@@ -1,18 +1,25 @@
 /**
- * CanvasAgentResponseParser — JSON parse + schema-ish + semantic validation.
- * Does not mutate the canvas.
+ * CanvasAgentResponseParser — JSON parse + semantic validation.
+ * Does not mutate the canvas. All-or-nothing: any invalid op rejects the plan.
  */
 
 import {
+  AI_TEXT_MAX_HEIGHT,
+  AI_TEXT_MAX_WIDTH,
+  AI_TEXT_MIN_HEIGHT,
+  AI_TEXT_MIN_WIDTH,
   CANVAS_AGENT_JSON_SCHEMA,
   PLACEMENT_RELATIONS,
   type AbsolutePlacement,
   type CanvasAgentResponse,
   type CanvasOperation,
   type CreateTextOperation,
+  type DeleteTextOperation,
+  type MoveTextOperation,
   type Placement,
   type PlacementRelation,
   type RelativePlacement,
+  type ResizeTextOperation,
   type UpdateTextOperation,
 } from './operations';
 import { describeOperationPlanLines } from './actionSummary';
@@ -29,7 +36,10 @@ export type ParseErrorCode =
   | 'missing_anchor'
   | 'anchor_not_in_context'
   | 'invalid_relation'
-  | 'invalid_coordinates';
+  | 'invalid_coordinates'
+  | 'invalid_size'
+  | 'missing_size'
+  | 'self_anchor';
 
 export class CanvasAgentParseError extends Error {
   readonly code: ParseErrorCode;
@@ -67,6 +77,14 @@ function requireNonEmptyString(v: unknown, field: string): string {
     throw new CanvasAgentParseError('empty_text', `${field} must be a non-empty string.`);
   }
   return v;
+}
+
+function requireTargetId(raw: Record<string, unknown>, opName: string): string {
+  const target = raw.target_element_id;
+  if (typeof target !== 'string' || !target.trim()) {
+    throw new CanvasAgentParseError('missing_target', `${opName} needs target_element_id.`);
+  }
+  return target.trim();
 }
 
 function parsePlacement(raw: unknown): Placement {
@@ -109,6 +127,29 @@ function parsePlacement(raw: unknown): Placement {
   throw new CanvasAgentParseError('schema', `Unknown placement mode: ${String(raw.mode)}`);
 }
 
+function validateDimension(
+  value: unknown,
+  field: 'width' | 'height',
+): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new CanvasAgentParseError(
+      'invalid_size',
+      `resize_text.${field} must be a finite number.`,
+      String(value),
+    );
+  }
+  const min = field === 'width' ? AI_TEXT_MIN_WIDTH : AI_TEXT_MIN_HEIGHT;
+  const max = field === 'width' ? AI_TEXT_MAX_WIDTH : AI_TEXT_MAX_HEIGHT;
+  if (value < min || value > max) {
+    throw new CanvasAgentParseError(
+      'invalid_size',
+      `resize_text.${field} must be between ${min} and ${max}.`,
+      String(value),
+    );
+  }
+  return value;
+}
+
 function parseOperation(raw: unknown): CanvasOperation {
   if (!isRecord(raw) || typeof raw.type !== 'string') {
     throw new CanvasAgentParseError('schema', 'Each operation needs a type.');
@@ -119,51 +160,95 @@ function parseOperation(raw: unknown): CanvasOperation {
     return { type: 'create_text', text, placement } satisfies CreateTextOperation;
   }
   if (raw.type === 'update_text') {
-    const target = raw.target_element_id;
-    if (typeof target !== 'string' || !target.trim()) {
-      throw new CanvasAgentParseError('missing_target', 'update_text needs target_element_id.');
-    }
+    const target_element_id = requireTargetId(raw, 'update_text');
     const text = requireNonEmptyString(raw.text, 'update_text.text');
     return {
       type: 'update_text',
-      target_element_id: target.trim(),
+      target_element_id,
       text,
     } satisfies UpdateTextOperation;
   }
+  if (raw.type === 'move_text') {
+    const target_element_id = requireTargetId(raw, 'move_text');
+    const placement = parsePlacement(raw.placement);
+    return { type: 'move_text', target_element_id, placement } satisfies MoveTextOperation;
+  }
+  if (raw.type === 'resize_text') {
+    const target_element_id = requireTargetId(raw, 'resize_text');
+    const hasWidth = raw.width !== undefined;
+    const hasHeight = raw.height !== undefined;
+    if (!hasWidth && !hasHeight) {
+      throw new CanvasAgentParseError(
+        'missing_size',
+        'resize_text requires width and/or height.',
+      );
+    }
+    const op: ResizeTextOperation = { type: 'resize_text', target_element_id };
+    if (hasWidth) op.width = validateDimension(raw.width, 'width');
+    if (hasHeight) op.height = validateDimension(raw.height, 'height');
+    return op;
+  }
+  if (raw.type === 'delete_text') {
+    const target_element_id = requireTargetId(raw, 'delete_text');
+    return { type: 'delete_text', target_element_id } satisfies DeleteTextOperation;
+  }
   throw new CanvasAgentParseError(
     'unknown_operation',
-    `Unsupported operation type "${raw.type}". Only create_text and update_text are allowed.`,
+    `Unsupported operation type "${raw.type}". Allowed: create_text, update_text, move_text, resize_text, delete_text.`,
     String(raw.type),
   );
 }
 
-function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
-  if (op.type === 'update_text') {
-    if (!ctx.allowedElementIds.has(op.target_element_id)) {
-      throw new CanvasAgentParseError(
-        'target_not_in_context',
-        `target_element_id "${op.target_element_id}" was not in the supplied canvas context.`,
-        op.target_element_id,
-      );
-    }
-    const t = ctx.elementTypes?.get(op.target_element_id);
-    if (t !== undefined && t !== 'text') {
-      throw new CanvasAgentParseError(
-        'target_not_text',
-        `target_element_id "${op.target_element_id}" is not a TextElement.`,
-        op.target_element_id,
-      );
-    }
+function assertTargetInContext(id: string, ctx: ParseContext): void {
+  if (!ctx.allowedElementIds.has(id)) {
+    throw new CanvasAgentParseError(
+      'target_not_in_context',
+      `target_element_id "${id}" was not in the supplied canvas context.`,
+      id,
+    );
   }
-  if (op.type === 'create_text' && op.placement.mode === 'relative_to_element') {
-    const id = op.placement.anchor_element_id;
-    if (!ctx.allowedElementIds.has(id)) {
-      throw new CanvasAgentParseError(
-        'anchor_not_in_context',
-        `anchor_element_id "${id}" was not in the supplied canvas context.`,
-        id,
-      );
-    }
+  const t = ctx.elementTypes?.get(id);
+  if (t !== undefined && t !== 'text') {
+    throw new CanvasAgentParseError(
+      'target_not_text',
+      `target_element_id "${id}" is not a TextElement.`,
+      id,
+    );
+  }
+}
+
+function assertRelativePlacement(
+  placement: Placement,
+  ctx: ParseContext,
+  targetId?: string,
+): void {
+  if (placement.mode !== 'relative_to_element') return;
+  const id = placement.anchor_element_id;
+  if (!ctx.allowedElementIds.has(id)) {
+    throw new CanvasAgentParseError(
+      'anchor_not_in_context',
+      `anchor_element_id "${id}" was not in the supplied canvas context.`,
+      id,
+    );
+  }
+  if (targetId && id === targetId) {
+    throw new CanvasAgentParseError(
+      'self_anchor',
+      'move_text cannot use the target as its own placement anchor.',
+      id,
+    );
+  }
+}
+
+function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
+  if (op.type === 'update_text' || op.type === 'move_text' || op.type === 'resize_text' || op.type === 'delete_text') {
+    assertTargetInContext(op.target_element_id, ctx);
+  }
+  if (op.type === 'create_text') {
+    assertRelativePlacement(op.placement, ctx);
+  }
+  if (op.type === 'move_text') {
+    assertRelativePlacement(op.placement, ctx, op.target_element_id);
   }
 }
 

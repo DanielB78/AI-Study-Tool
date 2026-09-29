@@ -70,4 +70,75 @@ describe('summarizeAiActions', () => {
       summarizeAiActions({ userPrompt: 'x', operations: [] }),
     ).toBe('No canvas changes were applied.');
   });
+
+  it('summarizes a single move_text', () => {
+    const ops: CanvasOperation[] = [
+      {
+        type: 'move_text',
+        target_element_id: 'textbox_18',
+        placement: {
+          mode: 'relative_to_element',
+          anchor_element_id: 'textbox_42',
+          relation: 'below',
+        },
+      },
+    ];
+    const summary = summarizeAiActions({
+      userPrompt: 'Move the Gauss note below the other one',
+      operations: ops,
+    });
+    expect(summary).toBe('Moved textbox textbox_18 below textbox textbox_42.');
+  });
+
+  it('summarizes a single resize_text', () => {
+    const ops: CanvasOperation[] = [
+      {
+        type: 'resize_text',
+        target_element_id: 'textbox_18',
+        width: 360,
+        height: 120,
+      },
+    ];
+    const summary = summarizeAiActions({
+      userPrompt: 'Make it bigger',
+      operations: ops,
+    });
+    expect(summary).toBe('Resized textbox textbox_18 to 360 × 120.');
+  });
+
+  it('summarizes a single delete_text', () => {
+    const ops: CanvasOperation[] = [
+      { type: 'delete_text', target_element_id: 'textbox_18' },
+    ];
+    const summary = summarizeAiActions({
+      userPrompt: 'Delete the Gauss note',
+      operations: ops,
+      elementPreviews: {
+        textbox_18: { id: 'textbox_18', text: 'Old Gauss law notes', exists: true },
+      },
+    });
+    expect(summary).toContain('Deleted textbox textbox_18');
+    expect(summary).toContain('Old Gauss law notes');
+  });
+
+  it('summarizes multiple move/resize/delete operations', () => {
+    const ops: CanvasOperation[] = [
+      {
+        type: 'move_text',
+        target_element_id: 'textbox_1',
+        placement: { mode: 'absolute', x: 10, y: 20 },
+      },
+      {
+        type: 'resize_text',
+        target_element_id: 'textbox_2',
+        width: 300,
+      },
+      { type: 'delete_text', target_element_id: 'textbox_3' },
+    ];
+    const summary = summarizeAiActions({
+      userPrompt: 'rearrange',
+      operations: ops,
+    });
+    expect(summary).toBe('Moved textbox_1, resized textbox_2 and deleted textbox_3.');
+  });
 });
