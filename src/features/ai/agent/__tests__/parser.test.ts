@@ -72,7 +72,7 @@ describe('parseCanvasAgentResponse', () => {
         ctx,
       ),
     ).toThrow(
-      /Allowed: create_text, update_text, move_text, resize_text, delete_text, update_text_style/,
+      /Allowed: create_text, update_text, move_text, resize_text, delete_text, update_text_style, create_equation/,
     );
   });
 
@@ -429,5 +429,143 @@ describe('parseCanvasAgentResponse', () => {
     expect(lines[3]).toContain('STYLE TEXTBOX');
     expect(lines[3]).toContain('Bold: yes');
     expect(lines[3]).toContain('#0000FF');
+  });
+
+  it('parses create_equation and sanitizes fences', () => {
+    const raw = JSON.stringify({
+      operations: [
+        {
+          type: 'create_equation',
+          latex: '$E=mc^2$',
+          placement: { mode: 'viewport_default' },
+        },
+      ],
+    });
+    const res = parseCanvasAgentResponse(raw, ctx);
+    expect(res.operations[0]).toMatchObject({
+      type: 'create_equation',
+      latex: 'E=mc^2',
+    });
+  });
+
+  it('parses update_equation for equation targets', () => {
+    const eqCtx = {
+      allowedElementIds: new Set(['eq_1', 'textbox_18']),
+      elementTypes: new Map([
+        ['eq_1', 'equation'],
+        ['textbox_18', 'text'],
+      ]),
+    };
+    const raw = JSON.stringify({
+      operations: [
+        {
+          type: 'update_equation',
+          target_element_id: 'eq_1',
+          latex: 'F=ma',
+        },
+      ],
+    });
+    expect(parseCanvasAgentResponse(raw, eqCtx).operations[0]).toMatchObject({
+      type: 'update_equation',
+      latex: 'F=ma',
+    });
+  });
+
+  it('rejects invalid latex on create_equation', () => {
+    expect(() =>
+      parseCanvasAgentResponse(
+        JSON.stringify({
+          operations: [
+            {
+              type: 'create_equation',
+              latex: '\\frac{1{2}',
+              placement: { mode: 'viewport_default' },
+            },
+          ],
+        }),
+        ctx,
+      ),
+    ).toThrow(/invalid|KaTeX|LaTeX/i);
+  });
+
+  it('rejects equation op targeting a text element', () => {
+    expect(() =>
+      parseCanvasAgentResponse(
+        JSON.stringify({
+          operations: [
+            {
+              type: 'update_equation',
+              target_element_id: 'textbox_18',
+              latex: 'E=mc^2',
+            },
+          ],
+        }),
+        ctx,
+      ),
+    ).toThrow(/not an EquationElement/i);
+  });
+
+  it('accepts same-plan anchor_operation_index', () => {
+    const raw = JSON.stringify({
+      operations: [
+        {
+          type: 'create_text',
+          text: 'Gauss note',
+          placement: { mode: 'viewport_default' },
+        },
+        {
+          type: 'create_equation',
+          latex: 'E=mc^2',
+          placement: {
+            mode: 'relative_to_element',
+            relation: 'below',
+            anchor_operation_index: 0,
+          },
+        },
+      ],
+    });
+    const res = parseCanvasAgentResponse(raw, ctx);
+    expect(res.operations).toHaveLength(2);
+    expect(res.operations[1]).toMatchObject({
+      type: 'create_equation',
+      placement: {
+        mode: 'relative_to_element',
+        relation: 'below',
+        anchor_operation_index: 0,
+      },
+    });
+  });
+
+  it('rejects anchor_operation_index that is not earlier', () => {
+    expect(() =>
+      parseCanvasAgentResponse(
+        JSON.stringify({
+          operations: [
+            {
+              type: 'create_equation',
+              latex: 'E=mc^2',
+              placement: {
+                mode: 'relative_to_element',
+                relation: 'below',
+                anchor_operation_index: 0,
+              },
+            },
+          ],
+        }),
+        ctx,
+      ),
+    ).toThrow(/anchor_operation_index/i);
+  });
+
+  it('describeOperationPlan includes CREATE EQUATION', () => {
+    const lines = describeOperationPlan([
+      {
+        type: 'create_equation',
+        latex: 'E=mc^2',
+        placement: { mode: 'viewport_default' },
+      },
+    ]);
+    expect(lines[0]).toContain('CREATE EQUATION');
+    expect(lines[0]).toContain('E=mc^2');
   });
 });

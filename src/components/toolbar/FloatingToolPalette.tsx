@@ -7,6 +7,7 @@ import {
   Pencil,
   Redo2,
   Shapes,
+  Sigma,
   Type,
   Undo2,
   Minus,
@@ -161,6 +162,16 @@ export function FloatingToolPalette({ fileInputRef }: FloatingToolPaletteProps) 
             onClick={() => {
               closeShapes();
               setTool('text');
+            }}
+          />
+          <ToolButton
+            label="Equation"
+            shortcut="E"
+            icon={Sigma}
+            active={activeTool === 'equation'}
+            onClick={() => {
+              closeShapes();
+              setTool('equation');
             }}
           />
           <ToolButton

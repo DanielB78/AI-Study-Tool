@@ -5,6 +5,7 @@ import type {
   CanvasElement,
   ConnectorElement,
   DrawingElement,
+  EquationElement,
   ImageElement,
   ShapeElement,
   ShapeType,
@@ -25,6 +26,10 @@ import {
 } from '../persistence/storage';
 import { styleFromElement } from '../persistence/migrate';
 import { ragSync } from '../features/rag/ragSync';
+import {
+  EQUATION_DEFAULT_FONT_SIZE,
+  measureEquationSize,
+} from '../features/equations/latex';
 
 const MAX_HISTORY = 80;
 const persistence: PersistenceService = createLocalStoragePersistence();
@@ -35,6 +40,8 @@ export interface TransientUI {
   selectedIds: string[];
   activeTool: ToolType;
   editingTextId: string | null;
+  /** Equation id currently editing its LaTeX source. */
+  editingEquationId: string | null;
   /** Shape id currently editing its label. */
   editingShapeLabelId: string | null;
   isSpacePanning: boolean;
@@ -107,6 +114,7 @@ export interface CanvasStore extends TransientUI, HistorySlice {
   select: (ids: string[], additive?: boolean) => void;
   clearSelection: () => void;
   setEditingTextId: (id: string | null) => void;
+  setEditingEquationId: (id: string | null) => void;
   setEditingShapeLabelId: (id: string | null) => void;
 
   pushHistory: () => void;
@@ -153,6 +161,7 @@ export interface CanvasStore extends TransientUI, HistorySlice {
   ) => void;
 
   createTextAt: (worldX: number, worldY: number, width?: number) => string;
+  createEquationAt: (worldX: number, worldY: number) => string;
   commitDrawing: (absolutePoints: number[]) => void;
   commitShape: (draft: NonNullable<TransientUI['draftShape']>) => void;
   addImageFromFile: (file: File, worldX: number, worldY: number) => Promise<void>;
@@ -196,6 +205,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   selectedIds: [],
   activeTool: 'select',
   editingTextId: null,
+  editingEquationId: null,
   editingShapeLabelId: null,
   isSpacePanning: false,
   marquee: null,
@@ -217,6 +227,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       document: doc,
       selectedIds: [],
       editingTextId: null,
+      editingEquationId: null,
       editingShapeLabelId: null,
     });
     ragSync.scheduleReconcile(doc.id, doc.elements);
@@ -230,6 +241,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     set({
       activeTool: tool,
       editingTextId: null,
+      editingEquationId: null,
       editingShapeLabelId: null,
       draftPoints: null,
       draftShape: null,
@@ -255,9 +267,12 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   setDraftPoints: (points) => set({ draftPoints: points }),
   setDraftShape: (draft) => set({ draftShape: draft }),
   setSnapGuides: (guides) => set({ snapGuides: guides }),
-  setEditingTextId: (id) => set({ editingTextId: id, editingShapeLabelId: null }),
+  setEditingTextId: (id) =>
+    set({ editingTextId: id, editingEquationId: null, editingShapeLabelId: null }),
+  setEditingEquationId: (id) =>
+    set({ editingEquationId: id, editingTextId: null, editingShapeLabelId: null }),
   setEditingShapeLabelId: (id) =>
-    set({ editingShapeLabelId: id, editingTextId: null }),
+    set({ editingShapeLabelId: id, editingTextId: null, editingEquationId: null }),
 
   select: (ids, additive = false) => {
     set((s) => {
@@ -280,6 +295,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       return {
         selectedIds,
         editingTextId: null,
+        editingEquationId: null,
         editingShapeLabelId: null,
         style: primary ? styleFromElement(primary, s.style) : s.style,
       };
@@ -287,7 +303,12 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   },
 
   clearSelection: () =>
-    set({ selectedIds: [], editingTextId: null, editingShapeLabelId: null }),
+    set({
+      selectedIds: [],
+      editingTextId: null,
+      editingEquationId: null,
+      editingShapeLabelId: null,
+    }),
 
   pushHistory: () => {
     const { document, past, historySuspended } = get();
@@ -324,7 +345,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     const { document, selectedIds } = get();
     const idSet = selectedIds.length > 0 ? new Set(selectedIds) : null;
     for (const el of document.elements) {
-      if (el.type !== 'text') continue;
+      if (el.type !== 'text' && el.type !== 'equation') continue;
       if (idSet && !idSet.has(el.id)) continue;
       if (!idSet) continue;
       ragSync.updateGeometry(document.id, el);
@@ -346,6 +367,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       document: entry.document,
       selectedIds: [],
       editingTextId: null,
+      editingEquationId: null,
       editingShapeLabelId: null,
       activeTransactionId: entry.transactionId,
     });
@@ -366,6 +388,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       document: entry.document,
       selectedIds: [],
       editingTextId: null,
+      editingEquationId: null,
       editingShapeLabelId: null,
       activeTransactionId: entry.transactionId,
     });
@@ -387,8 +410,8 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       selectedIds: select ? [element.id] : s.selectedIds,
     }));
     get().persist();
-    if (element.type === 'text') {
-      ragSync.indexText(get().document.id, element);
+    if (element.type === 'text' || element.type === 'equation') {
+      ragSync.indexElement(get().document.id, element);
     }
   },
 
@@ -426,8 +449,8 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     );
     if (unlockedTargets.length === 0) return;
 
-    const removedTextIds = unlockedTargets
-      .filter((el) => el.type === 'text')
+    const removedIndexedIds = unlockedTargets
+      .filter((el) => el.type === 'text' || el.type === 'equation')
       .map((el) => el.id);
     const removeSet = new Set(unlockedTargets.map((el) => el.id));
 
@@ -440,14 +463,18 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       selectedIds: s.selectedIds.filter((id) => !removeSet.has(id)),
       editingTextId:
         s.editingTextId && removeSet.has(s.editingTextId) ? null : s.editingTextId,
+      editingEquationId:
+        s.editingEquationId && removeSet.has(s.editingEquationId)
+          ? null
+          : s.editingEquationId,
       editingShapeLabelId:
         s.editingShapeLabelId && removeSet.has(s.editingShapeLabelId)
           ? null
           : s.editingShapeLabelId,
     }));
     get().persist();
-    if (removedTextIds.length > 0) {
-      ragSync.deleteMany(document.id, removedTextIds);
+    if (removedIndexedIds.length > 0) {
+      ragSync.deleteMany(document.id, removedIndexedIds);
     }
   },
 
@@ -672,6 +699,33 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     return id;
   },
 
+  createEquationAt: (worldX, worldY) => {
+    const { style } = get();
+    const id = createId();
+    const latex = 'E=mc^2';
+    const fontSize = EQUATION_DEFAULT_FONT_SIZE;
+    const size = measureEquationSize(latex, { fontSize, displayMode: true });
+    const element: EquationElement = {
+      ...createBaseFields({
+        x: worldX,
+        y: worldY,
+        width: size.width,
+        height: size.height,
+        zIndex: get().nextZIndex(),
+        opacity: style.opacity,
+      }),
+      id,
+      type: 'equation',
+      latex,
+      fontSize,
+      color: style.textColor,
+      displayMode: 'display',
+    };
+    get().addElement(element, true);
+    set({ editingEquationId: id, activeTool: 'select' });
+    return id;
+  },
+
   commitDrawing: (absolutePoints) => {
     if (absolutePoints.length < 4) {
       set({ draftPoints: null });
@@ -828,6 +882,13 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
             backgroundColor: style.textBackgroundColor,
             padding: style.textPadding,
             cornerRadius: style.textCornerRadius,
+            opacity: style.opacity,
+          });
+        case 'equation':
+          return touch({
+            ...el,
+            color: style.textColor,
+            fontSize: style.fontSize,
             opacity: style.opacity,
           });
         case 'shape':

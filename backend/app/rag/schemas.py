@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 class TextElementIndexRequest(BaseModel):
     board_id: str = Field(..., min_length=1, max_length=128)
     element_id: str = Field(..., min_length=1, max_length=128)
-    element_type: Literal["text"] = "text"
+    element_type: Literal["text", "equation"] = "text"
     text: str
     x: float
     y: float

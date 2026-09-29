@@ -135,8 +135,13 @@ function formatElementBlock(el: RagContextElement): string {
       `STYLE: text_color=${el.style.text_color}, background_color=${el.style.background_color ?? 'transparent'}, bold=${el.style.bold}, italic=${el.style.italic}, underline=${el.style.underline}`,
     );
   }
-  lines.push('TEXT:');
-  lines.push(el.text || '(empty)');
+  if (el.element_type === 'equation') {
+    lines.push('LATEX:');
+    lines.push(el.text || '(empty)');
+  } else {
+    lines.push('TEXT:');
+    lines.push(el.text || '(empty)');
+  }
   return lines.join('\n');
 }
 

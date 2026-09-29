@@ -1,5 +1,14 @@
-import type { CanvasElement, TextElement } from '../../types/canvas';
-import { createRagIndexer, toPayload, type RagIndexer } from './ragIndexer';
+import type {
+  CanvasElement,
+  EquationElement,
+  TextElement,
+} from '../../types/canvas';
+import {
+  createRagIndexer,
+  toPayload,
+  type IndexableCanvasElement,
+  type RagIndexer,
+} from './ragIndexer';
 
 /**
  * Fire-and-forget RAG sync. Never blocks the editor UI.
@@ -13,14 +22,23 @@ export class RagSyncController {
     this.indexer = indexer;
   }
 
-  indexText(boardId: string, element: TextElement): void {
+  /** Index a text or equation element (content = text or latex). */
+  indexElement(boardId: string, element: IndexableCanvasElement): void {
     const payload = toPayload(boardId, element);
     void this.indexer.indexTextElement(payload).catch((err) => {
-      console.warn('[rag] indexText failed', element.id, err);
+      console.warn('[rag] indexElement failed', element.id, err);
     });
   }
 
-  updateGeometry(boardId: string, element: TextElement): void {
+  indexText(boardId: string, element: TextElement): void {
+    this.indexElement(boardId, element);
+  }
+
+  indexEquation(boardId: string, element: EquationElement): void {
+    this.indexElement(boardId, element);
+  }
+
+  updateGeometry(boardId: string, element: IndexableCanvasElement): void {
     void this.indexer
       .updateGeometry(boardId, element.id, {
         x: element.x,
@@ -46,8 +64,8 @@ export class RagSyncController {
   }
 
   /**
-   * After undo/redo (or bulk mutations), reconcile index with current text elements.
-   * Debounced so rapid history steps coalesce.
+   * After undo/redo (or bulk mutations), reconcile index with current
+   * text + equation elements. Debounced so rapid history steps coalesce.
    */
   scheduleReconcile(boardId: string, elements: CanvasElement[]): void {
     if (this.reconcileTimer !== null) {
@@ -55,8 +73,11 @@ export class RagSyncController {
     }
     this.reconcileTimer = setTimeout(() => {
       this.reconcileTimer = null;
-      const texts = elements.filter((el): el is TextElement => el.type === 'text');
-      const payloads = texts.map((el) => toPayload(boardId, el));
+      const indexable = elements.filter(
+        (el): el is IndexableCanvasElement =>
+          el.type === 'text' || el.type === 'equation',
+      );
+      const payloads = indexable.map((el) => toPayload(boardId, el));
       void this.indexer.reindexBoard(boardId, payloads).catch((err) => {
         console.warn('[rag] reconcile/reindex failed', boardId, err);
       });

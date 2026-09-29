@@ -43,6 +43,7 @@ function extractText(el: SpatialElementLike): string {
  */
 export function isSpatiallyEligible(el: SpatialElementLike): boolean {
   if (el.type === 'text') return true;
+  if (el.type === 'equation') return true;
   // Shape labels only when non-empty — no invented semantics.
   if (el.type === 'shape' && typeof el.label === 'string' && el.label.trim()) {
     return true;
@@ -114,6 +115,17 @@ export function canvasElementsAsSpatial(
         width: el.width,
         height: el.height,
         text: el.text,
+      };
+    }
+    if (el.type === 'equation') {
+      return {
+        id: el.id,
+        type: el.type,
+        x: el.x,
+        y: el.y,
+        width: el.width,
+        height: el.height,
+        text: el.latex,
       };
     }
     if (el.type === 'shape') {

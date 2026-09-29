@@ -45,6 +45,7 @@ function resetCanvas() {
     selectedIds: [],
     activeTool: 'select',
     editingTextId: null,
+    editingEquationId: null,
     editingShapeLabelId: null,
     past: [],
     future: [],
@@ -61,6 +62,8 @@ describe('executeCanvasOperations', () => {
   beforeEach(() => {
     resetCanvas();
     vi.spyOn(ragSync, 'indexText').mockImplementation(() => {});
+    vi.spyOn(ragSync, 'indexEquation').mockImplementation(() => {});
+    vi.spyOn(ragSync, 'indexElement').mockImplementation(() => {});
     vi.spyOn(ragSync, 'updateGeometry').mockImplementation(() => {});
     vi.spyOn(ragSync, 'deleteMany').mockImplementation(() => {});
     vi.spyOn(ragSync, 'scheduleReconcile').mockImplementation(() => {});
@@ -345,5 +348,45 @@ describe('executeCanvasOperations', () => {
     const restored = afterUndo.find((e) => e.id === 'textbox_18')!;
     expect(restored.x).toBe(100);
     expect(restored.y).toBe(100);
+  });
+
+  it('create_equation + relative via operation index, then undo', () => {
+    const result = executeCanvasOperations(
+      [
+        {
+          type: 'create_text',
+          text: "Gauss's law note",
+          placement: { mode: 'viewport_default' },
+        },
+        {
+          type: 'create_equation',
+          latex: 'E=mc^2',
+          placement: {
+            mode: 'relative_to_element',
+            relation: 'below',
+            anchor_operation_index: 0,
+          },
+        },
+      ],
+      target(),
+    );
+    expect(result.createdIds).toHaveLength(2);
+    const els = useCanvasStore.getState().document.elements;
+    expect(els).toHaveLength(3); // seeded textbox_18 + 2 creates
+    const text = els.find((e) => e.id === result.createdIds[0]);
+    const eq = els.find((e) => e.id === result.createdIds[1]);
+    expect(text?.type).toBe('text');
+    expect(eq?.type).toBe('equation');
+    if (eq?.type === 'equation') expect(eq.latex).toBe('E=mc^2');
+    if (text && eq) {
+      expect(eq.y).toBeGreaterThan(text.y);
+    }
+    expect(ragSync.indexElement).toHaveBeenCalled();
+
+    useCanvasStore.getState().undo();
+    const after = useCanvasStore.getState().document.elements;
+    expect(after.find((e) => e.id === result.createdIds[0])).toBeUndefined();
+    expect(after.find((e) => e.id === result.createdIds[1])).toBeUndefined();
+    expect(after.find((e) => e.id === 'textbox_18')).toBeTruthy();
   });
 });

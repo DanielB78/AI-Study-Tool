@@ -16,8 +16,17 @@ class ViewportDefaultPlacement(BaseModel):
 
 class RelativePlacement(BaseModel):
     mode: Literal["relative_to_element"] = "relative_to_element"
-    anchor_element_id: str = Field(..., min_length=1)
     relation: Literal["left_of", "right_of", "above", "below", "near"]
+    anchor_element_id: str | None = Field(default=None, min_length=1)
+    anchor_operation_index: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def require_anchor(self) -> RelativePlacement:
+        if not self.anchor_element_id and self.anchor_operation_index is None:
+            raise ValueError(
+                "relative_to_element requires anchor_element_id or anchor_operation_index"
+            )
+        return self
 
 
 class AbsolutePlacement(BaseModel):
@@ -93,6 +102,42 @@ class UpdateTextStyleOperation(BaseModel):
         return self
 
 
+class CreateEquationOperation(BaseModel):
+    type: Literal["create_equation"] = "create_equation"
+    latex: str = Field(..., min_length=1)
+    placement: Placement
+
+
+class UpdateEquationOperation(BaseModel):
+    type: Literal["update_equation"] = "update_equation"
+    target_element_id: str = Field(..., min_length=1)
+    latex: str = Field(..., min_length=1)
+
+
+class MoveEquationOperation(BaseModel):
+    type: Literal["move_equation"] = "move_equation"
+    target_element_id: str = Field(..., min_length=1)
+    placement: Placement
+
+
+class ResizeEquationOperation(BaseModel):
+    type: Literal["resize_equation"] = "resize_equation"
+    target_element_id: str = Field(..., min_length=1)
+    width: float | None = None
+    height: float | None = None
+
+    @model_validator(mode="after")
+    def require_dimension(self) -> ResizeEquationOperation:
+        if self.width is None and self.height is None:
+            raise ValueError("resize_equation requires width and/or height")
+        return self
+
+
+class DeleteEquationOperation(BaseModel):
+    type: Literal["delete_equation"] = "delete_equation"
+    target_element_id: str = Field(..., min_length=1)
+
+
 CanvasOperation = Annotated[
     Union[
         CreateTextOperation,
@@ -101,6 +146,11 @@ CanvasOperation = Annotated[
         ResizeTextOperation,
         DeleteTextOperation,
         UpdateTextStyleOperation,
+        CreateEquationOperation,
+        UpdateEquationOperation,
+        MoveEquationOperation,
+        ResizeEquationOperation,
+        DeleteEquationOperation,
     ],
     Field(discriminator="type"),
 ]

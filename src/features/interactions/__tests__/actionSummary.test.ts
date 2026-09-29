@@ -197,4 +197,44 @@ describe('summarizeAiActions', () => {
     const summary = summarizeAiActions({ userPrompt: 'edit and style', operations: ops });
     expect(summary).toBe('Updated textbox_1 and styled textbox_2.');
   });
+
+  it('summarizes create_equation', () => {
+    const ops: CanvasOperation[] = [
+      {
+        type: 'create_equation',
+        latex: 'E=mc^2',
+        placement: { mode: 'viewport_default' },
+      },
+    ];
+    const summary = summarizeAiActions({
+      userPrompt: 'Add Einstein equation',
+      operations: ops,
+      createdIds: ['eq_1'],
+    });
+    expect(summary).toContain('Created equation eq_1');
+    expect(summary).toContain('E=mc^2');
+  });
+
+  it('summarizes update_equation and delete_equation', () => {
+    expect(
+      summarizeAiActions({
+        userPrompt: 'fix formula',
+        operations: [
+          {
+            type: 'update_equation',
+            target_element_id: 'eq_1',
+            latex: 'F=ma',
+          },
+        ],
+      }),
+    ).toContain('Updated equation eq_1');
+
+    expect(
+      summarizeAiActions({
+        userPrompt: 'remove it',
+        operations: [{ type: 'delete_equation', target_element_id: 'eq_1' }],
+        elementPreviews: { eq_1: { id: 'eq_1', text: 'E=mc^2', exists: true } },
+      }),
+    ).toContain('Deleted equation eq_1');
+  });
 });

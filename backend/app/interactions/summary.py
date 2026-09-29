@@ -49,15 +49,19 @@ def _relation_phrase(relation: str) -> str:
     return relation.replace("_", " ")
 
 
-def _placement_phrase(placement: dict[str, Any]) -> str:
+def _placement_phrase(placement: dict[str, Any], noun: str = "textbox") -> str:
     mode = placement.get("mode")
     if mode == "viewport_default":
         return "to the viewport default position"
     if mode == "absolute":
         return f"to ({placement.get('x')}, {placement.get('y')})"
     relation = _relation_phrase(str(placement.get("relation", "near")))
-    anchor = placement.get("anchor_element_id", "unknown")
-    return f"{relation} textbox {anchor}"
+    if placement.get("anchor_element_id"):
+        anchor = placement.get("anchor_element_id", "unknown")
+        return f"{relation} {noun} {anchor}"
+    if placement.get("anchor_operation_index") is not None:
+        return f"{relation} operation {placement.get('anchor_operation_index')}"
+    return f"{relation} unknown anchor"
 
 
 def _join_and(parts: list[str]) -> str:
@@ -167,12 +171,21 @@ def summarize_operations(
             topic = _topic_from_prompt(user_prompt) or _preview_phrase(op.get("text"))
             placement = op.get("placement") or {}
             if isinstance(placement, dict) and placement.get("mode") == "relative_to_element":
-                relation = _relation_phrase(str(placement.get("relation", "near")))
-                anchor = placement.get("anchor_element_id", "unknown")
                 return (
-                    f"Created textbox {element_id} {relation} textbox {anchor} about {topic}."
+                    f"Created textbox {element_id} {_placement_phrase(placement)} about {topic}."
                 )
             return f"Created textbox {element_id} about {topic}."
+
+        if op_type == "create_equation":
+            element_id = created[0] if created else "new equation"
+            topic = _topic_from_prompt(user_prompt) or _preview_phrase(op.get("latex"))
+            placement = op.get("placement") or {}
+            if isinstance(placement, dict) and placement.get("mode") == "relative_to_element":
+                return (
+                    f"Created equation {element_id} "
+                    f"{_placement_phrase(placement, 'element')} ({topic})."
+                )
+            return f"Created equation {element_id} ({topic})."
 
         if op_type == "update_text":
             target = str(op.get("target_element_id", "unknown"))
@@ -183,12 +196,24 @@ def summarize_operations(
                 topic = _preview_phrase(op.get("text"))
             return f"Updated textbox {target}{_about_suffix_from_topic(topic)}."
 
+        if op_type == "update_equation":
+            target = str(op.get("target_element_id", "unknown"))
+            topic = _topic_from_prompt(user_prompt) or _preview_phrase(op.get("latex"))
+            return f"Updated equation {target}{_about_suffix_from_topic(topic)}."
+
         if op_type == "move_text":
             target = str(op.get("target_element_id", "unknown"))
             placement = op.get("placement") or {}
             if not isinstance(placement, dict):
                 placement = {}
             return f"Moved textbox {target} {_placement_phrase(placement)}."
+
+        if op_type == "move_equation":
+            target = str(op.get("target_element_id", "unknown"))
+            placement = op.get("placement") or {}
+            if not isinstance(placement, dict):
+                placement = {}
+            return f"Moved equation {target} {_placement_phrase(placement, 'element')}."
 
         if op_type == "resize_text":
             target = str(op.get("target_element_id", "unknown"))
@@ -205,10 +230,30 @@ def summarize_operations(
                 dims = ", ".join(parts)
             return f"Resized textbox {target} to {dims}."
 
+        if op_type == "resize_equation":
+            target = str(op.get("target_element_id", "unknown"))
+            width = op.get("width")
+            height = op.get("height")
+            if width is not None and height is not None:
+                dims = f"{width} × {height}"
+            else:
+                parts = []
+                if width is not None:
+                    parts.append(f"width {width}")
+                if height is not None:
+                    parts.append(f"height {height}")
+                dims = ", ".join(parts)
+            return f"Resized equation {target} to {dims}."
+
         if op_type == "delete_text":
             target = str(op.get("target_element_id", "unknown"))
             prev = previews.get(target)
             return f"Deleted textbox {target}{_about_suffix(prev)}."
+
+        if op_type == "delete_equation":
+            target = str(op.get("target_element_id", "unknown"))
+            prev = previews.get(target)
+            return f"Deleted equation {target}{_about_suffix(prev)}."
 
         if op_type == "update_text_style":
             target = str(op.get("target_element_id", "unknown"))
@@ -225,14 +270,26 @@ def summarize_operations(
             element_id = created[create_idx] if create_idx < len(created) else "new textbox"
             create_idx += 1
             parts.append(f"created {element_id}")
+        elif op_type == "create_equation":
+            element_id = created[create_idx] if create_idx < len(created) else "new equation"
+            create_idx += 1
+            parts.append(f"created equation {element_id}")
         elif op_type == "update_text":
             parts.append(f"updated {op.get('target_element_id', 'unknown')}")
+        elif op_type == "update_equation":
+            parts.append(f"updated equation {op.get('target_element_id', 'unknown')}")
         elif op_type == "move_text":
             parts.append(f"moved {op.get('target_element_id', 'unknown')}")
+        elif op_type == "move_equation":
+            parts.append(f"moved equation {op.get('target_element_id', 'unknown')}")
         elif op_type == "resize_text":
             parts.append(f"resized {op.get('target_element_id', 'unknown')}")
+        elif op_type == "resize_equation":
+            parts.append(f"resized equation {op.get('target_element_id', 'unknown')}")
         elif op_type == "delete_text":
             parts.append(f"deleted {op.get('target_element_id', 'unknown')}")
+        elif op_type == "delete_equation":
+            parts.append(f"deleted equation {op.get('target_element_id', 'unknown')}")
         elif op_type == "update_text_style":
             parts.append(f"styled {op.get('target_element_id', 'unknown')}")
 
