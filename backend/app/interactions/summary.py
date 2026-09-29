@@ -60,11 +60,87 @@ def _placement_phrase(placement: dict[str, Any]) -> str:
     return f"{relation} textbox {anchor}"
 
 
+def _join_and(parts: list[str]) -> str:
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+    if len(parts) == 2:
+        return f"{parts[0]} and {parts[1]}"
+    return f"{', '.join(parts[:-1])}, and {parts[-1]}"
+
+
+def _summarize_style_patch(style: dict[str, Any]) -> str:
+    parts: list[str] = []
+    if "text_color" in style and style.get("text_color") is not None:
+        parts.append(f"{style['text_color']} text")
+    if "background_color" in style:
+        bg = style.get("background_color")
+        parts.append("transparent background" if bg is None else f"{bg} background")
+    flags: list[str] = []
+    if style.get("bold") is True:
+        flags.append("bold")
+    if style.get("bold") is False:
+        flags.append("not bold")
+    if style.get("italic") is True:
+        flags.append("italic")
+    if style.get("italic") is False:
+        flags.append("not italic")
+    if style.get("underline") is True:
+        flags.append("underlined")
+    if style.get("underline") is False:
+        flags.append("not underlined")
+    if flags:
+        parts.append(", ".join(flags))
+    if not parts:
+        return "style unchanged"
+    if len(parts) == 1:
+        return parts[0]
+    if len(parts) == 2:
+        return f"{parts[0]} and {parts[1]}"
+    return f"{', '.join(parts[:-1])}, and {parts[-1]}"
+
+
+def summarize_style_update(element_id: str, style: dict[str, Any]) -> str:
+    """Natural one-line phrasing for a single update_text_style (mirrors frontend)."""
+    has_color = "text_color" in style and style.get("text_color") is not None
+    has_bg = "background_color" in style
+    flags_on: list[str] = []
+    flags_off: list[str] = []
+    if style.get("bold") is True:
+        flags_on.append("bold")
+    if style.get("bold") is False:
+        flags_off.append("not bold")
+    if style.get("italic") is True:
+        flags_on.append("italic")
+    if style.get("italic") is False:
+        flags_off.append("not italic")
+    if style.get("underline") is True:
+        flags_on.append("underlined")
+    if style.get("underline") is False:
+        flags_off.append("not underlined")
+
+    if not has_color and not has_bg and flags_on and not flags_off:
+        return f"Made textbox {element_id} {_join_and(flags_on)}."
+
+    if has_color and not has_bg and not flags_on and not flags_off:
+        return f"Changed textbox {element_id} to {style['text_color']} text."
+
+    if not has_color and has_bg and not flags_on and not flags_off:
+        bg = style.get("background_color")
+        if bg is None:
+            return f"Cleared textbox {element_id} background."
+        return f"Filled textbox {element_id} {bg}."
+
+    return f"Styled textbox {element_id}: {_summarize_style_patch(style)}."
+
+
 def _normalize_op(op: Any) -> dict[str, Any]:
     if isinstance(op, dict):
         return op
     if hasattr(op, "model_dump"):
-        return op.model_dump()
+        # exclude_unset keeps background_color:null distinguishable from omitted
+        return op.model_dump(exclude_unset=True)
     return dict(op)  # type: ignore[arg-type]
 
 
@@ -134,6 +210,13 @@ def summarize_operations(
             prev = previews.get(target)
             return f"Deleted textbox {target}{_about_suffix(prev)}."
 
+        if op_type == "update_text_style":
+            target = str(op.get("target_element_id", "unknown"))
+            style = op.get("style") or {}
+            if not isinstance(style, dict):
+                style = {}
+            return summarize_style_update(target, style)
+
     parts: list[str] = []
     create_idx = 0
     for op in ops:
@@ -150,6 +233,8 @@ def summarize_operations(
             parts.append(f"resized {op.get('target_element_id', 'unknown')}")
         elif op_type == "delete_text":
             parts.append(f"deleted {op.get('target_element_id', 'unknown')}")
+        elif op_type == "update_text_style":
+            parts.append(f"styled {op.get('target_element_id', 'unknown')}")
 
     if not parts:
         return "Applied canvas operations."

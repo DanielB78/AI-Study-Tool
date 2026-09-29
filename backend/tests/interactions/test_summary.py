@@ -141,3 +141,60 @@ def test_multiple_move_resize_delete() -> None:
         ],
     )
     assert summary == "Moved textbox_1, resized textbox_2 and deleted textbox_3."
+
+
+def test_update_text_style_bold_underline() -> None:
+    summary = summarize_operations(
+        "Make it bold and underlined",
+        [
+            {
+                "type": "update_text_style",
+                "target_element_id": "textbox_18",
+                "style": {"bold": True, "underline": True},
+            }
+        ],
+    )
+    assert summary == "Made textbox textbox_18 bold and underlined."
+
+
+def test_update_text_style_text_color() -> None:
+    summary = summarize_operations(
+        "Make text blue",
+        [
+            {
+                "type": "update_text_style",
+                "target_element_id": "textbox_18",
+                "style": {"text_color": "#0000FF"},
+            }
+        ],
+    )
+    assert summary == "Changed textbox textbox_18 to #0000FF text."
+
+
+def test_update_text_style_fill() -> None:
+    summary = summarize_operations(
+        "Highlight yellow",
+        [
+            {
+                "type": "update_text_style",
+                "target_element_id": "textbox_18",
+                "style": {"background_color": "#FFFF00"},
+            }
+        ],
+    )
+    assert summary == "Filled textbox textbox_18 #FFFF00."
+
+
+def test_multiple_includes_styled() -> None:
+    summary = summarize_operations(
+        "edit and style",
+        [
+            {"type": "update_text", "target_element_id": "textbox_1", "text": "New"},
+            {
+                "type": "update_text_style",
+                "target_element_id": "textbox_2",
+                "style": {"bold": True},
+            },
+        ],
+    )
+    assert summary == "Updated textbox_1 and styled textbox_2."

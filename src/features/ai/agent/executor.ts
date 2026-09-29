@@ -13,6 +13,7 @@ import {
 } from '../canvas/placement';
 import type { CanvasOperation } from './operations';
 import { resolvePlacement } from './placementService';
+import { applyTextStylePatch } from './textStyle';
 
 export interface AgentExecutorTarget {
   getCamera: () => Camera;
@@ -41,6 +42,8 @@ export interface ExecuteAgentOpsResult {
   movedIds: string[];
   resizedIds: string[];
   deletedIds: string[];
+  /** Style-only updates — do NOT re-index or update geometry. */
+  styledIds: string[];
   affectedIds: string[];
   transactionId: string | null;
 }
@@ -61,6 +64,7 @@ export function executeCanvasOperations(
       movedIds: [],
       resizedIds: [],
       deletedIds: [],
+      styledIds: [],
       affectedIds: [],
       transactionId: null,
     };
@@ -80,6 +84,7 @@ export function executeCanvasOperations(
   const movedIds: string[] = [];
   const resizedIds: string[] = [];
   const deletedIds: string[] = [];
+  const styledIds: string[] = [];
   const geometryDirty = new Set<string>();
 
   const transactionId = target.beginInteraction();
@@ -103,13 +108,16 @@ export function executeCanvasOperations(
           viewport,
         });
         const zIndex = target.nextZIndex();
-        const element = createAiTextElement(op.text, { x: placed.x, y: placed.y }, {
+        let element = createAiTextElement(op.text, { x: placed.x, y: placed.y }, {
           zIndex,
           style,
           width,
           metadata: { createdBy: 'ai', source: 'agent', operation: 'create_text' },
         });
         element.height = height;
+        if (op.style) {
+          element = applyTextStylePatch(element, op.style);
+        }
         target.addElement(element, false);
         createdIds.push(element.id);
       } else if (op.type === 'update_text') {
@@ -190,6 +198,23 @@ export function executeCanvasOperations(
         target.deleteElements([id]);
         deletedIds.push(id);
         geometryDirty.delete(id);
+      } else if (op.type === 'update_text_style') {
+        const id = op.target_element_id;
+        target.updateElement(id, (el) => {
+          if (el.type !== 'text') return el;
+          const styled = applyTextStylePatch(el, op.style);
+          return {
+            ...styled,
+            metadata: {
+              ...styled.metadata,
+              lastEditedBy: 'ai',
+              source: 'agent',
+              operation: 'update_text_style',
+            },
+          };
+        });
+        styledIds.push(id);
+        // Style-only: do NOT re-index (indexText) or updateGeometry.
       }
     }
   } finally {
@@ -220,7 +245,14 @@ export function executeCanvasOperations(
   }
 
   const affectedIds = [
-    ...new Set([...createdIds, ...updatedIds, ...movedIds, ...resizedIds, ...deletedIds]),
+    ...new Set([
+      ...createdIds,
+      ...updatedIds,
+      ...movedIds,
+      ...resizedIds,
+      ...deletedIds,
+      ...styledIds,
+    ]),
   ];
   const remaining = affectedIds.filter((id) => !deletedIds.includes(id));
   if (remaining.length > 0) {
@@ -236,6 +268,7 @@ export function executeCanvasOperations(
     movedIds,
     resizedIds,
     deletedIds,
+    styledIds,
     affectedIds,
     transactionId,
   };

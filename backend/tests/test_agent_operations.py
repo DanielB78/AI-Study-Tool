@@ -95,6 +95,8 @@ def test_system_prompt_loads() -> None:
     assert "move_text" in text
     assert "resize_text" in text
     assert "delete_text" in text
+    assert "update_text_style" in text
+    assert "TEXT STYLING" in text
 
 
 def test_valid_move_text() -> None:
@@ -151,6 +153,69 @@ def test_rejects_resize_without_dimensions() -> None:
                     {
                         "type": "resize_text",
                         "target_element_id": "textbox_18",
+                    }
+                ]
+            }
+        )
+
+
+def test_valid_update_text_style() -> None:
+    payload = {
+        "operations": [
+            {
+                "type": "update_text_style",
+                "target_element_id": "textbox_18",
+                "style": {"text_color": "#0000FF", "bold": True},
+            }
+        ]
+    }
+    model = CanvasAgentResponse.model_validate(payload)
+    assert model.operations[0].type == "update_text_style"
+    assert model.operations[0].style.text_color == "#0000FF"
+    assert model.operations[0].style.bold is True
+
+
+def test_create_text_with_style() -> None:
+    payload = {
+        "operations": [
+            {
+                "type": "create_text",
+                "text": "Styled",
+                "placement": {"mode": "viewport_default"},
+                "style": {"italic": True, "background_color": "#FFFF00"},
+            }
+        ]
+    }
+    model = CanvasAgentResponse.model_validate(payload)
+    assert model.operations[0].type == "create_text"
+    assert model.operations[0].style is not None
+    assert model.operations[0].style.italic is True
+
+
+def test_rejects_empty_style_on_update_text_style() -> None:
+    with pytest.raises(ValidationError):
+        CanvasAgentResponse.model_validate(
+            {
+                "operations": [
+                    {
+                        "type": "update_text_style",
+                        "target_element_id": "textbox_18",
+                        "style": {},
+                    }
+                ]
+            }
+        )
+
+
+def test_rejects_unknown_style_property() -> None:
+    with pytest.raises(ValidationError):
+        CanvasAgentResponse.model_validate(
+            {
+                "operations": [
+                    {
+                        "type": "update_text_style",
+                        "target_element_id": "textbox_18",
+                        "style": {"font_size": 20},
                     }
                 ]
             }

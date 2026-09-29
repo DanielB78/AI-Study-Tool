@@ -21,8 +21,15 @@ import {
   type RelativePlacement,
   type ResizeTextOperation,
   type UpdateTextOperation,
+  type UpdateTextStyleOperation,
 } from './operations';
 import { describeOperationPlanLines } from './actionSummary';
+import {
+  ColorNormalizeFailure,
+  isEmptyStylePatch,
+  normalizeTextStylePatch,
+  type TextStylePatch,
+} from './textStyle';
 
 export type ParseErrorCode =
   | 'empty'
@@ -39,7 +46,10 @@ export type ParseErrorCode =
   | 'invalid_coordinates'
   | 'invalid_size'
   | 'missing_size'
-  | 'self_anchor';
+  | 'self_anchor'
+  | 'invalid_style'
+  | 'empty_style'
+  | 'unknown_style_property';
 
 export class CanvasAgentParseError extends Error {
   readonly code: ParseErrorCode;
@@ -59,6 +69,17 @@ export interface ParseContext {
   /** Optional: map id → type for TextElement checks. */
   elementTypes?: ReadonlyMap<string, string>;
 }
+
+const ALLOWED_STYLE_KEYS = new Set([
+  'text_color',
+  'background_color',
+  'bold',
+  'italic',
+  'underline',
+]);
+
+const ALLOWED_OPERATIONS =
+  'create_text, update_text, move_text, resize_text, delete_text, update_text_style';
 
 /** Strip optional ```json fences; still require JSON object body. */
 export function stripCodeFences(raw: string): string {
@@ -85,6 +106,73 @@ function requireTargetId(raw: Record<string, unknown>, opName: string): string {
     throw new CanvasAgentParseError('missing_target', `${opName} needs target_element_id.`);
   }
   return target.trim();
+}
+
+/**
+ * Parse + normalize a style patch object.
+ * Rejects unknown keys. For update_text_style, requireNonEmpty rejects {}.
+ */
+export function parseTextStylePatch(
+  raw: unknown,
+  options: { requireNonEmpty: boolean } = { requireNonEmpty: false },
+): TextStylePatch {
+  if (!isRecord(raw)) {
+    throw new CanvasAgentParseError('invalid_style', 'style must be an object.');
+  }
+
+  const unknownKeys = Object.keys(raw).filter((k) => !ALLOWED_STYLE_KEYS.has(k));
+  if (unknownKeys.length > 0) {
+    throw new CanvasAgentParseError(
+      'unknown_style_property',
+      `Unknown style propert${unknownKeys.length === 1 ? 'y' : 'ies'}: ${unknownKeys.join(', ')}.`,
+      unknownKeys.join(','),
+    );
+  }
+
+  const draft: TextStylePatch = {};
+  if ('text_color' in raw) {
+    if (typeof raw.text_color !== 'string') {
+      throw new CanvasAgentParseError('invalid_style', 'text_color must be a string.');
+    }
+    draft.text_color = raw.text_color;
+  }
+  if ('background_color' in raw) {
+    if (raw.background_color !== null && typeof raw.background_color !== 'string') {
+      throw new CanvasAgentParseError(
+        'invalid_style',
+        'background_color must be a string or null.',
+      );
+    }
+    draft.background_color = raw.background_color as string | null;
+  }
+  if ('bold' in raw) {
+    draft.bold = raw.bold as boolean;
+  }
+  if ('italic' in raw) {
+    draft.italic = raw.italic as boolean;
+  }
+  if ('underline' in raw) {
+    draft.underline = raw.underline as boolean;
+  }
+
+  let normalized: TextStylePatch;
+  try {
+    normalized = normalizeTextStylePatch(draft);
+  } catch (err) {
+    if (err instanceof ColorNormalizeFailure) {
+      throw new CanvasAgentParseError('invalid_style', err.message, err.code);
+    }
+    throw err;
+  }
+
+  if (options.requireNonEmpty && isEmptyStylePatch(normalized)) {
+    throw new CanvasAgentParseError(
+      'empty_style',
+      'update_text_style.style must include at least one property.',
+    );
+  }
+
+  return normalized;
 }
 
 function parsePlacement(raw: unknown): Placement {
@@ -157,7 +245,11 @@ function parseOperation(raw: unknown): CanvasOperation {
   if (raw.type === 'create_text') {
     const text = requireNonEmptyString(raw.text, 'create_text.text');
     const placement = parsePlacement(raw.placement);
-    return { type: 'create_text', text, placement } satisfies CreateTextOperation;
+    const op: CreateTextOperation = { type: 'create_text', text, placement };
+    if (raw.style !== undefined) {
+      op.style = parseTextStylePatch(raw.style, { requireNonEmpty: false });
+    }
+    return op;
   }
   if (raw.type === 'update_text') {
     const target_element_id = requireTargetId(raw, 'update_text');
@@ -192,9 +284,24 @@ function parseOperation(raw: unknown): CanvasOperation {
     const target_element_id = requireTargetId(raw, 'delete_text');
     return { type: 'delete_text', target_element_id } satisfies DeleteTextOperation;
   }
+  if (raw.type === 'update_text_style') {
+    const target_element_id = requireTargetId(raw, 'update_text_style');
+    if (raw.style === undefined) {
+      throw new CanvasAgentParseError(
+        'invalid_style',
+        'update_text_style requires a style object.',
+      );
+    }
+    const style = parseTextStylePatch(raw.style, { requireNonEmpty: true });
+    return {
+      type: 'update_text_style',
+      target_element_id,
+      style,
+    } satisfies UpdateTextStyleOperation;
+  }
   throw new CanvasAgentParseError(
     'unknown_operation',
-    `Unsupported operation type "${raw.type}". Allowed: create_text, update_text, move_text, resize_text, delete_text.`,
+    `Unsupported operation type "${raw.type}". Allowed: ${ALLOWED_OPERATIONS}.`,
     String(raw.type),
   );
 }
@@ -241,7 +348,13 @@ function assertRelativePlacement(
 }
 
 function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
-  if (op.type === 'update_text' || op.type === 'move_text' || op.type === 'resize_text' || op.type === 'delete_text') {
+  if (
+    op.type === 'update_text' ||
+    op.type === 'move_text' ||
+    op.type === 'resize_text' ||
+    op.type === 'delete_text' ||
+    op.type === 'update_text_style'
+  ) {
     assertTargetInContext(op.target_element_id, ctx);
   }
   if (op.type === 'create_text') {

@@ -4,6 +4,7 @@
  */
 
 import type { CanvasOperation, Placement } from './operations';
+import { describeStylePatch, summarizeStylePatch, type TextStylePatch } from './textStyle';
 
 export interface SummaryElementPreview {
   id: string;
@@ -37,6 +38,50 @@ function placementPhrase(placement: Placement): string {
   if (placement.mode === 'viewport_default') return 'to the viewport default position';
   if (placement.mode === 'absolute') return `to (${placement.x}, ${placement.y})`;
   return `${placement.relation.replace(/_/g, ' ')} textbox ${placement.anchor_element_id}`;
+}
+
+function joinAnd(parts: string[]): string {
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0]!;
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`;
+}
+
+/** Natural one-line phrasing for a single update_text_style. */
+export function summarizeStyleUpdate(id: string, patch: TextStylePatch): string {
+  const hasColor = patch.text_color !== undefined;
+  const hasBg = patch.background_color !== undefined;
+  const flagsOn: string[] = [];
+  const flagsOff: string[] = [];
+  if (patch.bold === true) flagsOn.push('bold');
+  if (patch.bold === false) flagsOff.push('not bold');
+  if (patch.italic === true) flagsOn.push('italic');
+  if (patch.italic === false) flagsOff.push('not italic');
+  if (patch.underline === true) flagsOn.push('underlined');
+  if (patch.underline === false) flagsOff.push('not underlined');
+
+  const onlyPositiveFlags =
+    !hasColor && !hasBg && flagsOn.length > 0 && flagsOff.length === 0;
+  if (onlyPositiveFlags) {
+    return `Made textbox ${id} ${joinAnd(flagsOn)}.`;
+  }
+
+  const onlyTextColor =
+    hasColor && !hasBg && flagsOn.length === 0 && flagsOff.length === 0;
+  if (onlyTextColor) {
+    return `Changed textbox ${id} to ${patch.text_color} text.`;
+  }
+
+  const onlyFill =
+    !hasColor && hasBg && flagsOn.length === 0 && flagsOff.length === 0;
+  if (onlyFill) {
+    if (patch.background_color === null) {
+      return `Cleared textbox ${id} background.`;
+    }
+    return `Filled textbox ${id} ${patch.background_color}.`;
+  }
+
+  return `Styled textbox ${id}: ${summarizeStylePatch(patch)}.`;
 }
 
 /** Compact one-line action summary for interaction memory. */
@@ -88,6 +133,9 @@ export function summarizeAiActions(input: {
       const topic = previewPhrase(prev?.text);
       return `Deleted textbox ${op.target_element_id}${aboutSuffix(topic)}.`;
     }
+    if (op.type === 'update_text_style') {
+      return summarizeStyleUpdate(op.target_element_id, op.style);
+    }
   }
 
   const parts: string[] = [];
@@ -104,6 +152,8 @@ export function summarizeAiActions(input: {
       parts.push(`resized ${op.target_element_id}`);
     } else if (op.type === 'delete_text') {
       parts.push(`deleted ${op.target_element_id}`);
+    } else if (op.type === 'update_text_style') {
+      parts.push(`styled ${op.target_element_id}`);
     }
   }
   if (parts.length === 0) return 'Applied canvas operations.';
@@ -157,12 +207,29 @@ export function describeOperationPlanLines(ops: readonly CanvasOperation[]): str
     if (op.type === 'delete_text') {
       return `${n}. ⚠ DELETE TEXTBOX\n   Target: ${op.target_element_id}`;
     }
+    if (op.type === 'update_text_style') {
+      const styleLines = describeStylePatch(op.style)
+        .map((line) => `   ${line}`)
+        .join('\n');
+      return `${n}. STYLE TEXTBOX\n   Target: ${op.target_element_id}\n${styleLines}`;
+    }
+    // create_text
     const p = op.placement;
     let placementLine = '';
     if (p.mode === 'viewport_default') placementLine = 'viewport_default';
     else if (p.mode === 'absolute') placementLine = `absolute (${p.x}, ${p.y})`;
     else placementLine = `${p.relation} ${p.anchor_element_id}`;
     const preview = op.text.replace(/\s+/g, ' ').slice(0, 80);
-    return `${n}. CREATE TEXT\n   Placement: ${placementLine}\n   Text: ${preview}${op.text.length > 80 ? '…' : ''}`;
+    const lines = [
+      `${n}. CREATE TEXT`,
+      `   Placement: ${placementLine}`,
+      `   Text: ${preview}${op.text.length > 80 ? '…' : ''}`,
+    ];
+    if (op.style) {
+      for (const line of describeStylePatch(op.style)) {
+        lines.push(`   ${line}`);
+      }
+    }
+    return lines.join('\n');
   });
 }

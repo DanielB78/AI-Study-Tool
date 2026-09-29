@@ -3,6 +3,10 @@
  * Backend Pydantic models mirror this for future Structured Outputs.
  */
 
+import type { TextStylePatch } from './textStyle';
+
+export type { TextStylePatch } from './textStyle';
+
 export type PlacementRelation = 'left_of' | 'right_of' | 'above' | 'below' | 'near';
 
 export type ViewportDefaultPlacement = {
@@ -27,6 +31,8 @@ export type CreateTextOperation = {
   type: 'create_text';
   text: string;
   placement: Placement;
+  /** Optional initial style (same patch schema as update_text_style). */
+  style?: TextStylePatch;
 };
 
 export type UpdateTextOperation = {
@@ -44,9 +50,7 @@ export type MoveTextOperation = {
 export type ResizeTextOperation = {
   type: 'resize_text';
   target_element_id: string;
-  /** New width in world units (omit to keep current). */
   width?: number;
-  /** New height in world units (omit to keep current). */
   height?: number;
 };
 
@@ -55,12 +59,19 @@ export type DeleteTextOperation = {
   target_element_id: string;
 };
 
+export type UpdateTextStyleOperation = {
+  type: 'update_text_style';
+  target_element_id: string;
+  style: TextStylePatch;
+};
+
 export type CanvasOperation =
   | CreateTextOperation
   | UpdateTextOperation
   | MoveTextOperation
   | ResizeTextOperation
-  | DeleteTextOperation;
+  | DeleteTextOperation
+  | UpdateTextStyleOperation;
 
 export type CanvasAgentResponse = {
   operations: CanvasOperation[];
@@ -74,11 +85,24 @@ export const PLACEMENT_RELATIONS: readonly PlacementRelation[] = [
   'near',
 ] as const;
 
-/** Centralized AI textbox size limits (world units). */
 export const AI_TEXT_MIN_WIDTH = 80;
 export const AI_TEXT_MIN_HEIGHT = 40;
 export const AI_TEXT_MAX_WIDTH = 2400;
 export const AI_TEXT_MAX_HEIGHT = 2400;
+
+const TEXT_STYLE_PATCH_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    text_color: { type: 'string', minLength: 1 },
+    background_color: {
+      anyOf: [{ type: 'string' }, { type: 'null' }],
+    },
+    bold: { type: 'boolean' },
+    italic: { type: 'boolean' },
+    underline: { type: 'boolean' },
+  },
+} as const;
 
 /** Authoritative JSON Schema for LLM Structured Outputs / prompt contract. */
 export const CANVAS_AGENT_JSON_SCHEMA = {
@@ -101,6 +125,7 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               type: { const: 'create_text' },
               text: { type: 'string', minLength: 1 },
               placement: { $ref: '#/$defs/placement' },
+              style: { $ref: '#/$defs/textStylePatch' },
             },
           },
           {
@@ -143,6 +168,16 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               target_element_id: { type: 'string', minLength: 1 },
             },
           },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'style'],
+            properties: {
+              type: { const: 'update_text_style' },
+              target_element_id: { type: 'string', minLength: 1 },
+              style: { $ref: '#/$defs/textStylePatch' },
+            },
+          },
         ],
       },
     },
@@ -183,6 +218,7 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
         },
       ],
     },
+    textStylePatch: TEXT_STYLE_PATCH_SCHEMA,
   },
 } as const;
 
@@ -195,6 +231,15 @@ Shape:
   "operations": [ /* one or more */ ]
 }
 
+Shared style patch (all fields optional; only supplied fields change):
+{
+  "text_color": "#RRGGBB",
+  "background_color": "#RRGGBB" | null | "transparent",
+  "bold": true|false,
+  "italic": true|false,
+  "underline": true|false
+}
+
 create_text:
 {
   "type": "create_text",
@@ -202,7 +247,8 @@ create_text:
   "placement":
     { "mode": "viewport_default" }
     | { "mode": "relative_to_element", "anchor_element_id": "<id from context>", "relation": "left_of"|"right_of"|"above"|"below"|"near" }
-    | { "mode": "absolute", "x": <number>, "y": <number> }
+    | { "mode": "absolute", "x": <number>, "y": <number> },
+  "style": { /* optional TextStylePatch */ }
 }
 
 update_text:
@@ -226,7 +272,6 @@ resize_text:
   "width": <positive number, optional>,
   "height": <positive number, optional>
 }
-(At least one of width/height required. Omitting one preserves the current value.)
 
 delete_text:
 {
@@ -234,11 +279,18 @@ delete_text:
   "target_element_id": "<id from context>"
 }
 
+update_text_style:
+{
+  "type": "update_text_style",
+  "target_element_id": "<id from context>",
+  "style": { /* at least one TextStylePatch field */ }
+}
+
 Rules:
 - Never invent element IDs.
-- Prefer relative_to_element over absolute for "next to / below / above / left / right".
-- Prefer viewport_default when creating with no location.
-- Prefer relative placement for moves when the user describes a relationship.
-- delete_text only when the user clearly asks to delete/remove/get rid of a textbox.
-- Do not emit shape/image/connector/style/group operations.
+- Prefer #RRGGBB for colours.
+- text_color = writing colour; background_color = textbox fill.
+- Prefer relative_to_element over absolute for spatial relationships.
+- delete_text only when the user clearly asks to delete/remove a textbox.
+- Do not emit shape/image/connector/group/font-size/font-family operations.
 `.trim();

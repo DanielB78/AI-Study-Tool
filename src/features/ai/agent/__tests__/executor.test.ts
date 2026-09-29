@@ -223,6 +223,67 @@ describe('executeCanvasOperations', () => {
     expect(ragSync.deleteMany).toHaveBeenCalled();
   });
 
+  it('update_text_style changes colour and bold without re-index', () => {
+    const before = useCanvasStore.getState().document.elements.find((e) => e.id === 'textbox_18')!;
+    expect(before.type).toBe('text');
+    vi.mocked(ragSync.indexText).mockClear();
+    vi.mocked(ragSync.updateGeometry).mockClear();
+
+    const result = executeCanvasOperations(
+      [
+        {
+          type: 'update_text_style',
+          target_element_id: 'textbox_18',
+          style: { text_color: '#0000FF', bold: true, underline: true },
+        },
+      ],
+      target(),
+    );
+
+    expect(result.styledIds).toEqual(['textbox_18']);
+    expect(result.affectedIds).toContain('textbox_18');
+    expect(result.updatedIds).toEqual([]);
+    const el = useCanvasStore.getState().document.elements.find((e) => e.id === 'textbox_18')!;
+    expect(el.type).toBe('text');
+    if (el.type === 'text' && before.type === 'text') {
+      expect(el.color).toBe('#0000FF');
+      expect(el.fontWeight).toBe('bold');
+      expect(el.underline).toBe(true);
+      expect(el.strikethrough).toBe(before.strikethrough);
+      expect(el.text).toBe(before.text);
+      expect(el.x).toBe(before.x);
+      expect(el.y).toBe(before.y);
+      expect(el.width).toBe(before.width);
+      expect(el.height).toBe(before.height);
+    }
+    expect(ragSync.indexText).not.toHaveBeenCalled();
+    expect(ragSync.updateGeometry).not.toHaveBeenCalled();
+  });
+
+  it('create_text with style applies initial styling', () => {
+    const result = executeCanvasOperations(
+      [
+        {
+          type: 'create_text',
+          text: 'Styled create',
+          placement: { mode: 'viewport_default' },
+          style: { italic: true, background_color: '#FFFF00', text_color: '#8B0000' },
+        },
+      ],
+      target(),
+    );
+    const created = useCanvasStore.getState().document.elements.find(
+      (e) => e.id === result.createdIds[0],
+    )!;
+    expect(created.type).toBe('text');
+    if (created.type === 'text') {
+      expect(created.fontItalic).toBe(true);
+      expect(created.backgroundColor).toBe('#FFFF00');
+      expect(created.color).toBe('#8B0000');
+      expect(created.text).toBe('Styled create');
+    }
+  });
+
   it('move + delete are one undo transaction', () => {
     // Seed a second element as move anchor
     useCanvasStore.getState().addElement(

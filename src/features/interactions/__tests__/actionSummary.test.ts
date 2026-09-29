@@ -141,4 +141,60 @@ describe('summarizeAiActions', () => {
     });
     expect(summary).toBe('Moved textbox_1, resized textbox_2 and deleted textbox_3.');
   });
+
+  it('summarizes a single update_text_style for bold+underline', () => {
+    const ops: CanvasOperation[] = [
+      {
+        type: 'update_text_style',
+        target_element_id: 'textbox_18',
+        style: { bold: true, underline: true },
+      },
+    ];
+    expect(
+      summarizeAiActions({ userPrompt: 'Make it bold and underlined', operations: ops }),
+    ).toBe('Made textbox textbox_18 bold and underlined.');
+  });
+
+  it('summarizes a single update_text_style for text colour', () => {
+    const ops: CanvasOperation[] = [
+      {
+        type: 'update_text_style',
+        target_element_id: 'textbox_18',
+        style: { text_color: '#0000FF' },
+      },
+    ];
+    expect(summarizeAiActions({ userPrompt: 'Make text blue', operations: ops })).toBe(
+      'Changed textbox textbox_18 to #0000FF text.',
+    );
+  });
+
+  it('summarizes a single update_text_style for fill', () => {
+    const ops: CanvasOperation[] = [
+      {
+        type: 'update_text_style',
+        target_element_id: 'textbox_18',
+        style: { background_color: '#FFFF00' },
+      },
+    ];
+    expect(summarizeAiActions({ userPrompt: 'Highlight yellow', operations: ops })).toBe(
+      'Filled textbox textbox_18 #FFFF00.',
+    );
+  });
+
+  it('includes styled id in multi-op summaries', () => {
+    const ops: CanvasOperation[] = [
+      {
+        type: 'update_text',
+        target_element_id: 'textbox_1',
+        text: 'New',
+      },
+      {
+        type: 'update_text_style',
+        target_element_id: 'textbox_2',
+        style: { bold: true },
+      },
+    ];
+    const summary = summarizeAiActions({ userPrompt: 'edit and style', operations: ops });
+    expect(summary).toBe('Updated textbox_1 and styled textbox_2.');
+  });
 });
