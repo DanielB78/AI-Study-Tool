@@ -4,8 +4,8 @@ Each fragment is embedded separately. Intent score = mean of top-K exemplar
 similarities. Tune these lists during development — changing text invalidates
 the in-memory exemplar embedding cache.
 
-GENERAL does NOT encode element / topic / board-wide scope — only that the
-prompt lacks a special spatial or interaction-history signal.
+Only special-context intents are classified (spatial / interaction). Ordinary
+content prompts are not given a GENERAL label.
 """
 
 from __future__ import annotations
@@ -24,33 +24,8 @@ class PromptIntentDefinition:
     examples: tuple[str, ...]
 
 
-# Exactly three intents — short, subject-free interaction-pattern fragments.
+# Exactly two special-context intents — short, subject-free fragments.
 INTENT_DEFINITIONS: tuple[PromptIntentDefinition, ...] = (
-    PromptIntentDefinition(
-        intent=PromptIntent.GENERAL,
-        examples=(
-            "make shorter",
-            "rewrite clearly",
-            "check for mistakes",
-            "check correctness",
-            "explain simply",
-            "summarise content",
-            "summarise everything",
-            "make more detailed",
-            "make easier to understand",
-            "change colour",
-            "make bold",
-            "make italic",
-            "underline",
-            "remove content",
-            "create an explanation",
-            "rewrite this",
-            "improve wording",
-            "correct this",
-            "review everything",
-            "add more detail",
-        ),
-    ),
     PromptIntentDefinition(
         intent=PromptIntent.SPATIAL_RELATIONAL,
         examples=(
@@ -120,5 +95,5 @@ def exemplar_content_fingerprint() -> str:
     return "\n".join(parts)
 
 
-# Back-compat alias used by older imports / tests during migration.
+# Back-compat alias
 prototype_content_fingerprint = exemplar_content_fingerprint

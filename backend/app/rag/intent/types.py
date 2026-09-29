@@ -10,21 +10,21 @@ from pydantic import BaseModel, Field
 class PromptIntent(str, Enum):
     """Special-context signals for a user prompt (single-label, debug-only).
 
-    GENERAL does NOT mean element-specific, topic-specific, or board-wide.
-    It means: no special spatial or interaction-reference retrieval signal
-    was detected. Canvas context scope for GENERAL prompts will be decided
-    later by a separate semantic-distribution analysis system — not by this
-    classifier.
+    Only intents that indicate a special retrieval mechanism:
+    - SPATIAL_RELATIONAL — physical position / relative placement language
+    - INTERACTION_REFERENCE — dependence on previous AI/user actions
+
+    Ordinary content/edit prompts are not given a separate GENERAL label;
+    they simply score lower on both special intents. Canvas context scope
+    for ordinary prompts is decided later by semantic-distribution analysis.
     """
 
-    GENERAL = "general"
     SPATIAL_RELATIONAL = "spatial_relational"
     INTERACTION_REFERENCE = "interaction_reference"
 
     @property
     def display_name(self) -> str:
         return {
-            PromptIntent.GENERAL: "General",
             PromptIntent.SPATIAL_RELATIONAL: "Spatial / Relational",
             PromptIntent.INTERACTION_REFERENCE: "Interaction Reference",
         }[self]
@@ -56,7 +56,7 @@ class PromptIntentClassification(BaseModel):
     classified_intent: PromptIntent
     scores: list[PromptIntentScore] = Field(
         ...,
-        description="All three intents ranked by intent score descending.",
+        description="Both special intents ranked by intent score descending.",
     )
     top_score: float
     second_score: float

@@ -31,7 +31,7 @@ describe('ragRetrievalService', () => {
             },
           ],
           prompt_intent: {
-            classified_intent: 'general',
+            classified_intent: 'spatial_relational',
             top_score: 0.8,
             second_score: 0.5,
             score_margin: 0.3,
@@ -40,13 +40,13 @@ describe('ragRetrievalService', () => {
             exemplar_top_k: 3,
             scores: [
               {
-                intent: 'general',
+                intent: 'spatial_relational',
                 similarity: 0.8,
-                display_name: 'General',
+                display_name: 'Spatial / Relational',
                 top_matches: [
-                  { text: 'make shorter', similarity: 0.9 },
-                  { text: 'rewrite clearly', similarity: 0.8 },
-                  { text: 'check for mistakes', similarity: 0.7 },
+                  { text: 'move below', similarity: 0.9 },
+                  { text: 'put beside', similarity: 0.8 },
+                  { text: 'near this', similarity: 0.7 },
                 ],
               },
             ],
@@ -61,7 +61,7 @@ describe('ragRetrievalService', () => {
     const result = await svc.retrieve({ board_id: 'b1', prompt: 'gauss' });
     expect(result.candidates[0]?.element_id).toBe('el-1');
     expect(result.min_similarity).toBeNull();
-    expect(result.prompt_intent?.classified_intent).toBe('general');
+    expect(result.prompt_intent?.classified_intent).toBe('spatial_relational');
     expect(fetchMock).toHaveBeenCalledWith(
       'http://example.test/api/rag/retrieve',
       expect.objectContaining({ method: 'POST' }),

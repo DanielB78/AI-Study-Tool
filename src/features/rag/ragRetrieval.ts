@@ -24,7 +24,6 @@ export interface RetrievedCandidate {
 }
 
 export type PromptIntentId =
-  | 'general'
   | 'spatial_relational'
   | 'interaction_reference';
 

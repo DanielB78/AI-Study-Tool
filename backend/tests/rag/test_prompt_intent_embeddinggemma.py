@@ -1,4 +1,4 @@
-"""Optional real EmbeddingGemma integration for abstract-exemplar intent classification.
+"""Optional real EmbeddingGemma integration for 2-way intent classification.
 
 Enable with: RUN_EMBEDDINGGEMMA_TESTS=1
 """
@@ -38,12 +38,10 @@ def classifier() -> EmbeddingPromptIntentClassifier:
 
 
 @pytest.mark.asyncio
-async def test_gemma_abstract_exemplars(
+async def test_gemma_two_way_special_intents(
     classifier: EmbeddingPromptIntentClassifier,
 ) -> None:
     cases: list[tuple[str, PromptIntent]] = [
-        ("Make this shorter.", PromptIntent.GENERAL),
-        ("Summarise everything.", PromptIntent.GENERAL),
         ("What is around this?", PromptIntent.SPATIAL_RELATIONAL),
         ("Can you move this to the right?", PromptIntent.SPATIAL_RELATIONAL),
         ("Change the one you just made.", PromptIntent.INTERACTION_REFERENCE),
@@ -60,12 +58,9 @@ async def test_gemma_abstract_exemplars(
             f"margin={result.score_margin:.4f}\n  expected={expected.value}\n"
             f"  ranking={ranking}"
         )
-        assert len(result.scores) == 3
+        assert len(result.scores) == 2
         assert result.exemplar_top_k == 3
-        assert len(result.scores[0].top_matches) == 3
-        top_two = {result.scores[0].intent, result.scores[1].intent}
-        assert expected in top_two or result.classified_intent is expected
-        # Winner's top matches should be from that intent's exemplar set.
+        assert result.classified_intent is expected
         allowed = set(get_intent_definition(result.classified_intent).examples)
         for match in result.scores[0].top_matches:
             assert match.text in allowed

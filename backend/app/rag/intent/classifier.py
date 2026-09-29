@@ -5,9 +5,9 @@ Observational only — does not change retrieval policies.
 Compares the prompt query embedding to short abstract exemplar fragments
 (embedded separately). Intent score = mean of top-K exemplar similarities.
 
-Answers: does this request need a special spatial or interaction-history
-interpretation? It does NOT decide how much canvas context to retrieve.
-GENERAL means neither special signal was strongest — not element/topic/board scope.
+Answers which special signal is stronger: spatial vs interaction-history.
+It does NOT decide how much canvas context to retrieve, and there is no
+GENERAL / ordinary-content label — ordinary prompts simply score lower.
 """
 
 from __future__ import annotations
@@ -168,9 +168,12 @@ class EmbeddingPromptIntentClassifier:
                 )
             )
 
+        if len(scored) < 2:
+            raise RuntimeError("expected both special-context intents to be scored")
+
         scored.sort(key=lambda s: s.similarity, reverse=True)
         top = scored[0]
-        second = scored[1] if len(scored) > 1 else scored[0]
+        second = scored[1]
         margin = top.similarity - second.similarity
 
         return PromptIntentClassification(
