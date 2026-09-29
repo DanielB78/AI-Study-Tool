@@ -32,13 +32,76 @@ CRITICAL:
 ## LATEX RULES (KaTeX)
 
 - Source of truth is raw LaTeX **without** `$…$`, `$$…$$`, `\(...\)`, `\[…\]`, or Markdown code fences.
-- Examples of correct `latex` values:
+- Conceptual LaTeX values (before JSON encoding):
   - `E=mc^2`
   - `\nabla \cdot \mathbf{E} = \frac{\rho}{\varepsilon_0}`
   - `i\hbar\frac{\partial}{\partial t}\Psi = \hat{H}\Psi`
   - `\oint_S \mathbf{E}\cdot d\mathbf{A} = \frac{Q_{\mathrm{enc}}}{\varepsilon_0}`
-- Invalid / reject: `$E=mc^2$`, `$$E=mc^2$$`, `` ```latex E=mc^2``` ``
+- When these appear inside a JSON string, **every backslash must be doubled** (see JSON + LATEX ESCAPING below).
+- Invalid / reject: `$E=mc^2$`, `$$E=mc^2$$`, Markdown code fences around LaTeX
 - Prefer standard KaTeX commands (`\frac`, `\partial`, `\mathbf`, `\hat`, `\oint`, `\varepsilon`, `\hbar`, …).
+
+## JSON + LATEX ESCAPING
+
+The response is **JSON first**. LaTeX is only a string value inside JSON.
+
+Therefore **every LaTeX backslash must itself be JSON-escaped** as `\\`.
+
+| LaTeX source | Correct JSON string | Incorrect (breaks or corrupts JSON) |
+| --- | --- | --- |
+| `\frac{a}{b}` | `"\\frac{a}{b}"` | `"\frac{a}{b}"` (`\f` = form-feed) |
+| `\nabla\cdot E` | `"\\nabla\\cdot E"` | `"\nabla\cdot E"` (`\n` = newline) |
+| `\times` | `"\\times"` | `"\times"` (`\t` = tab) |
+| `\hbar` | `"\\hbar"` | `"\hbar"` (invalid escape → JSON fails) |
+| `\partial` | `"\\partial"` | `"\partial"` (invalid escape → JSON fails) |
+| `\mathbf{E}` | `"\\mathbf{E}"` | `"\mathbf{E}"` (invalid / `\b` = backspace) |
+
+Correct:
+
+```json
+{
+  "type": "create_equation",
+  "latex": "E=\\frac{Q}{4\\pi\\varepsilon_0r^2}",
+  "placement": { "mode": "viewport_default" }
+}
+```
+
+Incorrect:
+
+```json
+{
+  "type": "create_equation",
+  "latex": "E=\frac{Q}{4\pi\varepsilon_0r^2}",
+  "placement": { "mode": "viewport_default" }
+}
+```
+
+Correct:
+
+```json
+{ "latex": "\\nabla\\cdot\\mathbf{E}=\\frac{\\rho}{\\varepsilon_0}" }
+```
+
+Incorrect:
+
+```json
+{ "latex": "\nabla\cdot\mathbf{E}=\frac{\rho}{\varepsilon_0}" }
+```
+
+Correct:
+
+```json
+{ "latex": "i\\hbar\\frac{\\partial\\psi}{\\partial t}=\\hat{H}\\psi" }
+```
+
+Rules:
+- Return syntactically valid JSON only (no Markdown fences, no prose).
+- Escape every LaTeX backslash as `\\`.
+- Do not include `$...$` or `$$...$$`.
+- Do not include Markdown code fences.
+- Do not include explanatory prose outside the JSON object.
+- Mentally validate the JSON (especially every `latex` string) before producing the final response.
+- The client does **not** auto-fix backslashes. Incorrect escaping will fail or silently corrupt LaTeX (`\f` / `\n` / `\t`).
 
 ## AVAILABLE ACTIONS
 
@@ -181,14 +244,14 @@ Same schemas as before (see contract).
 ```json
 {
   "type": "create_equation",
-  "latex": "E=mc^2",
+  "latex": "E=\\frac{1}{2}mv^2",
   "placement": { "mode": "viewport_default" }
 }
 ```
 
 ### update_equation
 ```json
-{ "type": "update_equation", "target_element_id": "eq_3", "latex": "F=ma" }
+{ "type": "update_equation", "target_element_id": "eq_3", "latex": "\\hat{H}\\Psi=E\\Psi" }
 ```
 
 ### move_equation / resize_equation / delete_equation
@@ -223,6 +286,7 @@ Multiple operations are allowed; order is preserved and applied as one undo tran
 - Never invent element IDs
 - Never emit unsupported operation types
 - Never wrap equation LaTeX in `$` fences
+- In JSON, escape every LaTeX backslash as `\\` (see JSON + LATEX ESCAPING)
 - Never delete without clear user intent
 - Never move by creating a second copy
 - Prefer relative placement over absolute guesses

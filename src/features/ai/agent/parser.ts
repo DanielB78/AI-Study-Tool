@@ -30,6 +30,10 @@ import {
 } from './operations';
 import { describeOperationPlanLines } from './actionSummary';
 import {
+  detectSilentLatexJsonCorruption,
+  explainJsonParseFailure,
+} from './latexJsonEscaping';
+import {
   ColorNormalizeFailure,
   isEmptyStylePatch,
   normalizeTextStylePatch,
@@ -118,6 +122,10 @@ function requireNonEmptyString(v: unknown, field: string): string {
 function requireValidLatex(raw: unknown, field: string): string {
   if (typeof raw !== 'string' || !raw.trim()) {
     throw new CanvasAgentParseError('empty_latex', `${field} must be a non-empty LaTeX string.`);
+  }
+  const corruption = detectSilentLatexJsonCorruption(raw);
+  if (corruption) {
+    throw new CanvasAgentParseError('invalid_latex', corruption, raw.slice(0, 120));
   }
   const cleaned = sanitizeLatexSource(raw);
   if (!cleaned) {
@@ -539,10 +547,11 @@ export function parseCanvasAgentResponse(
   try {
     parsed = JSON.parse(stripCodeFences(trimmed));
   } catch (err) {
+    const explained = explainJsonParseFailure(trimmed, err);
     throw new CanvasAgentParseError(
       'invalid_json',
-      'Response is not valid JSON.',
-      err instanceof Error ? err.message : undefined,
+      explained.message,
+      explained.detail,
     );
   }
 

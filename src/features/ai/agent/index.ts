@@ -33,6 +33,12 @@ export {
   stripCodeFences,
 } from './parser';
 export {
+  explainJsonParseFailure,
+  detectSilentLatexJsonCorruption,
+  isLikelyLatexJsonEscapeIssue,
+  LATEX_JSON_ESCAPE_HINT,
+} from './latexJsonEscaping';
+export {
   summarizeAiActions,
   summarizeStyleUpdate,
   buildInteractionEmbeddingDocument,

@@ -35,9 +35,27 @@ You do NOT mutate the board. Return structured JSON only. The app validates and 
 
 ## LATEX RULES (KaTeX)
 
-- Raw LaTeX WITHOUT \`$…$\`, \`$$…$$\`, \`\\(…\\)\`, \`\\[…\\]\`, or Markdown fences
-- Good: \`E=mc^2\`, \`\\\\nabla \\\\cdot \\\\mathbf{E} = \\\\rho/\\\\varepsilon_0\`, \`i\\\\hbar\\\\partial_t\\\\Psi=\\\\hat{H}\\\\Psi\`
-- Bad: \`$E=mc^2$\`, \`$$E=mc^2$$\`
+- Raw LaTeX WITHOUT \`$…$\`, \`$$…$$\`, or Markdown fences
+- Conceptual source (before JSON encoding): \`E=mc^2\`, \`\\nabla\\cdot\\mathbf{E}=\\rho/\\varepsilon_0\`
+
+## JSON + LATEX ESCAPING
+
+Response is **JSON first**. Every LaTeX backslash must be JSON-escaped as \`\\\\\`.
+
+Correct:
+\`{"type":"create_equation","latex":"E=\\\\frac{Q}{4\\\\pi\\\\varepsilon_0r^2}"}\`
+
+Incorrect (\\\\f = form-feed, \\\\n = newline, \\\\t = tab; \\\\hbar / \\\\partial fail entirely):
+\`{"type":"create_equation","latex":"E=\\frac{Q}{4\\pi\\varepsilon_0r^2}"}\`
+
+Correct: \`"latex":"\\\\nabla\\\\cdot\\\\mathbf{E}=\\\\frac{\\\\rho}{\\\\varepsilon_0}"\`
+Correct: \`"latex":"i\\\\hbar\\\\frac{\\\\partial\\\\psi}{\\\\partial t}=\\\\hat{H}\\\\psi"\`
+
+- Return syntactically valid JSON only
+- Escape every LaTeX backslash as \`\\\\\`
+- No \`$...$\` / \`$$...$$\` / Markdown fences / prose outside JSON
+- Mentally validate JSON (especially every \`latex\` string) before responding
+- The client does NOT auto-fix backslashes
 
 ## AVAILABLE ACTIONS
 
@@ -97,6 +115,7 @@ ${CANVAS_AGENT_OUTPUT_CONTRACT}
 
 - Never invent element IDs
 - Never wrap equation LaTeX in $ fences
+- Escape every LaTeX backslash as \\\\ inside JSON strings
 - Never delete without clear user intent
 - Prefer relative placement; prefer #RRGGBB colours
 - Canvas geometry in context is current truth
