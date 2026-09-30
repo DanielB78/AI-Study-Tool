@@ -21,6 +21,17 @@ export {
   serializeRagContext,
   DEFAULT_RAG_SYSTEM_INSTRUCTION,
 } from './contextBuilder';
+export {
+  semanticExpansionService,
+  createSemanticExpansionService,
+  buildSemanticTrees,
+  semanticHitsForContext,
+} from './semanticExpansion';
+export type {
+  SemanticExpandResponse,
+  SemanticExpansionEdge,
+  SemanticTreeNode,
+} from './semanticExpansion';
 export { useRagDebugStore, computeDebugContext } from './ragDebugStore';
 export { RagDebugPanel } from './ui/RagDebugPanel';
 export { RagDebugOverlay } from './ui/RagDebugOverlay';

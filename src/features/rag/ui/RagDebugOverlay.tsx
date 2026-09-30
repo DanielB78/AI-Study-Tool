@@ -7,13 +7,24 @@ import { computeDebugContext, useRagDebugStore } from '../ragDebugStore';
 /**
  * Transient Konva overlay for RAG debug highlights.
  * Not part of CanvasDocument — visualization only.
+ *
+ * Colors:
+ * - prompt semantic anchors: teal
+ * - spatial additions: amber
+ * - semantic expansion additions: violet
  */
 export function RagDebugOverlay() {
   const open = useRagDebugStore((s) => s.open);
   const prompt = useRagDebugStore((s) => s.prompt);
   const candidates = useRagDebugStore((s) => s.candidates);
   const selectedAnchorIds = useRagDebugStore((s) => s.selectedAnchorIds);
+  const spatialExpansionEnabled = useRagDebugStore((s) => s.spatialExpansionEnabled);
   const radius = useRagDebugStore((s) => s.radius);
+  const semanticExpansionEnabled = useRagDebugStore((s) => s.semanticExpansionEnabled);
+  const semanticExpansionDepth = useRagDebugStore((s) => s.semanticExpansionDepth);
+  const semanticMaxNeighbours = useRagDebugStore((s) => s.semanticMaxNeighbours);
+  const semanticExpandResponse = useRagDebugStore((s) => s.semanticExpandResponse);
+  const semanticIncludedIds = useRagDebugStore((s) => s.semanticIncludedIds);
   const camera = useCanvasStore((s) => s.document.camera);
   const elements = useCanvasStore((s) => s.document.elements);
 
@@ -21,16 +32,47 @@ export function RagDebugOverlay() {
     if (!open) {
       return {
         context: {
-          semanticAnchors: [] as ReturnType<typeof computeDebugContext>['context']['semanticAnchors'],
-          spatialElements: [] as ReturnType<typeof computeDebugContext>['context']['spatialElements'],
+          semanticAnchors: [] as ReturnType<
+            typeof computeDebugContext
+          >['context']['semanticAnchors'],
+          spatialElements: [] as ReturnType<
+            typeof computeDebugContext
+          >['context']['spatialElements'],
+          semanticNeighborElements: [] as ReturnType<
+            typeof computeDebugContext
+          >['context']['semanticNeighborElements'],
         },
       };
     }
     return computeDebugContext(
-      { prompt, candidates, selectedAnchorIds, radius },
+      {
+        prompt,
+        candidates,
+        selectedAnchorIds,
+        spatialExpansionEnabled,
+        radius,
+        semanticExpansionEnabled,
+        semanticExpansionDepth,
+        semanticMaxNeighbours,
+        semanticExpandResponse,
+        semanticIncludedIds,
+      },
       elements,
     );
-  }, [open, prompt, candidates, selectedAnchorIds, radius, elements]);
+  }, [
+    open,
+    prompt,
+    candidates,
+    selectedAnchorIds,
+    spatialExpansionEnabled,
+    radius,
+    semanticExpansionEnabled,
+    semanticExpansionDepth,
+    semanticMaxNeighbours,
+    semanticExpandResponse,
+    semanticIncludedIds,
+    elements,
+  ]);
 
   if (!open) return null;
 
@@ -40,7 +82,8 @@ export function RagDebugOverlay() {
   return (
     <>
       {/* Soft expanded AABB around each semantic anchor (approx. radius region). */}
-      {radius > 0 &&
+      {spatialExpansionEnabled &&
+        radius > 0 &&
         context.semanticAnchors.map((anchor) => {
           const expanded = expandRect(anchor.geometry, radius);
           return (
@@ -60,9 +103,28 @@ export function RagDebugOverlay() {
           );
         })}
 
-      {/* Spatial inclusions — amber; skipped if also semantic. */}
+      {/* Semantic expansion additions — violet; skip if also anchor. */}
+      {context.semanticNeighborElements.map((el) => {
+        if (semanticIds.has(el.element_id)) return null;
+        return (
+          <Rect
+            key={`rag-sem-exp-${el.element_id}`}
+            x={el.geometry.x - 3}
+            y={el.geometry.y - 3}
+            width={el.geometry.width + 6}
+            height={el.geometry.height + 6}
+            fill="rgba(124, 58, 237, 0.08)"
+            stroke="rgba(124, 58, 237, 0.75)"
+            strokeWidth={1.5 * strokeScale}
+            listening={false}
+          />
+        );
+      })}
+
+      {/* Spatial inclusions — amber; skipped if also semantic anchor. */}
       {context.spatialElements.map((el) => {
         if (semanticIds.has(el.element_id)) return null;
+        const alsoNeighbor = el.sources.some((s) => s.type === 'semantic_neighbor');
         return (
           <Rect
             key={`rag-spatial-${el.element_id}`}
@@ -73,6 +135,7 @@ export function RagDebugOverlay() {
             fill="rgba(217, 119, 6, 0.08)"
             stroke="rgba(217, 119, 6, 0.7)"
             strokeWidth={1.5 * strokeScale}
+            dash={alsoNeighbor ? [4 * strokeScale, 3 * strokeScale] : undefined}
             listening={false}
           />
         );

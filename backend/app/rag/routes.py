@@ -16,8 +16,13 @@ from .schemas import (
     RebuildEmbeddingsResponse,
     RetrieveRequest,
     RetrieveResponse,
+    SemanticExpandRequest,
+    SemanticExpandResponse,
+    SemanticExpansionEdgeResponse,
+    SemanticExpansionElementResponse,
     TextElementIndexRequest,
 )
+from .semantic_expansion import SUPPORTED_ELEMENT_TYPES, SemanticExpansionService
 from .service import RagIndexingService
 
 router = APIRouter(prefix="/api/rag", tags=["rag"])
@@ -29,6 +34,12 @@ def get_rag_service(session: Session = Depends(get_db_session)) -> RagIndexingSe
 
 def get_retrieval_service(session: Session = Depends(get_db_session)) -> PromptRetrievalService:
     return PromptRetrievalService(session)
+
+
+def get_semantic_expansion_service(
+    session: Session = Depends(get_db_session),
+) -> SemanticExpansionService:
+    return SemanticExpansionService(session)
 
 
 @router.put("/elements/text", response_model=IndexElementResponse)
@@ -112,3 +123,45 @@ async def retrieve(
 ) -> RetrieveResponse:
     """Semantic-only retrieval for development / debugging (not wired to the LLM)."""
     return await service.retrieve(body)
+
+
+@router.post("/expand/semantic", response_model=SemanticExpandResponse)
+def expand_semantic(
+    body: SemanticExpandRequest,
+    service: SemanticExpansionService = Depends(get_semantic_expansion_service),
+) -> SemanticExpandResponse:
+    """Anchor → related canvas elements (debug). Distinct from prompt retrieve."""
+    result = service.expand(
+        board_id=body.board_id,
+        root_anchor_ids=body.root_anchor_ids,
+        depth=body.depth,
+        max_neighbours=body.max_neighbours,
+    )
+    return SemanticExpandResponse(
+        board_id=result.board_id,
+        root_anchor_ids=result.root_anchor_ids,
+        depth=result.depth,
+        max_neighbours=result.max_neighbours,
+        embedding_model=result.embedding_model,
+        supported_element_types=sorted(SUPPORTED_ELEMENT_TYPES),
+        edges=[
+            SemanticExpansionEdgeResponse(
+                parent_element_id=e.parent_element_id,
+                child_element_id=e.child_element_id,
+                root_anchor_element_id=e.root_anchor_element_id,
+                depth=e.depth,
+                similarity=e.similarity,
+            )
+            for e in result.edges
+        ],
+        elements=[
+            SemanticExpansionElementResponse(
+                element_id=v.element_id,
+                element_type=v.element_type,
+                preview=v.preview,
+                geometry=v.geometry,
+            )
+            for v in result.elements.values()
+        ],
+        unique_element_ids=result.unique_element_ids,
+    )

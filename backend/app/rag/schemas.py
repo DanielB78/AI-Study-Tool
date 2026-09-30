@@ -171,3 +171,45 @@ class RetrieveResponse(BaseModel):
     candidates: list[RetrievedElementResponse]
     # Observational only — never used to change top_k / cutoff / radius / budgets.
     prompt_intent: PromptIntentClassificationResponse | None = None
+
+
+class SemanticExpandRequest(BaseModel):
+    board_id: str = Field(..., min_length=1, max_length=128)
+    root_anchor_ids: list[str] = Field(default_factory=list)
+    depth: int = Field(default=1, ge=0, le=2)
+    max_neighbours: int = Field(default=5, ge=1, le=20)
+
+    @field_validator("board_id")
+    @classmethod
+    def strip_board(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("must not be empty")
+        return cleaned
+
+
+class SemanticExpansionEdgeResponse(BaseModel):
+    parent_element_id: str
+    child_element_id: str
+    root_anchor_element_id: str
+    depth: int
+    similarity: float
+
+
+class SemanticExpansionElementResponse(BaseModel):
+    element_id: str
+    element_type: str
+    preview: str
+    geometry: dict[str, float]
+
+
+class SemanticExpandResponse(BaseModel):
+    board_id: str
+    root_anchor_ids: list[str]
+    depth: int
+    max_neighbours: int
+    embedding_model: str
+    supported_element_types: list[str]
+    edges: list[SemanticExpansionEdgeResponse]
+    elements: list[SemanticExpansionElementResponse]
+    unique_element_ids: list[str]
