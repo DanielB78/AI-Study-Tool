@@ -22,13 +22,9 @@ export interface BuiltLlmPrompt {
 
 function formatRetrieval(el: RagContextElement): string[] {
   const lines: string[] = [];
-  if (el.inclusion === 'both') {
-    lines.push('RETRIEVAL:');
-    lines.push('semantic + spatial');
-  } else {
-    lines.push('RETRIEVAL:');
-    lines.push(el.inclusion);
-  }
+  const kinds = [...new Set(el.sources.map((s) => s.type))];
+  lines.push('RETRIEVAL:');
+  lines.push(kinds.join(' + '));
 
   if (el.similarity !== null) {
     lines.push('');
@@ -45,6 +41,17 @@ function formatRetrieval(el: RagContextElement): string[] {
     lines.push('');
     lines.push('DISTANCE:');
     lines.push(s.distance.toFixed(1));
+  }
+
+  const neighbors = el.sources.filter((s) => s.type === 'semantic_neighbor');
+  for (const s of neighbors) {
+    if (s.type !== 'semantic_neighbor') continue;
+    lines.push('');
+    lines.push('SEMANTIC NEIGHBOR:');
+    lines.push(`root: ${s.root_anchor_element_id}`);
+    lines.push(`parent: ${s.parent_element_id}`);
+    lines.push(`depth: ${s.depth}`);
+    lines.push(`similarity: ${s.similarity.toFixed(4)}`);
   }
   return lines;
 }
