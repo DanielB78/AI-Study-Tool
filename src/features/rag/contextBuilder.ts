@@ -1,12 +1,13 @@
 /**
- * RagContextBuilder — assembles LLM-ready canvas context from semantic anchors
- * + spatial expansion + semantic knowledge expansion.
+ * RagContextBuilder — assembles LLM-ready canvas context from:
+ * explicit editor selection + semantic anchors + spatial + semantic expansion.
  * Pure functions; no UI / no canvas renderer coupling.
  */
 
 import type { MatchedChunk, RetrievedCandidate } from './ragRetrieval';
 import type { SpatialHit } from './spatialContext';
 import type { SemanticNeighborHit } from './semanticExpansion';
+import type { ExplicitSelectionInput } from './explicitSelection';
 import type { WorldRect } from './geometry';
 import {
   RAG_MAX_CONTEXT_CHARACTERS,
@@ -14,9 +15,14 @@ import {
 } from './config';
 
 export type RetrievalSourceType =
+  | 'explicit_selection'
   | 'semantic'
   | 'spatial'
   | 'semantic_neighbor';
+
+export interface ExplicitSelectionSource {
+  type: 'explicit_selection';
+}
 
 export interface SemanticSource {
   type: 'semantic';
@@ -39,11 +45,13 @@ export interface SemanticNeighborSource {
 }
 
 export type ElementProvenance =
+  | ExplicitSelectionSource
   | SemanticSource
   | SpatialSource
   | SemanticNeighborSource;
 
 export type ElementInclusion =
+  | 'explicit_selection'
   | 'semantic'
   | 'spatial'
   | 'semantic_neighbor'
@@ -66,6 +74,7 @@ export interface RagContextElement {
 }
 
 export interface RagContextStats {
+  explicit_selection_count: number;
   semantic_anchor_count: number;
   spatial_addition_count: number;
   semantic_depth1_addition_count: number;
@@ -76,10 +85,13 @@ export interface RagContextStats {
   word_count: number;
   truncated_by_element_budget: boolean;
   truncated_by_character_budget: boolean;
+  /** True when required (explicit) context alone exceeds configured budgets. */
+  required_context_exceeds_budget: boolean;
 }
 
 export interface RagContext {
   query: string;
+  explicitlySelectedElements: RagContextElement[];
   semanticAnchors: RagContextElement[];
   spatialElements: RagContextElement[];
   semanticNeighborElements: RagContextElement[];
@@ -101,6 +113,8 @@ export interface SemanticAnchorInput {
 
 export interface BuildRagContextOptions {
   query: string;
+  /** Editor selection snapshot — highest priority, always retained. */
+  explicitSelections?: ExplicitSelectionInput[];
   semanticAnchors: SemanticAnchorInput[];
   /** Raw spatial hits (may include duplicates across anchors / overlap with anchors) */
   spatialHits: SpatialHit[];
@@ -155,12 +169,22 @@ function bestPromptSimilarity(sources: ElementProvenance[]): number | null {
   return null;
 }
 
+function refreshDerived(el: RagContextElement): void {
+  el.inclusion = inclusionOf(el.sources);
+  el.similarity = bestPromptSimilarity(el.sources);
+  el.nearest_distance = nearestDistance(el.sources);
+  el.semantic_neighbor_similarity = bestSemanticNeighborSim(el.sources);
+}
+
 function formatElementBlock(el: RagContextElement): string {
   const lines: string[] = [];
   lines.push('ELEMENT');
   lines.push(`ID: ${el.element_id}`);
   lines.push(`TYPE: ${el.element_type}`);
   lines.push(`SOURCE: ${el.inclusion}`);
+  if (el.sources.some((s) => s.type === 'explicit_selection')) {
+    lines.push('EXPLICIT_SELECTION: yes');
+  }
   if (el.similarity !== null) {
     lines.push(`SIMILARITY: ${el.similarity.toFixed(4)}`);
   }
@@ -192,18 +216,42 @@ function formatElementBlock(el: RagContextElement): string {
 export function serializeRagContext(
   query: string,
   elements: readonly RagContextElement[],
+  explicitlySelected: readonly RagContextElement[] = [],
 ): string {
   if (elements.length === 0) {
     return 'CANVAS CONTEXT\n\n(none selected)';
   }
-  const blocks = elements.map(formatElementBlock);
-  return [
+
+  const sections: string[] = [
     'CANVAS CONTEXT',
     `QUERY: ${query}`,
     `ELEMENTS: ${elements.length}`,
-    '',
-    blocks.join('\n\n'),
-  ].join('\n');
+  ];
+
+  if (explicitlySelected.length > 0) {
+    sections.push('');
+    sections.push('EXPLICITLY SELECTED CANVAS ELEMENTS');
+    sections.push(
+      'These elements were selected by the user. Strong contextual signal.',
+    );
+    sections.push('');
+    sections.push(explicitlySelected.map(formatElementBlock).join('\n\n'));
+  }
+
+  const supporting = elements.filter(
+    (el) => !el.sources.some((s) => s.type === 'explicit_selection'),
+  );
+  if (supporting.length > 0) {
+    sections.push('');
+    sections.push('RETRIEVED SUPPORTING CONTEXT');
+    sections.push('');
+    sections.push(supporting.map(formatElementBlock).join('\n\n'));
+  } else if (explicitlySelected.length === 0) {
+    sections.push('');
+    sections.push(elements.map(formatElementBlock).join('\n\n'));
+  }
+
+  return sections.join('\n');
 }
 
 function attachSemanticNeighborSources(
@@ -219,44 +267,69 @@ function attachSemanticNeighborSources(
       similarity: hit.similarity,
     });
   }
-  existing.inclusion = inclusionOf(existing.sources);
-  existing.semantic_neighbor_similarity = bestSemanticNeighborSim(existing.sources);
-  existing.nearest_distance = nearestDistance(existing.sources);
-  existing.similarity = bestPromptSimilarity(existing.sources);
+  refreshDerived(existing);
 }
 
 /**
- * Merge anchors + spatial hits + semantic-neighbor hits, dedupe by element_id,
- * enforce budgets.
+ * Merge explicit selection + anchors + spatial + semantic-neighbor hits.
+ * Dedupes by element_id. Explicit selections always survive budgeting.
  *
- * Budget rules:
- * 1. All semantic anchors are always retained.
- * 2. Spatial additions are nearest-first until budgets.
- * 3. Semantic-neighbor additions are best-similarity-first among remaining.
- * 4. Disabled expansion stages pass empty hit lists.
+ * Budget priority (trim first → last):
+ * 1. semantic-neighbor additions
+ * 2. spatial additions
+ * Required (never trimmed for budget):
+ * - explicitly selected elements
+ * - semantic anchors
  */
 export function buildRagContext(options: BuildRagContextOptions): RagContext {
   const maxElements = options.maxElements ?? RAG_MAX_CONTEXT_ELEMENTS;
   const maxCharacters = options.maxCharacters ?? RAG_MAX_CONTEXT_CHARACTERS;
+  const explicitSelections = options.explicitSelections ?? [];
   const semanticNeighborHits = options.semanticNeighborHits ?? [];
 
   const byId = new Map<string, RagContextElement>();
 
-  // 1. Semantic anchors first (stable order as provided).
+  // 1. Explicit editor selection — highest priority, always retained.
+  for (const sel of explicitSelections) {
+    byId.set(sel.element_id, {
+      element_id: sel.element_id,
+      element_type: sel.element_type,
+      text: sel.text,
+      geometry: sel.geometry,
+      sources: [{ type: 'explicit_selection' }],
+      inclusion: 'explicit_selection',
+      similarity: null,
+      nearest_distance: null,
+      semantic_neighbor_similarity: null,
+    });
+  }
+
+  // 2. Semantic anchors (merge into existing if also explicitly selected).
   for (const anchor of options.semanticAnchors) {
-    const sources: ElementProvenance[] = [
-      {
+    const existing = byId.get(anchor.element_id);
+    if (existing) {
+      existing.sources.push({
         type: 'semantic',
         similarity: anchor.similarity,
         matched_chunks: anchor.matched_chunks,
-      },
-    ];
+      });
+      // Prefer live canvas text already on explicit selection; keep longer if needed.
+      if (anchor.text.length > existing.text.length) existing.text = anchor.text;
+      refreshDerived(existing);
+      continue;
+    }
     byId.set(anchor.element_id, {
       element_id: anchor.element_id,
       element_type: anchor.element_type,
       text: anchor.text,
       geometry: anchor.geometry,
-      sources,
+      sources: [
+        {
+          type: 'semantic',
+          similarity: anchor.similarity,
+          matched_chunks: anchor.matched_chunks,
+        },
+      ],
       inclusion: 'semantic',
       similarity: anchor.similarity,
       nearest_distance: null,
@@ -264,7 +337,7 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     });
   }
 
-  // 2. Collect spatial candidates (exclude pure duplicates of anchors until merge).
+  // 3. Collect spatial candidates.
   type SpatialCandidate = {
     element_id: string;
     element_type: string;
@@ -283,8 +356,7 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
         anchor_element_id: hit.anchor_element_id,
         distance: hit.distance,
       });
-      existing.inclusion = inclusionOf(existing.sources);
-      existing.nearest_distance = nearestDistance(existing.sources);
+      refreshDerived(existing);
       continue;
     }
 
@@ -314,25 +386,42 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     (a, b) => a.nearest - b.nearest || a.element_id.localeCompare(b.element_id),
   );
 
+  const explicitlySelectedElements: RagContextElement[] = explicitSelections.map(
+    (s) => byId.get(s.element_id)!,
+  );
   const semanticAnchors: RagContextElement[] = options.semanticAnchors.map(
     (a) => byId.get(a.element_id)!,
   );
 
-  let charUsed = semanticAnchors.reduce((n, el) => n + el.text.length, 0);
+  // Required elements for budget baseline (unique).
+  const requiredElements: RagContextElement[] = [];
+  const seenRequired = new Set<string>();
+  for (const el of [...explicitlySelectedElements, ...semanticAnchors]) {
+    if (seenRequired.has(el.element_id)) continue;
+    seenRequired.add(el.element_id);
+    requiredElements.push(el);
+  }
+
+  let charUsed = requiredElements.reduce((n, el) => n + el.text.length, 0);
   let truncatedByElements = false;
   let truncatedByChars = false;
-  const spatialElements: RagContextElement[] = [];
+  const requiredExceedsBudget =
+    requiredElements.length > maxElements || charUsed > maxCharacters;
 
+  if (requiredExceedsBudget) {
+    truncatedByElements = requiredElements.length > maxElements;
+    truncatedByChars = charUsed > maxCharacters;
+  }
+
+  const spatialElements: RagContextElement[] = [];
   for (const cand of spatialOrdered) {
-    if (semanticAnchors.length + spatialElements.length >= maxElements) {
+    const acceptedCount = requiredElements.length + spatialElements.length;
+    if (acceptedCount >= maxElements) {
       truncatedByElements = true;
       break;
     }
     const nextChars = charUsed + cand.text.length;
-    if (
-      nextChars > maxCharacters &&
-      spatialElements.length + semanticAnchors.length > 0
-    ) {
+    if (nextChars > maxCharacters && acceptedCount > 0) {
       truncatedByChars = true;
       break;
     }
@@ -353,7 +442,7 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     charUsed = nextChars;
   }
 
-  // 3. Semantic neighbor hits — attach to existing or collect as new candidates.
+  // 4. Semantic neighbor hits.
   type SemCand = {
     element_id: string;
     element_type: string;
@@ -392,15 +481,14 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
   );
 
   const semanticNeighborElements: RagContextElement[] = [];
-  // Recompute charUsed from currently accepted elements.
-  charUsed = [...semanticAnchors, ...spatialElements].reduce(
+  charUsed = [...requiredElements, ...spatialElements].reduce(
     (n, el) => n + el.text.length,
     0,
   );
 
   for (const cand of semOrdered) {
     const acceptedCount =
-      semanticAnchors.length +
+      requiredElements.length +
       spatialElements.length +
       semanticNeighborElements.length;
     if (acceptedCount >= maxElements) {
@@ -436,62 +524,59 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     charUsed = nextChars;
   }
 
-  const anchorChars = semanticAnchors.reduce((n, el) => n + el.text.length, 0);
-  if (anchorChars > maxCharacters) {
-    truncatedByChars = true;
+  // allElements: explicit first, then anchors not already listed, then additions.
+  const allElements: RagContextElement[] = [];
+  const inAll = new Set<string>();
+  for (const el of explicitlySelectedElements) {
+    if (inAll.has(el.element_id)) continue;
+    allElements.push(el);
+    inAll.add(el.element_id);
   }
-  if (semanticAnchors.length > maxElements) {
-    truncatedByElements = true;
+  for (const el of semanticAnchors) {
+    if (inAll.has(el.element_id)) continue;
+    allElements.push(el);
+    inAll.add(el.element_id);
+  }
+  for (const el of spatialElements) {
+    if (inAll.has(el.element_id)) continue;
+    allElements.push(el);
+    inAll.add(el.element_id);
+  }
+  for (const el of semanticNeighborElements) {
+    if (inAll.has(el.element_id)) continue;
+    allElements.push(el);
+    inAll.add(el.element_id);
   }
 
-  const allElements = [
-    ...semanticAnchors,
-    ...spatialElements,
-    ...semanticNeighborElements,
-  ];
   const totalChars = allElements.reduce((n, el) => n + el.text.length, 0);
   const totalWords = allElements.reduce((n, el) => n + wordCount(el.text), 0);
 
-  // Count unique semantic additions by depth (from sources on allElements that
-  // are not prompt anchors — i.e. elements whose first role is neighbor, OR
-  // anchors that also have neighbor sources don't count as "additions").
   const additionIds = new Set<string>();
   let depth1 = 0;
   let depth2 = 0;
-  const anchorIdSet = new Set(semanticAnchors.map((a) => a.element_id));
+  const explicitIdSet = new Set(explicitSelections.map((s) => s.element_id));
+  const anchorIdSet = new Set(options.semanticAnchors.map((a) => a.element_id));
   for (const el of allElements) {
-    if (anchorIdSet.has(el.element_id)) continue;
+    if (explicitIdSet.has(el.element_id) || anchorIdSet.has(el.element_id)) {
+      continue;
+    }
     const neigh = el.sources.filter(
       (s): s is SemanticNeighborSource => s.type === 'semantic_neighbor',
     );
     if (neigh.length === 0) continue;
     additionIds.add(el.element_id);
     const minDepth = Math.min(...neigh.map((s) => s.depth));
-    if (minDepth <= 1) depth1 += 1;
-    else depth2 += 1;
-  }
-  // Also count depth-2 on elements that have both depth-1 and depth-2 paths:
-  // use exclusive buckets by min depth above; additionally count pure depth-2
-  // paths for summary. Spec wants:
-  //   Semantic depth-1 additions / Semantic depth-2 additions / Unique semantic additions
-  // Recompute with exclusive: depth1 = minDepth==1, depth2 = minDepth==2
-  depth1 = 0;
-  depth2 = 0;
-  for (const id of additionIds) {
-    const el = byId.get(id)!;
-    const neigh = el.sources.filter(
-      (s): s is SemanticNeighborSource => s.type === 'semantic_neighbor',
-    );
-    const minDepth = Math.min(...neigh.map((s) => s.depth));
     if (minDepth === 1) depth1 += 1;
     else if (minDepth >= 2) depth2 += 1;
   }
 
-  // Spatial-only additions (not anchors).
+  // Spatial additions = elements in spatialElements array (not required-only merges).
   const spatialAdditionCount = spatialElements.length;
 
   const stats: RagContextStats = {
-    semantic_anchor_count: semanticAnchors.length,
+    explicit_selection_count: explicitlySelectedElements.length,
+    semantic_anchor_count: new Set(options.semanticAnchors.map((a) => a.element_id))
+      .size,
     spatial_addition_count: spatialAdditionCount,
     semantic_depth1_addition_count: depth1,
     semantic_depth2_addition_count: depth2,
@@ -501,16 +586,22 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     word_count: totalWords,
     truncated_by_element_budget: truncatedByElements,
     truncated_by_character_budget: truncatedByChars,
+    required_context_exceeds_budget: requiredExceedsBudget,
   };
 
   return {
     query: options.query,
+    explicitlySelectedElements,
     semanticAnchors,
     spatialElements,
     semanticNeighborElements,
     allElements,
     stats,
-    serialized: serializeRagContext(options.query, allElements),
+    serialized: serializeRagContext(
+      options.query,
+      allElements,
+      explicitlySelectedElements,
+    ),
   };
 }
 

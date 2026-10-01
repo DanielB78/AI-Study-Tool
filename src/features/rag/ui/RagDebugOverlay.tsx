@@ -9,6 +9,7 @@ import { computeDebugContext, useRagDebugStore } from '../ragDebugStore';
  * Not part of CanvasDocument — visualization only.
  *
  * Colors:
+ * - explicit selection: red
  * - prompt semantic anchors: teal
  * - spatial additions: amber
  * - semantic expansion additions: violet
@@ -18,6 +19,7 @@ export function RagDebugOverlay() {
   const prompt = useRagDebugStore((s) => s.prompt);
   const candidates = useRagDebugStore((s) => s.candidates);
   const selectedAnchorIds = useRagDebugStore((s) => s.selectedAnchorIds);
+  const explicitSelectionIds = useRagDebugStore((s) => s.explicitSelectionIds);
   const spatialExpansionEnabled = useRagDebugStore((s) => s.spatialExpansionEnabled);
   const radius = useRagDebugStore((s) => s.radius);
   const semanticExpansionEnabled = useRagDebugStore((s) => s.semanticExpansionEnabled);
@@ -32,6 +34,9 @@ export function RagDebugOverlay() {
     if (!open) {
       return {
         context: {
+          explicitlySelectedElements: [] as ReturnType<
+            typeof computeDebugContext
+          >['context']['explicitlySelectedElements'],
           semanticAnchors: [] as ReturnType<
             typeof computeDebugContext
           >['context']['semanticAnchors'],
@@ -49,6 +54,7 @@ export function RagDebugOverlay() {
         prompt,
         candidates,
         selectedAnchorIds,
+        explicitSelectionIds,
         spatialExpansionEnabled,
         radius,
         semanticExpansionEnabled,
@@ -64,6 +70,7 @@ export function RagDebugOverlay() {
     prompt,
     candidates,
     selectedAnchorIds,
+    explicitSelectionIds,
     spatialExpansionEnabled,
     radius,
     semanticExpansionEnabled,
@@ -77,11 +84,13 @@ export function RagDebugOverlay() {
   if (!open) return null;
 
   const strokeScale = 1 / camera.zoom;
+  const explicitIds = new Set(
+    context.explicitlySelectedElements.map((e) => e.element_id),
+  );
   const semanticIds = new Set(context.semanticAnchors.map((e) => e.element_id));
 
   return (
     <>
-      {/* Soft expanded AABB around each semantic anchor (approx. radius region). */}
       {spatialExpansionEnabled &&
         radius > 0 &&
         context.semanticAnchors.map((anchor) => {
@@ -103,9 +112,10 @@ export function RagDebugOverlay() {
           );
         })}
 
-      {/* Semantic expansion additions — violet; skip if also anchor. */}
       {context.semanticNeighborElements.map((el) => {
-        if (semanticIds.has(el.element_id)) return null;
+        if (semanticIds.has(el.element_id) || explicitIds.has(el.element_id)) {
+          return null;
+        }
         return (
           <Rect
             key={`rag-sem-exp-${el.element_id}`}
@@ -121,9 +131,10 @@ export function RagDebugOverlay() {
         );
       })}
 
-      {/* Spatial inclusions — amber; skipped if also semantic anchor. */}
       {context.spatialElements.map((el) => {
-        if (semanticIds.has(el.element_id)) return null;
+        if (semanticIds.has(el.element_id) || explicitIds.has(el.element_id)) {
+          return null;
+        }
         const alsoNeighbor = el.sources.some((s) => s.type === 'semantic_neighbor');
         return (
           <Rect
@@ -141,17 +152,34 @@ export function RagDebugOverlay() {
         );
       })}
 
-      {/* Semantic anchors — teal; take precedence. */}
-      {context.semanticAnchors.map((el) => (
+      {context.semanticAnchors.map((el) => {
+        if (explicitIds.has(el.element_id)) return null;
+        return (
+          <Rect
+            key={`rag-sem-${el.element_id}`}
+            x={el.geometry.x - 4}
+            y={el.geometry.y - 4}
+            width={el.geometry.width + 8}
+            height={el.geometry.height + 8}
+            fill="rgba(15, 118, 110, 0.10)"
+            stroke="rgba(15, 118, 110, 0.9)"
+            strokeWidth={2 * strokeScale}
+            listening={false}
+          />
+        );
+      })}
+
+      {/* Explicit selection — red; highest visual precedence among RAG overlays. */}
+      {context.explicitlySelectedElements.map((el) => (
         <Rect
-          key={`rag-sem-${el.element_id}`}
-          x={el.geometry.x - 4}
-          y={el.geometry.y - 4}
-          width={el.geometry.width + 8}
-          height={el.geometry.height + 8}
-          fill="rgba(15, 118, 110, 0.10)"
-          stroke="rgba(15, 118, 110, 0.9)"
-          strokeWidth={2 * strokeScale}
+          key={`rag-explicit-${el.element_id}`}
+          x={el.geometry.x - 5}
+          y={el.geometry.y - 5}
+          width={el.geometry.width + 10}
+          height={el.geometry.height + 10}
+          fill="rgba(220, 38, 38, 0.08)"
+          stroke="rgba(185, 28, 28, 0.95)"
+          strokeWidth={2.5 * strokeScale}
           listening={false}
         />
       ))}

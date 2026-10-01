@@ -1108,6 +1108,11 @@ textarea {
   color: #6d28d9;
 }
 
+.rag-debug-badge.explicit_selection {
+  background: rgba(220, 38, 38, 0.12);
+  color: #b91c1c;
+}
+
 .rag-debug-check {
   display: flex;
   align-items: center;

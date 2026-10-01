@@ -21,6 +21,10 @@ import {
   type RagContext,
 } from './contextBuilder';
 import {
+  resolveExplicitSelection,
+  snapshotEditorSelection,
+} from './explicitSelection';
+import {
   ragRetrievalService,
   type PromptIntentClassification,
   type RetrievedCandidate,
@@ -70,6 +74,11 @@ export interface RagDebugState {
   statusMessage: string | null;
   candidates: RetrievedCandidate[];
   selectedAnchorIds: string[];
+  /**
+   * Editor selection IDs snapshotted at prompt submit (Retrieve / Send / Copy).
+   * Distinct from selectedAnchorIds (RAG semantic-anchor checkboxes).
+   */
+  explicitSelectionIds: string[];
   /** Independent of semantic expansion. */
   spatialExpansionEnabled: boolean;
   radius: number;
@@ -123,10 +132,12 @@ export interface RagDebugState {
   toggleAnchor: (elementId: string) => void;
   selectTopN: (n: number) => void;
   clearAnchors: () => void;
+  /** Capture current editor selectedIds into explicitSelectionIds. */
+  captureExplicitSelectionSnapshot: () => string[];
   retrieve: () => Promise<void>;
   /** Automatic mode only — never called when Manual LLM Mode is active. */
   sendWithContext: () => Promise<void>;
-  buildCurrentLlmPrompt: () => BuiltLlmPrompt | null;
+  buildCurrentLlmPrompt: (options?: { resnapshotSelection?: boolean }) => BuiltLlmPrompt | null;
   copyLlmPrompt: () => Promise<boolean>;
   openResponseModal: () => void;
   closeResponseModal: () => void;
@@ -142,6 +153,7 @@ export type DebugContextSlice = {
   prompt: string;
   candidates: RetrievedCandidate[];
   selectedAnchorIds: string[];
+  explicitSelectionIds: string[];
   spatialExpansionEnabled: boolean;
   radius: number;
   semanticExpansionEnabled: boolean;
@@ -240,8 +252,14 @@ export function computeDebugContext(
     );
   }
 
+  const explicitSelections = resolveExplicitSelection(
+    state.explicitSelectionIds,
+    docElements,
+  );
+
   const context = buildRagContext({
     query: state.prompt.trim(),
+    explicitSelections,
     semanticAnchors: anchors,
     spatialHits,
     semanticNeighborHits,
@@ -250,6 +268,17 @@ export function computeDebugContext(
   });
 
   return { context, spatialHits, semanticNeighborHits, semanticTrees };
+}
+
+function hasBuildableContext(state: {
+  prompt: string;
+  selectedAnchorIds: string[];
+  explicitSelectionIds: string[];
+}): boolean {
+  return (
+    state.prompt.trim().length > 0 &&
+    (state.selectedAnchorIds.length > 0 || state.explicitSelectionIds.length > 0)
+  );
 }
 
 async function writeClipboard(text: string): Promise<boolean> {
@@ -345,6 +374,7 @@ export function createRagDebugStore() {
       statusMessage: null,
       candidates: [],
       selectedAnchorIds: [],
+      explicitSelectionIds: [],
       spatialExpansionEnabled: true,
       radius: RAG_SPATIAL_RADIUS_DEFAULT,
       semanticExpansionEnabled: false,
@@ -500,12 +530,23 @@ export function createRagDebugStore() {
         });
       },
 
+      captureExplicitSelectionSnapshot: () => {
+        const ids = snapshotEditorSelection(
+          useCanvasStore.getState().selectedIds,
+        );
+        set({ explicitSelectionIds: ids });
+        return ids;
+      },
+
       clearError: () => set({ error: null }),
 
-      buildCurrentLlmPrompt: () => {
+      buildCurrentLlmPrompt: (options) => {
+        if (options?.resnapshotSelection !== false) {
+          get().captureExplicitSelectionSnapshot();
+        }
         const state = get();
         const prompt = state.prompt.trim();
-        if (!prompt || state.selectedAnchorIds.length === 0) return null;
+        if (!hasBuildableContext(state)) return null;
         const { context } = computeDebugContext(state);
         const built = buildLlmPrompt({
           userPrompt: prompt,
@@ -516,13 +557,13 @@ export function createRagDebugStore() {
       },
 
       copyLlmPrompt: async () => {
-        const built = get().buildCurrentLlmPrompt();
+        // New submit → capture current editor selection.
+        const built = get().buildCurrentLlmPrompt({ resnapshotSelection: true });
         if (!built) {
           set({
-            error:
-              !get().prompt.trim()
-                ? 'Enter a prompt first.'
-                : 'Select at least one semantic anchor.',
+            error: !get().prompt.trim()
+              ? 'Enter a prompt first.'
+              : 'Select canvas elements and/or RAG semantic anchors.',
           });
           return false;
         }
@@ -658,7 +699,7 @@ export function createRagDebugStore() {
         const state = get();
         const { context, spatialHits, semanticNeighborHits, semanticTrees } =
           computeDebugContext(state);
-        const built = state.selectedAnchorIds.length
+        const built = hasBuildableContext(state)
           ? buildLlmPrompt({
               userPrompt: state.prompt.trim(),
               ragContext: context,
@@ -668,8 +709,13 @@ export function createRagDebugStore() {
           userPrompt: state.prompt,
           llmExecutionMode: state.llmExecutionMode,
           promptIntent: state.promptIntent,
+          explicitSelection: context.explicitlySelectedElements.map((e) => ({
+            element_id: e.element_id,
+            element_type: e.element_type,
+          })),
           candidates: state.candidates,
           selectedAnchorIds: state.selectedAnchorIds,
+          explicitSelectionIds: state.explicitSelectionIds,
           spatialExpansionEnabled: state.spatialExpansionEnabled,
           radius: state.radius,
           semanticExpansionEnabled: state.semanticExpansionEnabled,
@@ -708,6 +754,9 @@ export function createRagDebugStore() {
         }
         if (get().retrieving) return;
 
+        // Snapshot editor selection at prompt submit — stable for this request.
+        const explicitSelectionIds = get().captureExplicitSelectionSnapshot();
+
         set({ retrieving: true, error: null, statusMessage: null });
         try {
           const boardId = useCanvasStore.getState().document.id;
@@ -718,6 +767,7 @@ export function createRagDebugStore() {
           set({
             candidates: result.candidates,
             selectedAnchorIds: [],
+            explicitSelectionIds,
             semanticExpandResponse: null,
             semanticIncludedIds: [],
             lastQueryChunks: result.query_chunks,
@@ -728,7 +778,7 @@ export function createRagDebugStore() {
             },
             promptIntent: result.prompt_intent ?? null,
             retrieving: false,
-            statusMessage: `${result.candidates.length} semantic candidate(s)`,
+            statusMessage: `${result.candidates.length} semantic candidate(s) · ${explicitSelectionIds.length} editor selection(s)`,
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : 'Retrieve failed';
@@ -737,6 +787,7 @@ export function createRagDebugStore() {
             error: message,
             candidates: [],
             selectedAnchorIds: [],
+            // Keep snapshot from this submit attempt for debugging.
             semanticExpandResponse: null,
             semanticIncludedIds: [],
             promptIntent: null,
@@ -765,13 +816,19 @@ export function createRagDebugStore() {
           set({ error: 'Enter a prompt.' });
           return;
         }
-        if (state.selectedAnchorIds.length === 0) {
-          set({ error: 'Select at least one semantic anchor.' });
+        // New submit → capture current editor selection.
+        get().captureExplicitSelectionSnapshot();
+        const submitted = get();
+        if (!hasBuildableContext(submitted)) {
+          set({
+            error:
+              'Select canvas elements and/or RAG semantic anchors before sending.',
+          });
           return;
         }
         if (state.sending) return;
 
-        const { context } = computeDebugContext(state);
+        const { context } = computeDebugContext(submitted);
         set({ sending: true, error: null, statusMessage: null });
 
         try {
