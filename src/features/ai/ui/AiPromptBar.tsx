@@ -1,5 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react';
 import { ArrowUp, Loader2, Sparkles } from 'lucide-react';
+import { StructureSelector } from '../../structures/ui/StructureSelector';
 import { useAiStore } from '../state/aiStore';
 
 const MAX_TEXTAREA_HEIGHT = 140;
@@ -105,6 +106,7 @@ export function AiPromptBar({ onInteraction }: AiPromptBarProps) {
           )}
         </div>
       )}
+      <StructureSelector disabled={loading} onInteraction={onInteraction} />
       <div className="ai-prompt-bar">
         <textarea
           ref={textareaRef}

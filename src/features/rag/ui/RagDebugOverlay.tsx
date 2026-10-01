@@ -55,6 +55,7 @@ export function RagDebugOverlay() {
         candidates,
         selectedAnchorIds,
         explicitSelectionIds,
+        selectedStructureId: useRagDebugStore.getState().selectedStructureId,
         spatialExpansionEnabled,
         radius,
         semanticExpansionEnabled,

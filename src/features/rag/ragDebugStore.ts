@@ -63,6 +63,8 @@ import {
 } from '../ai/llm/handleLlmResponse';
 import type { CanvasAgentResponse } from '../ai/agent/operations';
 import { CANVAS_EDITOR_SYSTEM_PROMPT } from '../ai/agent/prompts/loadAgentPrompt';
+import { useStructureStore } from '../structures/structureStore';
+import type { NoteStructure } from '../structures/types';
 
 export interface RagDebugState {
   open: boolean;
@@ -79,6 +81,11 @@ export interface RagDebugState {
    * Distinct from selectedAnchorIds (RAG semantic-anchor checkboxes).
    */
   explicitSelectionIds: string[];
+  /**
+   * Structure ID snapshotted at prompt submit (Retrieve / Copy / Send / Preview).
+   * Changing the live dropdown afterward must not alter an already-built prompt.
+   */
+  selectedStructureId: string | null;
   /** Independent of semantic expansion. */
   spatialExpansionEnabled: boolean;
   radius: number;
@@ -134,6 +141,10 @@ export interface RagDebugState {
   clearAnchors: () => void;
   /** Capture current editor selectedIds into explicitSelectionIds. */
   captureExplicitSelectionSnapshot: () => string[];
+  /** Capture live AI structure selector into selectedStructureId. */
+  captureStructureSnapshot: () => string | null;
+  /** Resolve the snapshotted structure (not the live dropdown). */
+  getSnapshottedStructure: () => NoteStructure | null;
   retrieve: () => Promise<void>;
   /** Automatic mode only — never called when Manual LLM Mode is active. */
   sendWithContext: () => Promise<void>;
@@ -154,6 +165,7 @@ export type DebugContextSlice = {
   candidates: RetrievedCandidate[];
   selectedAnchorIds: string[];
   explicitSelectionIds: string[];
+  selectedStructureId: string | null;
   spatialExpansionEnabled: boolean;
   radius: number;
   semanticExpansionEnabled: boolean;
@@ -162,6 +174,13 @@ export type DebugContextSlice = {
   semanticExpandResponse: SemanticExpandResponse | null;
   semanticIncludedIds: string[];
 };
+
+function resolveSnapshottedStructure(
+  selectedStructureId: string | null,
+): NoteStructure | null {
+  if (!selectedStructureId) return null;
+  return useStructureStore.getState().getStructureById(selectedStructureId);
+}
 
 function buildParseContextFromState(state: DebugContextSlice) {
   const { context } = computeDebugContext(state);
@@ -172,7 +191,12 @@ function buildParseContextFromState(state: DebugContextSlice) {
       elementTypes.set(el.id, el.type);
     }
   }
-  return { allowedElementIds, elementTypes, context };
+  return {
+    allowedElementIds,
+    elementTypes,
+    context,
+    selectedStructure: resolveSnapshottedStructure(state.selectedStructureId),
+  };
 }
 
 function resolveLiveElement(
@@ -275,10 +299,9 @@ function hasBuildableContext(state: {
   selectedAnchorIds: string[];
   explicitSelectionIds: string[];
 }): boolean {
-  return (
-    state.prompt.trim().length > 0 &&
-    (state.selectedAnchorIds.length > 0 || state.explicitSelectionIds.length > 0)
-  );
+  // Prompt alone is enough: empty canvas context is valid (e.g. structured note
+  // with viewport_default and no prior board content). Selection/anchors enrich.
+  return state.prompt.trim().length > 0;
 }
 
 async function writeClipboard(text: string): Promise<boolean> {
@@ -375,6 +398,7 @@ export function createRagDebugStore() {
       candidates: [],
       selectedAnchorIds: [],
       explicitSelectionIds: [],
+      selectedStructureId: null,
       spatialExpansionEnabled: true,
       radius: RAG_SPATIAL_RADIUS_DEFAULT,
       semanticExpansionEnabled: false,
@@ -538,11 +562,21 @@ export function createRagDebugStore() {
         return ids;
       },
 
+      captureStructureSnapshot: () => {
+        const id = useStructureStore.getState().selectedStructureIdForAi;
+        set({ selectedStructureId: id });
+        return id;
+      },
+
+      getSnapshottedStructure: () =>
+        resolveSnapshottedStructure(get().selectedStructureId),
+
       clearError: () => set({ error: null }),
 
       buildCurrentLlmPrompt: (options) => {
         if (options?.resnapshotSelection !== false) {
           get().captureExplicitSelectionSnapshot();
+          get().captureStructureSnapshot();
         }
         const state = get();
         const prompt = state.prompt.trim();
@@ -551,19 +585,18 @@ export function createRagDebugStore() {
         const built = buildLlmPrompt({
           userPrompt: prompt,
           ragContext: context,
+          selectedStructure: resolveSnapshottedStructure(state.selectedStructureId),
         });
         set({ lastBuiltPrompt: built });
         return built;
       },
 
       copyLlmPrompt: async () => {
-        // New submit → capture current editor selection.
+        // New submit → capture current editor selection + structure.
         const built = get().buildCurrentLlmPrompt({ resnapshotSelection: true });
         if (!built) {
           set({
-            error: !get().prompt.trim()
-              ? 'Enter a prompt first.'
-              : 'Select canvas elements and/or RAG semantic anchors.',
+            error: 'Enter a prompt first.',
           });
           return false;
         }
@@ -608,11 +641,16 @@ export function createRagDebugStore() {
       previewPastedPlan: () => {
         const state = get();
         try {
-          const { allowedElementIds, elementTypes } =
-            buildParseContextFromState(state);
+          // Use snapshotted structure from last prompt build; if none, capture live.
+          if (state.selectedStructureId === null && state.lastBuiltPrompt == null) {
+            get().captureStructureSnapshot();
+          }
+          const { allowedElementIds, elementTypes, selectedStructure } =
+            buildParseContextFromState(get());
           const parsed = parseAgentResponsePlan(state.pastedResponse, {
             allowedElementIds,
             elementTypes,
+            selectedStructure,
           });
           set({
             pendingPlan: parsed.plan,
@@ -754,8 +792,9 @@ export function createRagDebugStore() {
         }
         if (get().retrieving) return;
 
-        // Snapshot editor selection at prompt submit — stable for this request.
+        // Snapshot editor selection + structure at prompt submit — stable for this request.
         const explicitSelectionIds = get().captureExplicitSelectionSnapshot();
+        const selectedStructureId = get().captureStructureSnapshot();
 
         set({ retrieving: true, error: null, statusMessage: null });
         try {
@@ -768,6 +807,7 @@ export function createRagDebugStore() {
             candidates: result.candidates,
             selectedAnchorIds: [],
             explicitSelectionIds,
+            selectedStructureId,
             semanticExpandResponse: null,
             semanticIncludedIds: [],
             lastQueryChunks: result.query_chunks,
@@ -816,20 +856,25 @@ export function createRagDebugStore() {
           set({ error: 'Enter a prompt.' });
           return;
         }
-        // New submit → capture current editor selection.
+        // New submit → capture current editor selection + structure.
         get().captureExplicitSelectionSnapshot();
+        get().captureStructureSnapshot();
         const submitted = get();
         if (!hasBuildableContext(submitted)) {
           set({
-            error:
-              'Select canvas elements and/or RAG semantic anchors before sending.',
+            error: 'Enter a prompt before sending.',
           });
           return;
         }
         if (state.sending) return;
 
         const { context } = computeDebugContext(submitted);
-        set({ sending: true, error: null, statusMessage: null });
+        const built = buildLlmPrompt({
+          userPrompt: prompt,
+          ragContext: context,
+          selectedStructure: resolveSnapshottedStructure(submitted.selectedStructureId),
+        });
+        set({ sending: true, error: null, statusMessage: null, lastBuiltPrompt: built });
 
         try {
           useAiStore.setState({
@@ -842,7 +887,9 @@ export function createRagDebugStore() {
 
           const result = await aiService.sendPrompt(prompt, undefined, {
             systemInstruction: CANVAS_EDITOR_SYSTEM_PROMPT,
-            canvasContext: context.serialized,
+            canvasContext: [context.serialized, built.noteStructureSection]
+              .filter(Boolean)
+              .join('\n\n'),
           });
 
           const allowedElementIds = new Set(
@@ -858,6 +905,9 @@ export function createRagDebugStore() {
             applied = handleAgentResponse(result.text, {
               allowedElementIds,
               elementTypes,
+              selectedStructure: resolveSnapshottedStructure(
+                submitted.selectedStructureId,
+              ),
             });
           } catch (err) {
             const message =

@@ -5,6 +5,11 @@
 
 import type { RagContext, RagContextElement } from '../../rag/contextBuilder';
 import {
+  formatNoStructureSelected,
+  formatNoteStructureForPrompt,
+} from '../../structures/formatForPrompt';
+import type { NoteStructure } from '../../structures/types';
+import {
   CANVAS_EDITOR_RESPONSE_INSTRUCTIONS,
   CANVAS_EDITOR_SYSTEM_PROMPT,
 } from '../agent/prompts/loadAgentPrompt';
@@ -16,6 +21,8 @@ export interface BuiltLlmPrompt {
   systemInstructions: string;
   /** Canvas context section body (without outer USER REQUEST). */
   ragContextSection: string;
+  /** Selected note structure section (output format — not knowledge). */
+  noteStructureSection: string;
   /** Full deterministic prompt ready to paste into ChatGPT. */
   finalLlmPrompt: string;
 }
@@ -143,6 +150,8 @@ export function formatCanvasContextSection(context: RagContext): string {
 export interface BuildLlmPromptInput {
   userPrompt: string;
   ragContext: RagContext;
+  /** Snapshot of the structure selected for this request (null = No Structure). */
+  selectedStructure?: NoteStructure | null;
   systemInstructions?: string;
   responseInstructions?: string;
 }
@@ -150,6 +159,11 @@ export interface BuildLlmPromptInput {
 /**
  * Build the complete copyable LLM prompt for Manual LLM Mode.
  * Deterministic: same inputs → same string.
+ *
+ * Separation:
+ * - CANVAS CONTEXT = factual/contextual knowledge
+ * - SELECTED NOTE STRUCTURE = output format
+ * - USER REQUEST = task
  */
 export function buildLlmPrompt(input: BuildLlmPromptInput): BuiltLlmPrompt {
   const userPrompt = input.userPrompt.trim();
@@ -160,6 +174,9 @@ export function buildLlmPrompt(input: BuildLlmPromptInput): BuiltLlmPrompt {
     input.responseInstructions ?? CANVAS_EDITOR_RESPONSE_INSTRUCTIONS
   ).trim();
   const ragContextSection = formatCanvasContextSection(input.ragContext);
+  const noteStructureSection = input.selectedStructure
+    ? formatNoteStructureForPrompt(input.selectedStructure)
+    : formatNoStructureSelected();
 
   const finalLlmPrompt = [
     'SYSTEM INSTRUCTIONS',
@@ -175,6 +192,10 @@ export function buildLlmPrompt(input: BuildLlmPromptInput): BuiltLlmPrompt {
     '='.repeat(50),
     '',
     ragContextSection,
+    '',
+    '='.repeat(50),
+    '',
+    noteStructureSection,
     '',
     '='.repeat(50),
     '',
@@ -194,6 +215,7 @@ export function buildLlmPrompt(input: BuildLlmPromptInput): BuiltLlmPrompt {
     userPrompt,
     systemInstructions,
     ragContextSection,
+    noteStructureSection,
     finalLlmPrompt,
   };
 }

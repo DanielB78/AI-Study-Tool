@@ -3,6 +3,7 @@
  */
 
 import { useCanvasStore } from '../../../store/canvasStore';
+import { useStructureStore } from '../../structures/structureStore';
 import type { AgentExecutorTarget } from './executor';
 import { executeCanvasOperations } from './executor';
 import type { CanvasOperation } from './operations';
@@ -22,6 +23,7 @@ export function createLiveAgentExecutorTarget(): AgentExecutorTarget {
     setSelection: (ids) => useCanvasStore.getState().select(ids),
     persist: () => useCanvasStore.getState().persist(),
     getViewportSize: getDefaultViewportSize,
+    getStructureById: (id) => useStructureStore.getState().getStructureById(id),
   };
 }
 

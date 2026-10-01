@@ -1,6 +1,7 @@
 import type { CanvasElement } from '../../types/canvas';
 import { ConnectorNode } from './ConnectorNode';
 import { DrawingNode } from './DrawingNode';
+import { EquationNode } from './EquationNode';
 import { ImageNode } from './ImageNode';
 import { ShapeNode } from './ShapeNode';
 import { TextNode } from './TextNode';
@@ -15,6 +16,7 @@ interface Props {
   onDragEnd: (id: string, x: number, y: number) => void;
   onEditText: (id: string) => void;
   onEditShapeLabel: (id: string) => void;
+  onEditEquation?: (id: string) => void;
 }
 
 export function ElementRenderer({
@@ -27,6 +29,7 @@ export function ElementRenderer({
   onDragEnd,
   onEditText,
   onEditShapeLabel,
+  onEditEquation,
 }: Props) {
   switch (element.type) {
     case 'text':
@@ -40,6 +43,19 @@ export function ElementRenderer({
           onDragMove={onDragMove}
           onDragEnd={onDragEnd}
           onDblClick={onEditText}
+        />
+      );
+    case 'equation':
+      return (
+        <EquationNode
+          element={element}
+          listening={listening}
+          isEditing={false}
+          onSelect={onSelect}
+          onDragStart={onDragStart}
+          onDragMove={onDragMove}
+          onDragEnd={onDragEnd}
+          onDblClick={onEditEquation ?? (() => undefined)}
         />
       );
     case 'shape':

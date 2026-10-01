@@ -11,6 +11,7 @@ import { useCanvasStore, type DraftShapeKind } from '../store/canvasStore';
 import { ElementRenderer } from './elements/ElementRenderer';
 import { SelectionTransformer } from './elements/SelectionTransformer';
 import { TextEditorOverlay } from './TextEditorOverlay';
+import { EquationHtmlLayer } from './EquationHtmlLayer';
 import { DraftShapePreview } from './DraftShapePreview';
 import {
   normalizeRect,
@@ -19,7 +20,7 @@ import {
   zoomAtPoint,
 } from '../utils/coordinates';
 import { snapPosition } from '../utils/snap';
-import { ZOOM_STEP, isShapeTool } from '../types/canvas';
+import { ZOOM_STEP, isShapeTool, type EquationElement } from '../types/canvas';
 import { ragSync } from '../features/rag/ragSync';
 import { RagDebugOverlay } from '../features/rag/ui/RagDebugOverlay';
 
@@ -635,6 +636,14 @@ export function InfiniteCanvas() {
           />
         </Layer>
       </Stage>
+
+      <EquationHtmlLayer
+        equations={elements.filter(
+          (el): el is EquationElement => el.type === 'equation',
+        )}
+        camera={camera}
+        editingId={null}
+      />
 
       {editingTarget && (
         <TextEditorOverlay

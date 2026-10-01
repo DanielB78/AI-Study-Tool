@@ -1,0 +1,223 @@
+/**
+ * Note structure library + editor UI state (transient editor state + persisted library).
+ */
+
+import { create } from 'zustand';
+import { createId, now } from '../../utils/ids';
+import {
+  createEmptyStructure,
+  createStructureField,
+  duplicateStructure as duplicateStructureModel,
+} from './factory';
+import { loadStructureLibrary, saveStructureLibrary } from './storage';
+import type { NoteStructure, NoteStructureField } from './types';
+
+export type StructureUiMode = 'closed' | 'library' | 'editor' | 'preview';
+
+export interface StructureStoreState {
+  structures: NoteStructure[];
+  uiMode: StructureUiMode;
+  /** Structure being edited (draft; not saved until saveDraft). */
+  draft: NoteStructure | null;
+  selectedFieldId: string | null;
+  /** Per-request AI selection (also snapshotted in ragDebugStore). */
+  selectedStructureIdForAi: string | null;
+
+  openLibrary: () => void;
+  close: () => void;
+  openPreview: (id: string) => void;
+  startNew: (name?: string) => void;
+  editStructure: (id: string) => void;
+  saveDraft: () => boolean;
+  discardDraft: () => void;
+  deleteStructure: (id: string) => void;
+  renameStructure: (id: string, name: string) => void;
+  duplicateStructure: (id: string) => void;
+
+  setDraftName: (name: string) => void;
+  setDraftDescription: (description: string) => void;
+  addField: () => void;
+  updateField: (fieldId: string, patch: Partial<NoteStructureField>) => void;
+  deleteField: (fieldId: string) => void;
+  duplicateField: (fieldId: string) => void;
+  selectField: (fieldId: string | null) => void;
+  setFieldGeometry: (
+    fieldId: string,
+    geom: Pick<
+      NoteStructureField,
+      'relativeX' | 'relativeY' | 'relativeWidth' | 'relativeHeight'
+    >,
+  ) => void;
+
+  setSelectedStructureIdForAi: (id: string | null) => void;
+  getStructureById: (id: string) => NoteStructure | null;
+}
+
+function persist(structures: NoteStructure[]) {
+  saveStructureLibrary({ version: 1, structures });
+}
+
+function touchDraft(draft: NoteStructure): NoteStructure {
+  return { ...draft, updatedAt: now() };
+}
+
+export function createStructureStore() {
+  const loaded = loadStructureLibrary();
+  return create<StructureStoreState>((set, get) => ({
+    structures: loaded.structures,
+    uiMode: 'closed',
+    draft: null,
+    selectedFieldId: null,
+    selectedStructureIdForAi: null,
+
+    openLibrary: () => set({ uiMode: 'library', draft: null, selectedFieldId: null }),
+    close: () => set({ uiMode: 'closed', draft: null, selectedFieldId: null }),
+    openPreview: (id) => {
+      const s = get().structures.find((x) => x.id === id) ?? null;
+      if (!s) return;
+      set({ uiMode: 'preview', draft: structuredClone(s), selectedFieldId: null });
+    },
+
+    startNew: (name) => {
+      const draft = createEmptyStructure(name ?? 'Untitled structure');
+      set({ uiMode: 'editor', draft, selectedFieldId: null });
+    },
+
+    editStructure: (id) => {
+      const s = get().structures.find((x) => x.id === id);
+      if (!s) return;
+      set({ uiMode: 'editor', draft: structuredClone(s), selectedFieldId: null });
+    },
+
+    saveDraft: () => {
+      const draft = get().draft;
+      if (!draft) return false;
+      if (!draft.name.trim()) return false;
+      if (draft.fields.length === 0) return false;
+      const saved = touchDraft({ ...draft, name: draft.name.trim() });
+      const others = get().structures.filter((s) => s.id !== saved.id);
+      const structures = [...others, saved].sort(
+        (a, b) => b.updatedAt - a.updatedAt,
+      );
+      persist(structures);
+      set({ structures, uiMode: 'library', draft: null, selectedFieldId: null });
+      return true;
+    },
+
+    discardDraft: () => set({ uiMode: 'library', draft: null, selectedFieldId: null }),
+
+    deleteStructure: (id) => {
+      const structures = get().structures.filter((s) => s.id !== id);
+      persist(structures);
+      set((s) => ({
+        structures,
+        selectedStructureIdForAi:
+          s.selectedStructureIdForAi === id ? null : s.selectedStructureIdForAi,
+      }));
+    },
+
+    renameStructure: (id, name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      const structures = get().structures.map((s) =>
+        s.id === id ? { ...s, name: trimmed, updatedAt: now() } : s,
+      );
+      persist(structures);
+      set({ structures });
+    },
+
+    duplicateStructure: (id) => {
+      const source = get().structures.find((s) => s.id === id);
+      if (!source) return;
+      const copy = duplicateStructureModel(source);
+      const structures = [copy, ...get().structures];
+      persist(structures);
+      set({ structures });
+    },
+
+    setDraftName: (name) =>
+      set((s) => (s.draft ? { draft: { ...s.draft, name } } : s)),
+    setDraftDescription: (description) =>
+      set((s) => (s.draft ? { draft: { ...s.draft, description } } : s)),
+
+    addField: () => {
+      const draft = get().draft;
+      if (!draft) return;
+      const offset = draft.fields.length * 24;
+      const field = createStructureField({
+        label: `Field ${draft.fields.length + 1}`,
+        instruction: 'Describe what the AI should write here.',
+        relativeX: 24 + offset,
+        relativeY: 24 + offset,
+        zIndex: draft.fields.length,
+      });
+      set({
+        draft: touchDraft({ ...draft, fields: [...draft.fields, field] }),
+        selectedFieldId: field.id,
+      });
+    },
+
+    updateField: (fieldId, patch) => {
+      const draft = get().draft;
+      if (!draft) return;
+      set({
+        draft: touchDraft({
+          ...draft,
+          fields: draft.fields.map((f) =>
+            f.id === fieldId
+              ? {
+                  ...f,
+                  ...patch,
+                  style: patch.style ? { ...f.style, ...patch.style } : f.style,
+                }
+              : f,
+          ),
+        }),
+      });
+    },
+
+    deleteField: (fieldId) => {
+      const draft = get().draft;
+      if (!draft) return;
+      set({
+        draft: touchDraft({
+          ...draft,
+          fields: draft.fields.filter((f) => f.id !== fieldId),
+        }),
+        selectedFieldId:
+          get().selectedFieldId === fieldId ? null : get().selectedFieldId,
+      });
+    },
+
+    duplicateField: (fieldId) => {
+      const draft = get().draft;
+      if (!draft) return;
+      const source = draft.fields.find((f) => f.id === fieldId);
+      if (!source) return;
+      const copy: NoteStructureField = {
+        ...structuredClone(source),
+        id: `field_${createId()}`,
+        label: `${source.label} copy`,
+        relativeX: source.relativeX + 20,
+        relativeY: source.relativeY + 20,
+        zIndex: draft.fields.length,
+      };
+      set({
+        draft: touchDraft({ ...draft, fields: [...draft.fields, copy] }),
+        selectedFieldId: copy.id,
+      });
+    },
+
+    selectField: (fieldId) => set({ selectedFieldId: fieldId }),
+
+    setFieldGeometry: (fieldId, geom) => {
+      get().updateField(fieldId, geom);
+    },
+
+    setSelectedStructureIdForAi: (id) => set({ selectedStructureIdForAi: id }),
+
+    getStructureById: (id) => get().structures.find((s) => s.id === id) ?? null,
+  }));
+}
+
+export const useStructureStore = createStructureStore();
