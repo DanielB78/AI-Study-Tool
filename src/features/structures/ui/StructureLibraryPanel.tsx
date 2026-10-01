@@ -1,10 +1,14 @@
 import { useState } from 'react';
 import { LayoutTemplate, X } from 'lucide-react';
-import { createConceptSummaryStructure } from '../factory';
+import {
+  createConceptSummaryStructure,
+  createKnowledgeTreeStructure,
+} from '../factory';
 import { useStructureStore } from '../structureStore';
 import { StructureEditor } from './StructureEditor';
 import { StructurePreview } from './StructurePreview';
 import { saveStructureLibrary } from '../storage';
+import { NOTE_STRUCTURE_VERSION } from '../types';
 
 export function StructureLibraryPanel() {
   const uiMode = useStructureStore((s) => s.uiMode);
@@ -74,18 +78,38 @@ export function StructureLibraryPanel() {
               + New Structure
             </button>
             {structures.length === 0 && (
-              <button
-                type="button"
-                className="structure-btn ghost"
-                onClick={() => {
-                  const seed = createConceptSummaryStructure();
-                  const next = [seed, ...useStructureStore.getState().structures];
-                  saveStructureLibrary({ version: 1, structures: next });
-                  useStructureStore.setState({ structures: next });
-                }}
-              >
-                Add Concept Summary example
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="structure-btn ghost"
+                  onClick={() => {
+                    const seed = createConceptSummaryStructure();
+                    const next = [seed, ...useStructureStore.getState().structures];
+                    saveStructureLibrary({
+                      version: NOTE_STRUCTURE_VERSION,
+                      structures: next,
+                    });
+                    useStructureStore.setState({ structures: next });
+                  }}
+                >
+                  Add Concept Summary example
+                </button>
+                <button
+                  type="button"
+                  className="structure-btn ghost"
+                  onClick={() => {
+                    const seed = createKnowledgeTreeStructure();
+                    const next = [seed, ...useStructureStore.getState().structures];
+                    saveStructureLibrary({
+                      version: NOTE_STRUCTURE_VERSION,
+                      structures: next,
+                    });
+                    useStructureStore.setState({ structures: next });
+                  }}
+                >
+                  Add Knowledge Tree example
+                </button>
+              </>
             )}
           </div>
 
@@ -128,7 +152,11 @@ export function StructureLibraryPanel() {
                       <div className="structure-library-item-main">
                         <strong>{s.name}</strong>
                         <span className="structure-library-meta">
-                          {s.fields.length} field{s.fields.length === 1 ? '' : 's'}
+                          {s.fields.length} component
+                          {s.fields.length === 1 ? '' : 's'}
+                          {s.fields.some((f) => f.componentKind === 'node_section')
+                            ? ' · includes Node Section'
+                            : ''}
                         </span>
                       </div>
                       <div className="structure-library-item-actions">

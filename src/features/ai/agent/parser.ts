@@ -15,9 +15,17 @@ import {
   type PlacementRelation,
   type RelativePlacement,
   type StructuredFieldPayload,
+  type StructuredHierarchyNode,
   type UpdateTextOperation,
 } from './operations';
+import {
+  countHierarchyNodes,
+  formatHierarchyTreePreview,
+  maxHierarchyDepth,
+  type HierarchyNode,
+} from '../../structures/hierarchy';
 import type { NoteStructure } from '../../structures/types';
+import { isNodeSection, isStructureField } from '../../structures/types';
 import { validateLatex } from '../../equations/latex';
 
 export type ParseErrorCode =
@@ -38,7 +46,10 @@ export type ParseErrorCode =
   | 'unknown_structure_field'
   | 'missing_required_field'
   | 'invalid_field_payload'
-  | 'invalid_latex';
+  | 'invalid_latex'
+  | 'hierarchy_too_deep'
+  | 'hierarchy_too_large'
+  | 'hierarchy_too_many_children';
 
 export class CanvasAgentParseError extends Error {
   readonly code: ParseErrorCode;
@@ -123,6 +134,32 @@ function parsePlacement(raw: unknown): Placement {
   throw new CanvasAgentParseError('schema', `Unknown placement mode: ${String(raw.mode)}`);
 }
 
+function parseHierarchyNode(raw: unknown, path: string): StructuredHierarchyNode {
+  if (!isRecord(raw)) {
+    throw new CanvasAgentParseError(
+      'invalid_field_payload',
+      `${path} must be an object with content and children.`,
+    );
+  }
+  if ('x' in raw || 'y' in raw || 'id' in raw) {
+    throw new CanvasAgentParseError(
+      'invalid_field_payload',
+      `${path} must not include coordinates or IDs — content and children only.`,
+    );
+  }
+  const content = requireNonEmptyString(raw.content, `${path}.content`);
+  if (!Array.isArray(raw.children)) {
+    throw new CanvasAgentParseError(
+      'invalid_field_payload',
+      `${path}.children must be an array (use [] for leaves).`,
+    );
+  }
+  const children = raw.children.map((child, i) =>
+    parseHierarchyNode(child, `${path}.children[${i}]`),
+  );
+  return { content, children };
+}
+
 function parseFieldPayload(raw: unknown, fieldId: string): StructuredFieldPayload {
   if (raw === null) return null;
   if (!isRecord(raw)) {
@@ -131,15 +168,18 @@ function parseFieldPayload(raw: unknown, fieldId: string): StructuredFieldPayloa
       `fields.${fieldId} must be an object or null.`,
     );
   }
-  if ('content' in raw && !('latex' in raw)) {
+  if ('root' in raw && !('content' in raw) && !('latex' in raw)) {
+    return { root: parseHierarchyNode(raw.root, `fields.${fieldId}.root`) };
+  }
+  if ('content' in raw && !('latex' in raw) && !('root' in raw)) {
     return { content: requireNonEmptyString(raw.content, `fields.${fieldId}.content`) };
   }
-  if ('latex' in raw && !('content' in raw)) {
+  if ('latex' in raw && !('content' in raw) && !('root' in raw)) {
     return { latex: requireNonEmptyString(raw.latex, `fields.${fieldId}.latex`) };
   }
   throw new CanvasAgentParseError(
     'invalid_field_payload',
-    `fields.${fieldId} must be {content} for text or {latex} for equation.`,
+    `fields.${fieldId} must be {content}, {latex}, or {root:{content,children}}.`,
   );
 }
 
@@ -236,6 +276,49 @@ function validateStructuredNote(
       );
     }
     if (missing) continue;
+
+    if (isNodeSection(field)) {
+      if (!('root' in payload) || payload.root == null) {
+        throw new CanvasAgentParseError(
+          'invalid_field_payload',
+          `Field "${field.id}" is NODE_SECTION and requires { "root": { "content", "children" } }.`,
+          field.id,
+        );
+      }
+      const root = payload.root as HierarchyNode;
+      const depth = maxHierarchyDepth(root);
+      if (depth > field.maxDepth) {
+        throw new CanvasAgentParseError(
+          'hierarchy_too_deep',
+          `Node section "${field.id}" depth ${depth} exceeds maxDepth ${field.maxDepth}.`,
+          field.id,
+        );
+      }
+      const total = countHierarchyNodes(root);
+      if (total > field.maxTotalNodes) {
+        throw new CanvasAgentParseError(
+          'hierarchy_too_large',
+          `Node section "${field.id}" has ${total} nodes; maxTotalNodes is ${field.maxTotalNodes}.`,
+          field.id,
+        );
+      }
+      if (field.maxChildrenPerNode != null) {
+        const walk = (n: HierarchyNode) => {
+          if (n.children.length > field.maxChildrenPerNode!) {
+            throw new CanvasAgentParseError(
+              'hierarchy_too_many_children',
+              `Node section "${field.id}" has a node with ${n.children.length} children; max is ${field.maxChildrenPerNode}.`,
+              field.id,
+            );
+          }
+          n.children.forEach(walk);
+        };
+        walk(root);
+      }
+      continue;
+    }
+
+    if (!isStructureField(field)) continue;
 
     if (field.contentType === 'text') {
       if (!('content' in payload) || typeof payload.content !== 'string') {
@@ -382,16 +465,28 @@ export function describeOperationPlan(
       const labels = options?.structureFieldLabels?.get(op.structure_id);
       const fieldLines = Object.entries(op.fields)
         .filter(([, v]) => v != null)
-        .map(([id, v]) => {
+        .flatMap(([id, v]) => {
           const label = labels?.get(id) ?? id;
+          if (v && 'root' in v && v.root) {
+            const root = v.root as HierarchyNode;
+            const nodeCount = countHierarchyNodes(root);
+            const connectorCount = Math.max(0, nodeCount - 1);
+            const tree = formatHierarchyTreePreview(root);
+            return [
+              `   ${label.toUpperCase()}`,
+              ...tree.map((line) => `   ${line}`),
+              `   Nodes: ${nodeCount}`,
+              `   Connectors: ${connectorCount}`,
+            ];
+          }
           if (v && 'content' in v) {
             const preview = v.content.replace(/\s+/g, ' ').slice(0, 80);
-            return `   ${label}:\n   ${preview}${v.content.length > 80 ? '…' : ''}`;
+            return [`   ${label}:`, `   ${preview}${v.content.length > 80 ? '…' : ''}`];
           }
           if (v && 'latex' in v) {
-            return `   ${label}:\n   [equation] ${v.latex}`;
+            return [`   ${label}:`, `   [equation] ${v.latex}`];
           }
-          return `   ${label}: (empty)`;
+          return [`   ${label}: (empty)`];
         });
       return [
         `${n}. CREATE STRUCTURED NOTE`,

@@ -1,11 +1,19 @@
 import { createId, now } from '../../utils/ids';
 import {
+  DEFAULT_CHILD_NODE_STYLE,
+  DEFAULT_NODE_CONNECTOR_CONFIG,
+  DEFAULT_NODE_SECTION_MAX_DEPTH,
+  DEFAULT_NODE_SECTION_MAX_TOTAL_NODES,
+  DEFAULT_ROOT_NODE_STYLE,
   DEFAULT_STRUCTURE_FIELD_STYLE,
   DEFAULT_STRUCTURE_HEIGHT,
   DEFAULT_STRUCTURE_WIDTH,
   NOTE_STRUCTURE_VERSION,
   type NoteStructure,
   type NoteStructureField,
+  type NoteStructureNodeSection,
+  type NodeTemplate,
+  type StructureComponent,
   type StructureFieldContentType,
   type StructureFieldStyle,
 } from './types';
@@ -32,6 +40,7 @@ export function createStructureField(
   },
 ): NoteStructureField {
   return {
+    componentKind: 'field',
     id: partial.id ?? `field_${createId()}`,
     label: partial.label,
     instruction: partial.instruction,
@@ -43,6 +52,70 @@ export function createStructureField(
     relativeHeight: partial.relativeHeight ?? 100,
     zIndex: partial.zIndex ?? 0,
     style: { ...DEFAULT_STRUCTURE_FIELD_STYLE, ...(partial.style ?? {}) },
+  };
+}
+
+function createNodeTemplate(
+  partial: Partial<NodeTemplate> & { label: string; instruction: string },
+  defaults: { width: number; height: number; style: StructureFieldStyle },
+): NodeTemplate {
+  return {
+    label: partial.label,
+    instruction: partial.instruction,
+    width: partial.width ?? defaults.width,
+    height: partial.height ?? defaults.height,
+    style: { ...defaults.style, ...(partial.style ?? {}) },
+  };
+}
+
+export function createNodeSection(
+  partial: Partial<NoteStructureNodeSection> & {
+    label?: string;
+    instruction?: string;
+  } = {},
+): NoteStructureNodeSection {
+  return {
+    componentKind: 'node_section',
+    id: partial.id ?? `nodesection_${createId()}`,
+    label: partial.label ?? 'Knowledge Tree',
+    instruction:
+      partial.instruction ??
+      'Organise the subject into a hierarchy of major concepts and sub-concepts.',
+    required: partial.required ?? true,
+    relativeX: partial.relativeX ?? 24,
+    relativeY: partial.relativeY ?? 24,
+    relativeWidth: partial.relativeWidth ?? 480,
+    relativeHeight: partial.relativeHeight ?? 320,
+    zIndex: partial.zIndex ?? 0,
+    rootTemplate:
+      partial.rootTemplate ??
+      createNodeTemplate(
+        {
+          label: 'Root Topic',
+          instruction: 'Give the main subject or central concept in a short phrase.',
+        },
+        { width: 200, height: 64, style: DEFAULT_ROOT_NODE_STYLE },
+      ),
+    childTemplate:
+      partial.childTemplate ??
+      createNodeTemplate(
+        {
+          label: 'Concept Node',
+          instruction:
+            'Give a concise subtopic name and one short explanatory sentence.',
+        },
+        { width: 180, height: 72, style: DEFAULT_CHILD_NODE_STYLE },
+      ),
+    layoutMode: partial.layoutMode ?? 'tree_vertical',
+    horizontalSpacing: partial.horizontalSpacing ?? 28,
+    verticalSpacing: partial.verticalSpacing ?? 36,
+    maxDepth: partial.maxDepth ?? DEFAULT_NODE_SECTION_MAX_DEPTH,
+    maxTotalNodes: partial.maxTotalNodes ?? DEFAULT_NODE_SECTION_MAX_TOTAL_NODES,
+    maxChildrenPerNode: partial.maxChildrenPerNode,
+    connectorConfig: {
+      ...DEFAULT_NODE_CONNECTOR_CONFIG,
+      ...(partial.connectorConfig ?? {}),
+    },
   };
 }
 
@@ -111,6 +184,47 @@ export function createConceptSummaryStructure(): NoteStructure {
   return base;
 }
 
+/** Seed knowledge-tree structure for demos / tests. */
+export function createKnowledgeTreeStructure(): NoteStructure {
+  const base = createEmptyStructure('Knowledge Tree');
+  base.description = 'Hierarchical concept tree with automatic connectors.';
+  base.width = 720;
+  base.height = 560;
+  base.fields = [
+    createNodeSection({
+      id: 'knowledge_tree',
+      label: 'Knowledge Tree',
+      instruction: 'Break the subject into major ideas and their sub-concepts.',
+      relativeX: 24,
+      relativeY: 24,
+      relativeWidth: 672,
+      relativeHeight: 512,
+      layoutMode: 'tree_vertical',
+      maxDepth: 4,
+      maxTotalNodes: 30,
+      rootTemplate: createNodeTemplate(
+        {
+          label: 'Root Topic',
+          instruction: 'Main subject',
+          width: 220,
+          height: 70,
+        },
+        { width: 220, height: 70, style: DEFAULT_ROOT_NODE_STYLE },
+      ),
+      childTemplate: createNodeTemplate(
+        {
+          label: 'Concept Node',
+          instruction: 'Sub-concept with a concise explanation',
+          width: 190,
+          height: 80,
+        },
+        { width: 190, height: 80, style: DEFAULT_CHILD_NODE_STYLE },
+      ),
+    }),
+  ];
+  return base;
+}
+
 export function duplicateStructure(structure: NoteStructure): NoteStructure {
   const t = now();
   return {
@@ -119,12 +233,37 @@ export function duplicateStructure(structure: NoteStructure): NoteStructure {
     name: `${structure.name} copy`,
     createdAt: t,
     updatedAt: t,
-    fields: structure.fields.map((f) => ({
-      ...structuredClone(f),
-      // Keep field IDs stable within the template copy? Spec: structure ID is identity.
-      // Field IDs should remain the same within a duplicated template for instructions,
-      // but uniqueness within structure is enough — regenerate to avoid cross-template collision.
-      id: `field_${createId()}`,
-    })),
+    version: NOTE_STRUCTURE_VERSION,
+    fields: structure.fields.map((f) => {
+      if (f.componentKind === 'node_section') {
+        return {
+          ...structuredClone(f),
+          id: `nodesection_${createId()}`,
+        } satisfies NoteStructureNodeSection;
+      }
+      return {
+        ...structuredClone(f),
+        id: `field_${createId()}`,
+      } satisfies NoteStructureField;
+    }),
+  };
+}
+
+export function duplicateComponent(component: StructureComponent): StructureComponent {
+  if (component.componentKind === 'node_section') {
+    return {
+      ...structuredClone(component),
+      id: `nodesection_${createId()}`,
+      label: `${component.label} copy`,
+      relativeX: component.relativeX + 20,
+      relativeY: component.relativeY + 20,
+    };
+  }
+  return {
+    ...structuredClone(component),
+    id: `field_${createId()}`,
+    label: `${component.label} copy`,
+    relativeX: component.relativeX + 20,
+    relativeY: component.relativeY + 20,
   };
 }

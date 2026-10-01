@@ -45,9 +45,21 @@ export type StructuredEquationFieldPayload = {
   latex: string;
 };
 
+/** Recursive hierarchy node for NODE_SECTION fields (content only — no geometry/IDs). */
+export type StructuredHierarchyNode = {
+  content: string;
+  children: StructuredHierarchyNode[];
+};
+
+/** NODE_SECTION field payload for create_structured_note. */
+export type StructuredNodeSectionFieldPayload = {
+  root: StructuredHierarchyNode;
+};
+
 export type StructuredFieldPayload =
   | StructuredTextFieldPayload
   | StructuredEquationFieldPayload
+  | StructuredNodeSectionFieldPayload
   | null;
 
 export type CreateStructuredNoteOperation = {
@@ -131,6 +143,14 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
                       required: ['latex'],
                       properties: { latex: { type: 'string', minLength: 1 } },
                     },
+                    {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: ['root'],
+                      properties: {
+                        root: { $ref: '#/$defs/hierarchyNode' },
+                      },
+                    },
                     { type: 'null' },
                   ],
                 },
@@ -143,6 +163,18 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
     },
   },
   $defs: {
+    hierarchyNode: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['content', 'children'],
+      properties: {
+        content: { type: 'string', minLength: 1 },
+        children: {
+          type: 'array',
+          items: { $ref: '#/$defs/hierarchyNode' },
+        },
+      },
+    },
     placement: {
       oneOf: [
         {
@@ -212,17 +244,24 @@ create_structured_note (ONLY when a note structure is selected):
   "fields": {
     "<field_id>": { "content": "<text for TEXT fields>" }
       | { "latex": "<LaTeX for EQUATION fields>" }
+      | { "root": { "content": "...", "children": [ /* recursive */ ] } }
       | null
   },
   "placement": { "mode": "viewport_default" } | ...
 }
 
+NODE_SECTION fields:
+- Return hierarchy/content only under "root" (no x/y, no node IDs, no connectors).
+- Respect MAX DEPTH and MAX TOTAL NODES from the selected structure.
+- Leaf nodes use "children": [].
+- The application creates TextElements + ConnectorElements and owns all geometry.
+
 Rules:
-- Never invent element IDs or structure IDs.
+- Never invent element IDs, node IDs, connector IDs, or structure IDs.
 - Prefer relative_to_element over absolute for "next to / below / above / left / right".
 - Prefer viewport_default when the user gives no location.
-- When a structure is selected and the user asks for new structured content, use create_structured_note — do NOT recreate the layout with create_text/create_equation.
+- When a structure is selected and the user asks for new structured content, use create_structured_note — do NOT recreate the layout with create_text/create_equation/create_connector.
 - Omit or null optional structure fields when there is no meaningful content.
 - Do not emit delete/move/resize/style/shape/connector operations.
-- Do not invent structure geometry; the application owns layout.
+- Do not invent structure geometry; the application owns layout and tree connectors.
 `.trim();

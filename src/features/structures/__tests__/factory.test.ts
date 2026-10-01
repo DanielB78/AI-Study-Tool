@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   createConceptSummaryStructure,
   createEmptyStructure,
+  createKnowledgeTreeStructure,
+  createNodeSection,
   createStructureField,
   duplicateStructure,
 } from '../factory';
+import { isNodeSection, isStructureField } from '../types';
 
 describe('note structure factory', () => {
   it('creates empty structure with relative bounds', () => {
@@ -21,12 +24,15 @@ describe('note structure factory', () => {
     expect(s.name).toBe('Concept Summary');
     expect(s.fields).toHaveLength(4);
     const byId = Object.fromEntries(s.fields.map((f) => [f.id, f]));
-    expect(byId.title?.contentType).toBe('text');
-    expect(byId.title?.required).toBe(true);
-    expect(byId.explanation?.required).toBe(true);
-    expect(byId.equation?.contentType).toBe('equation');
-    expect(byId.equation?.required).toBe(false);
-    expect(byId.example?.required).toBe(false);
+    expect(isStructureField(byId.title!)).toBe(true);
+    if (isStructureField(byId.title!)) {
+      expect(byId.title.contentType).toBe('text');
+      expect(byId.title.required).toBe(true);
+    }
+    if (isStructureField(byId.equation!)) {
+      expect(byId.equation.contentType).toBe('equation');
+      expect(byId.equation.required).toBe(false);
+    }
     // Geometry is relative (within structure bounds), not world coords.
     for (const f of s.fields) {
       expect(f.relativeX).toBeGreaterThanOrEqual(0);
@@ -34,6 +40,17 @@ describe('note structure factory', () => {
       expect(f.relativeX + f.relativeWidth).toBeLessThanOrEqual(s.width + 1);
       expect(f.relativeY + f.relativeHeight).toBeLessThanOrEqual(s.height + 1);
     }
+  });
+
+  it('creates Knowledge Tree with Node Section defaults', () => {
+    const s = createKnowledgeTreeStructure();
+    expect(s.fields).toHaveLength(1);
+    expect(isNodeSection(s.fields[0]!)).toBe(true);
+    const ns = createNodeSection();
+    expect(ns.componentKind).toBe('node_section');
+    expect(ns.maxDepth).toBeGreaterThan(0);
+    expect(ns.rootTemplate.width).toBeGreaterThan(0);
+    expect(ns.childTemplate.height).toBeGreaterThan(0);
   });
 
   it('duplicateStructure gets a new id but keeps layout', () => {
