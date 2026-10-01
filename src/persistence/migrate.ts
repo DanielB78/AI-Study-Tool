@@ -4,6 +4,7 @@ import type {
   CanvasElement,
   ConnectorElement,
   DrawingElement,
+  EquationElement,
   ImageElement,
   ShapeElement,
   StyleDefaults,
@@ -140,6 +141,17 @@ function migrateImage(raw: Record<string, unknown>, z: number): ImageElement {
   };
 }
 
+function migrateEquation(raw: Record<string, unknown>, z: number): EquationElement {
+  return {
+    ...migrateBase(raw, z),
+    type: 'equation',
+    latex: str(raw.latex, ''),
+    fontSize: num(raw.fontSize, 28),
+    color: str(raw.color, DEFAULT_STYLE.textColor),
+    displayMode: raw.displayMode === 'inline' ? 'inline' : 'display',
+  };
+}
+
 function migrateConnector(raw: Record<string, unknown>, z: number): ConnectorElement {
   const pts = Array.isArray(raw.points) ? raw.points : [0, 0, 1, 1];
   const points: [number, number, number, number] = [
@@ -184,6 +196,8 @@ export function migrateElement(raw: unknown, index: number): CanvasElement | nul
   switch (raw.type) {
     case 'text':
       return migrateText(raw, index + 1);
+    case 'equation':
+      return migrateEquation(raw, index + 1);
     case 'shape':
       return migrateShape(raw, index + 1);
     case 'drawing':
@@ -247,6 +261,13 @@ export function styleFromElement(el: CanvasElement, style: StyleDefaults): Style
         textBackgroundColor: el.backgroundColor,
         textPadding: el.padding,
         textCornerRadius: el.cornerRadius,
+        opacity: el.opacity,
+      };
+    case 'equation':
+      return {
+        ...style,
+        textColor: el.color,
+        fontSize: el.fontSize,
         opacity: el.opacity,
       };
     case 'shape':

@@ -13,6 +13,12 @@ import {
 } from '../canvas/placement';
 import type { CanvasOperation } from './operations';
 import { resolvePlacement } from './placementService';
+import type { NoteStructure } from '../../structures/types';
+import {
+  instantiateNoteStructure,
+  structureBoundsSize,
+} from '../../structures/instantiation';
+import type { StructureFieldValue } from '../../structures/fieldValues';
 
 export interface AgentExecutorTarget {
   getCamera: () => Camera;
@@ -29,12 +35,15 @@ export interface AgentExecutorTarget {
   getViewportSize?: () => ViewportSize;
   /** Override RAG hook for tests. */
   indexText?: (boardId: string, element: TextElement) => void;
+  /** Resolve a saved note structure by id (required for create_structured_note). */
+  getStructureById?: (id: string) => NoteStructure | null;
 }
 
 export interface ExecuteAgentOpsResult {
   createdIds: string[];
   updatedIds: string[];
   affectedIds: string[];
+  structureInstanceIds: string[];
 }
 
 /**
@@ -46,7 +55,12 @@ export function executeCanvasOperations(
   target: AgentExecutorTarget,
 ): ExecuteAgentOpsResult {
   if (operations.length === 0) {
-    return { createdIds: [], updatedIds: [], affectedIds: [] };
+    return {
+      createdIds: [],
+      updatedIds: [],
+      affectedIds: [],
+      structureInstanceIds: [],
+    };
   }
 
   const style = target.getStyle();
@@ -56,13 +70,13 @@ export function executeCanvasOperations(
 
   const createdIds: string[] = [];
   const updatedIds: string[] = [];
+  const structureInstanceIds: string[] = [];
 
   target.beginInteraction();
   try {
     for (const op of operations) {
       if (op.type === 'create_text') {
         const camera = target.getCamera();
-        // Include elements created earlier in this same batch for collision.
         const elements = target.getElements();
         const width = AI_TEXT_DEFAULT_WIDTH;
         const height = estimateTextHeight(op.text, width, {
@@ -111,15 +125,54 @@ export function executeCanvasOperations(
           };
         });
         updatedIds.push(id);
+      } else if (op.type === 'create_structured_note') {
+        const structure = target.getStructureById?.(op.structure_id) ?? null;
+        if (!structure) {
+          throw new Error(`Unknown structure "${op.structure_id}" at execution time.`);
+        }
+        const bounds = structureBoundsSize(structure);
+        const camera = target.getCamera();
+        const elements = target.getElements();
+        const placed = resolvePlacement({
+          placement: op.placement,
+          width: bounds.width,
+          height: bounds.height,
+          camera,
+          elements,
+          viewport,
+        });
+
+        const fieldValues = new Map<string, StructureFieldValue>();
+        for (const field of structure.fields) {
+          const payload = op.fields[field.id];
+          if (payload == null) continue;
+          if (field.contentType === 'text' && 'content' in payload) {
+            fieldValues.set(field.id, { kind: 'text', content: payload.content });
+          } else if (field.contentType === 'equation' && 'latex' in payload) {
+            fieldValues.set(field.id, { kind: 'equation', latex: payload.latex });
+          }
+        }
+
+        const instantiated = instantiateNoteStructure({
+          structure,
+          fieldValues,
+          origin: { x: placed.x, y: placed.y },
+          style,
+          nextZIndex: () => target.nextZIndex(),
+        });
+        structureInstanceIds.push(instantiated.structureInstanceId);
+        for (const el of instantiated.elements) {
+          target.addElement(el, false);
+          createdIds.push(el.id);
+        }
       }
     }
   } finally {
     target.endInteraction();
   }
 
-  // Content updates: re-index (addElement already indexes creates).
   const latest = target.getElements();
-  for (const id of updatedIds) {
+  for (const id of [...createdIds, ...updatedIds]) {
     const el = latest.find((e) => e.id === id);
     if (el?.type === 'text') {
       indexText(boardId, el);
@@ -132,5 +185,5 @@ export function executeCanvasOperations(
   }
   target.persist?.();
 
-  return { createdIds, updatedIds, affectedIds };
+  return { createdIds, updatedIds, affectedIds, structureInstanceIds };
 }

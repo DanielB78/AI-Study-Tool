@@ -2,9 +2,11 @@ export type {
   CanvasOperation,
   CanvasAgentResponse,
   CreateTextOperation,
+  CreateStructuredNoteOperation,
   UpdateTextOperation,
   Placement,
   PlacementRelation,
+  StructuredFieldPayload,
 } from './operations';
 export {
   CANVAS_AGENT_JSON_SCHEMA,
@@ -16,6 +18,8 @@ export {
   describeOperationPlan,
   CanvasAgentParseError,
   stripCodeFences,
+  type ParseContext,
+  type DescribePlanOptions,
 } from './parser';
 export { executeCanvasOperations, type ExecuteAgentOpsResult } from './executor';
 export { executeAgentOperationsLive, createLiveAgentExecutorTarget } from './liveExecutor';

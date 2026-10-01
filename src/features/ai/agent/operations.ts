@@ -35,7 +35,33 @@ export type UpdateTextOperation = {
   text: string;
 };
 
-export type CanvasOperation = CreateTextOperation | UpdateTextOperation;
+/** TEXT field payload for create_structured_note. */
+export type StructuredTextFieldPayload = {
+  content: string;
+};
+
+/** EQUATION field payload for create_structured_note. */
+export type StructuredEquationFieldPayload = {
+  latex: string;
+};
+
+export type StructuredFieldPayload =
+  | StructuredTextFieldPayload
+  | StructuredEquationFieldPayload
+  | null;
+
+export type CreateStructuredNoteOperation = {
+  type: 'create_structured_note';
+  structure_id: string;
+  /** field_id → payload; optional fields may be omitted or null */
+  fields: Record<string, StructuredFieldPayload>;
+  placement: Placement;
+};
+
+export type CanvasOperation =
+  | CreateTextOperation
+  | UpdateTextOperation
+  | CreateStructuredNoteOperation;
 
 export type CanvasAgentResponse = {
   operations: CanvasOperation[];
@@ -69,41 +95,7 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
             properties: {
               type: { const: 'create_text' },
               text: { type: 'string', minLength: 1 },
-              placement: {
-                oneOf: [
-                  {
-                    type: 'object',
-                    additionalProperties: false,
-                    required: ['mode'],
-                    properties: {
-                      mode: { const: 'viewport_default' },
-                    },
-                  },
-                  {
-                    type: 'object',
-                    additionalProperties: false,
-                    required: ['mode', 'anchor_element_id', 'relation'],
-                    properties: {
-                      mode: { const: 'relative_to_element' },
-                      anchor_element_id: { type: 'string', minLength: 1 },
-                      relation: {
-                        type: 'string',
-                        enum: ['left_of', 'right_of', 'above', 'below', 'near'],
-                      },
-                    },
-                  },
-                  {
-                    type: 'object',
-                    additionalProperties: false,
-                    required: ['mode', 'x', 'y'],
-                    properties: {
-                      mode: { const: 'absolute' },
-                      x: { type: 'number' },
-                      y: { type: 'number' },
-                    },
-                  },
-                ],
-              },
+              placement: { $ref: '#/$defs/placement' },
             },
           },
           {
@@ -116,8 +108,73 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               text: { type: 'string', minLength: 1 },
             },
           },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'structure_id', 'fields', 'placement'],
+            properties: {
+              type: { const: 'create_structured_note' },
+              structure_id: { type: 'string', minLength: 1 },
+              fields: {
+                type: 'object',
+                additionalProperties: {
+                  anyOf: [
+                    {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: ['content'],
+                      properties: { content: { type: 'string', minLength: 1 } },
+                    },
+                    {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: ['latex'],
+                      properties: { latex: { type: 'string', minLength: 1 } },
+                    },
+                    { type: 'null' },
+                  ],
+                },
+              },
+              placement: { $ref: '#/$defs/placement' },
+            },
+          },
         ],
       },
+    },
+  },
+  $defs: {
+    placement: {
+      oneOf: [
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['mode'],
+          properties: { mode: { const: 'viewport_default' } },
+        },
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['mode', 'anchor_element_id', 'relation'],
+          properties: {
+            mode: { const: 'relative_to_element' },
+            anchor_element_id: { type: 'string', minLength: 1 },
+            relation: {
+              type: 'string',
+              enum: ['left_of', 'right_of', 'above', 'below', 'near'],
+            },
+          },
+        },
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['mode', 'x', 'y'],
+          properties: {
+            mode: { const: 'absolute' },
+            x: { type: 'number' },
+            y: { type: 'number' },
+          },
+        },
+      ],
     },
   },
 } as const;
@@ -148,9 +205,24 @@ update_text:
   "text": "<complete replacement text>"
 }
 
+create_structured_note (ONLY when a note structure is selected):
+{
+  "type": "create_structured_note",
+  "structure_id": "<exact selected structure id>",
+  "fields": {
+    "<field_id>": { "content": "<text for TEXT fields>" }
+      | { "latex": "<LaTeX for EQUATION fields>" }
+      | null
+  },
+  "placement": { "mode": "viewport_default" } | ...
+}
+
 Rules:
-- Never invent element IDs.
+- Never invent element IDs or structure IDs.
 - Prefer relative_to_element over absolute for "next to / below / above / left / right".
 - Prefer viewport_default when the user gives no location.
+- When a structure is selected and the user asks for new structured content, use create_structured_note — do NOT recreate the layout with create_text/create_equation.
+- Omit or null optional structure fields when there is no meaningful content.
 - Do not emit delete/move/resize/style/shape/connector operations.
+- Do not invent structure geometry; the application owns layout.
 `.trim();

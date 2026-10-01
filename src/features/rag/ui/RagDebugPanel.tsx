@@ -1,6 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useCanvasStore } from '../../../store/canvasStore';
 import { buildLlmPrompt } from '../../ai/llm';
+import { StructureSelector } from '../../structures/ui/StructureSelector';
+import { useStructureStore } from '../../structures/structureStore';
+import {
+  formatNoStructureSelected,
+  formatNoteStructureForPrompt,
+} from '../../structures/formatForPrompt';
 import {
   RAG_MAX_CONTEXT_CHARACTERS,
   RAG_MAX_CONTEXT_ELEMENTS,
@@ -15,6 +21,7 @@ import type { SemanticTreeNode } from '../semanticExpansion';
 
 type RagDebugPage =
   | 'selected'
+  | 'structure'
   | 'intent'
   | 'matches'
   | 'spatial'
@@ -23,6 +30,7 @@ type RagDebugPage =
 
 const RAG_DEBUG_PAGES: { id: RagDebugPage; label: string }[] = [
   { id: 'selected', label: 'Selected' },
+  { id: 'structure', label: 'Structure' },
   { id: 'intent', label: 'Intent' },
   { id: 'matches', label: 'Matches' },
   { id: 'spatial', label: 'Spatial' },
@@ -128,6 +136,7 @@ export function RagDebugPanel() {
   const candidates = useRagDebugStore((s) => s.candidates);
   const selectedAnchorIds = useRagDebugStore((s) => s.selectedAnchorIds);
   const explicitSelectionIds = useRagDebugStore((s) => s.explicitSelectionIds);
+  const selectedStructureId = useRagDebugStore((s) => s.selectedStructureId);
   const spatialExpansionEnabled = useRagDebugStore((s) => s.spatialExpansionEnabled);
   const radius = useRagDebugStore((s) => s.radius);
   const semanticExpansionEnabled = useRagDebugStore((s) => s.semanticExpansionEnabled);
@@ -183,6 +192,9 @@ export function RagDebugPanel() {
   const closePanel = useRagDebugStore((s) => s.closePanel);
   const togglePanel = useRagDebugStore((s) => s.togglePanel);
 
+  const liveStructureId = useStructureStore((s) => s.selectedStructureIdForAi);
+  const structures = useStructureStore((s) => s.structures);
+
   const { context, semanticTrees } = useMemo(
     () =>
       computeDebugContext(
@@ -191,6 +203,7 @@ export function RagDebugPanel() {
           candidates,
           selectedAnchorIds,
           explicitSelectionIds,
+          selectedStructureId,
           spatialExpansionEnabled,
           radius,
           semanticExpansionEnabled,
@@ -206,6 +219,7 @@ export function RagDebugPanel() {
       candidates,
       selectedAnchorIds,
       explicitSelectionIds,
+      selectedStructureId,
       spatialExpansionEnabled,
       radius,
       semanticExpansionEnabled,
@@ -217,15 +231,19 @@ export function RagDebugPanel() {
     ],
   );
 
+  const snapshottedStructure = useMemo(() => {
+    if (!selectedStructureId) return null;
+    return structures.find((s) => s.id === selectedStructureId) ?? null;
+  }, [selectedStructureId, structures]);
+
   const llmPrompt = useMemo(() => {
-    if (
-      !prompt.trim() ||
-      (selectedAnchorIds.length === 0 && explicitSelectionIds.length === 0)
-    ) {
-      return null;
-    }
-    return buildLlmPrompt({ userPrompt: prompt, ragContext: context });
-  }, [prompt, context, selectedAnchorIds.length, explicitSelectionIds.length]);
+    if (!prompt.trim()) return null;
+    return buildLlmPrompt({
+      userPrompt: prompt,
+      ragContext: context,
+      selectedStructure: snapshottedStructure,
+    });
+  }, [prompt, context, snapshottedStructure]);
 
   const selectedSet = useMemo(() => new Set(selectedAnchorIds), [selectedAnchorIds]);
   const includedSet = useMemo(() => new Set(semanticIncludedIds), [semanticIncludedIds]);
@@ -235,9 +253,7 @@ export function RagDebugPanel() {
   );
   const busy = retrieving || sending || expanding;
   const manual = llmExecutionMode === 'manual';
-  const canBuildPrompt =
-    prompt.trim().length > 0 &&
-    (selectedAnchorIds.length > 0 || explicitSelectionIds.length > 0);
+  const canBuildPrompt = prompt.trim().length > 0;
   const canSendAutomatic = canBuildPrompt && !busy && !manual;
 
   return (
@@ -293,6 +309,12 @@ export function RagDebugPanel() {
               </p>
             )}
           </section>
+
+          <StructureSelector
+            id="rag-debug-structure"
+            className="structure-selector rag-debug-structure"
+            disabled={busy}
+          />
 
           <label className="rag-debug-label" htmlFor="rag-debug-prompt">
             User prompt
@@ -391,6 +413,37 @@ export function RagDebugPanel() {
                       </li>
                     ))}
                   </ul>
+                )}
+              </section>
+            )}
+
+            {page === 'structure' && (
+              <section className="rag-debug-section">
+                <div className="rag-debug-section-title">
+                  SELECTED NOTE STRUCTURE
+                </div>
+                <p className="rag-debug-meta">
+                  Output format for this request — separate from canvas / interaction /
+                  semantic / spatial knowledge context. Snapshotted at Retrieve / Copy /
+                  Preview. Live dropdown:{' '}
+                  <strong>
+                    {liveStructureId
+                      ? structures.find((s) => s.id === liveStructureId)?.name ??
+                        liveStructureId
+                      : 'No Structure'}
+                  </strong>
+                </p>
+                {!selectedStructureId ? (
+                  <pre className="rag-debug-plan">{formatNoStructureSelected()}</pre>
+                ) : snapshottedStructure ? (
+                  <pre className="rag-debug-plan">
+                    {formatNoteStructureForPrompt(snapshottedStructure)}
+                  </pre>
+                ) : (
+                  <p className="rag-debug-empty">
+                    Structure id <code>{selectedStructureId}</code> was snapshotted but
+                    is no longer in the library (deleted after snapshot).
+                  </p>
                 )}
               </section>
             )}

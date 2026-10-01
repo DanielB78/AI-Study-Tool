@@ -20,11 +20,14 @@ export type ToolType =
   | 'select'
   | 'pan'
   | 'text'
+  | 'equation'
   | 'pen'
   | 'line'
   | 'arrow'
   | 'image'
   | ShapeType;
+
+export type EquationDisplayMode = 'display' | 'inline';
 
 export type ConnectorType = 'line' | 'arrow';
 export type ArrowHeads = 'none' | 'end' | 'both';
@@ -71,6 +74,16 @@ export interface TextElement extends BaseElement {
   backgroundColor: string | null;
   padding: number;
   cornerRadius: number;
+}
+
+/** Standalone mathematical expression — LaTeX is the source of truth. */
+export interface EquationElement extends BaseElement {
+  type: 'equation';
+  /** Canonical LaTeX source (no $ / $$ fences). */
+  latex: string;
+  fontSize: number;
+  color: string;
+  displayMode: EquationDisplayMode;
 }
 
 export interface ShapeElement extends BaseElement {
@@ -125,6 +138,7 @@ export interface ConnectorElement extends BaseElement {
 
 export type CanvasElement =
   | TextElement
+  | EquationElement
   | ShapeElement
   | DrawingElement
   | ImageElement

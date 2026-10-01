@@ -8,6 +8,7 @@ import {
   CanvasAgentParseError,
   describeOperationPlan,
   parseCanvasAgentResponse,
+  type DescribePlanOptions,
   type ParseContext,
 } from '../agent/parser';
 import {
@@ -27,6 +28,17 @@ export interface ParsedAgentPlan {
   plan: string[];
 }
 
+function planOptionsFromContext(ctx: ParseContext): DescribePlanOptions | undefined {
+  const structure = ctx.selectedStructure;
+  if (!structure) return undefined;
+  return {
+    structureNames: new Map([[structure.id, structure.name]]),
+    structureFieldLabels: new Map([
+      [structure.id, new Map(structure.fields.map((f) => [f.id, f.label]))],
+    ]),
+  };
+}
+
 /**
  * Parse + validate without applying. Use for AI Plan preview.
  */
@@ -37,7 +49,7 @@ export function parseAgentResponsePlan(
   const response = parseCanvasAgentResponse(raw, ctx);
   return {
     response,
-    plan: describeOperationPlan(response.operations),
+    plan: describeOperationPlan(response.operations, planOptionsFromContext(ctx)),
   };
 }
 
@@ -58,7 +70,7 @@ export function handleAgentResponse(
   ctx: ParseContext,
 ): HandleAgentResponseResult {
   const response = parseCanvasAgentResponse(raw, ctx);
-  const plan = describeOperationPlan(response.operations);
+  const plan = describeOperationPlan(response.operations, planOptionsFromContext(ctx));
   const execution = applyAgentOperations(response.operations);
   return { kind: 'operations', response, plan, execution };
 }

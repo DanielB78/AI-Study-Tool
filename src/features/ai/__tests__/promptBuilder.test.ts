@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildRagContext, type SemanticAnchorInput } from '../../rag/contextBuilder';
 import type { SpatialHit } from '../../rag/spatialContext';
+import { createConceptSummaryStructure } from '../../structures/factory';
 import { buildLlmPrompt } from '../llm/promptBuilder';
 import {
   CANVAS_EDITOR_RESPONSE_INSTRUCTIONS,
@@ -108,5 +109,26 @@ describe('buildLlmPrompt', () => {
     expect(built.ragContextSection).not.toContain('USER REQUEST');
     // Canvas content must not be folded into trusted system instructions.
     expect(built.systemInstructions).not.toContain('FULL TEXT.');
+  });
+
+  it('includes No Structure section by default (separate from canvas context)', () => {
+    expect(built.noteStructureSection).toContain('No Structure');
+    expect(built.finalLlmPrompt).toContain('SELECTED NOTE STRUCTURE');
+    expect(built.finalLlmPrompt).toContain('Do not emit create_structured_note');
+    expect(built.ragContextSection).not.toContain('SELECTED NOTE STRUCTURE');
+  });
+
+  it('includes selected structure schema separately from RAG', () => {
+    const structure = createConceptSummaryStructure();
+    const withStructure = buildLlmPrompt({
+      userPrompt: "Explain Gauss's law",
+      ragContext: context,
+      selectedStructure: structure,
+    });
+    expect(withStructure.noteStructureSection).toContain(structure.id);
+    expect(withStructure.noteStructureSection).toContain('Concept Summary');
+    expect(withStructure.noteStructureSection).toContain('FIELD ID: equation');
+    expect(withStructure.finalLlmPrompt).toContain('create_structured_note');
+    expect(withStructure.ragContextSection).not.toContain(structure.id);
   });
 });

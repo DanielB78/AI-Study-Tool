@@ -9,12 +9,16 @@ import {
   type AbsolutePlacement,
   type CanvasAgentResponse,
   type CanvasOperation,
+  type CreateStructuredNoteOperation,
   type CreateTextOperation,
   type Placement,
   type PlacementRelation,
   type RelativePlacement,
+  type StructuredFieldPayload,
   type UpdateTextOperation,
 } from './operations';
+import type { NoteStructure } from '../../structures/types';
+import { validateLatex } from '../../equations/latex';
 
 export type ParseErrorCode =
   | 'empty'
@@ -28,7 +32,13 @@ export type ParseErrorCode =
   | 'missing_anchor'
   | 'anchor_not_in_context'
   | 'invalid_relation'
-  | 'invalid_coordinates';
+  | 'invalid_coordinates'
+  | 'structure_not_selected'
+  | 'structure_mismatch'
+  | 'unknown_structure_field'
+  | 'missing_required_field'
+  | 'invalid_field_payload'
+  | 'invalid_latex';
 
 export class CanvasAgentParseError extends Error {
   readonly code: ParseErrorCode;
@@ -47,6 +57,11 @@ export interface ParseContext {
   allowedElementIds: ReadonlySet<string>;
   /** Optional: map id → type for TextElement checks. */
   elementTypes?: ReadonlyMap<string, string>;
+  /**
+   * Structure selected for this request (snapshot).
+   * null/undefined = No Structure mode (create_structured_note forbidden).
+   */
+  selectedStructure?: NoteStructure | null;
 }
 
 /** Strip optional ```json fences; still require JSON object body. */
@@ -108,6 +123,47 @@ function parsePlacement(raw: unknown): Placement {
   throw new CanvasAgentParseError('schema', `Unknown placement mode: ${String(raw.mode)}`);
 }
 
+function parseFieldPayload(raw: unknown, fieldId: string): StructuredFieldPayload {
+  if (raw === null) return null;
+  if (!isRecord(raw)) {
+    throw new CanvasAgentParseError(
+      'invalid_field_payload',
+      `fields.${fieldId} must be an object or null.`,
+    );
+  }
+  if ('content' in raw && !('latex' in raw)) {
+    return { content: requireNonEmptyString(raw.content, `fields.${fieldId}.content`) };
+  }
+  if ('latex' in raw && !('content' in raw)) {
+    return { latex: requireNonEmptyString(raw.latex, `fields.${fieldId}.latex`) };
+  }
+  throw new CanvasAgentParseError(
+    'invalid_field_payload',
+    `fields.${fieldId} must be {content} for text or {latex} for equation.`,
+  );
+}
+
+function parseStructuredNote(raw: Record<string, unknown>): CreateStructuredNoteOperation {
+  const structureId = raw.structure_id;
+  if (typeof structureId !== 'string' || !structureId.trim()) {
+    throw new CanvasAgentParseError('schema', 'create_structured_note needs structure_id.');
+  }
+  if (!isRecord(raw.fields)) {
+    throw new CanvasAgentParseError('schema', 'create_structured_note needs fields object.');
+  }
+  const fields: Record<string, StructuredFieldPayload> = {};
+  for (const [fieldId, payload] of Object.entries(raw.fields)) {
+    fields[fieldId] = parseFieldPayload(payload, fieldId);
+  }
+  const placement = parsePlacement(raw.placement);
+  return {
+    type: 'create_structured_note',
+    structure_id: structureId.trim(),
+    fields,
+    placement,
+  };
+}
+
 function parseOperation(raw: unknown): CanvasOperation {
   if (!isRecord(raw) || typeof raw.type !== 'string') {
     throw new CanvasAgentParseError('schema', 'Each operation needs a type.');
@@ -129,11 +185,95 @@ function parseOperation(raw: unknown): CanvasOperation {
       text,
     } satisfies UpdateTextOperation;
   }
+  if (raw.type === 'create_structured_note') {
+    return parseStructuredNote(raw);
+  }
   throw new CanvasAgentParseError(
     'unknown_operation',
-    `Unsupported operation type "${raw.type}". Only create_text and update_text are allowed.`,
+    `Unsupported operation type "${raw.type}".`,
     String(raw.type),
   );
+}
+
+function validateStructuredNote(
+  op: CreateStructuredNoteOperation,
+  ctx: ParseContext,
+): void {
+  const structure = ctx.selectedStructure;
+  if (!structure) {
+    throw new CanvasAgentParseError(
+      'structure_not_selected',
+      'create_structured_note is only allowed when a note structure is selected.',
+    );
+  }
+  if (op.structure_id !== structure.id) {
+    throw new CanvasAgentParseError(
+      'structure_mismatch',
+      `structure_id "${op.structure_id}" does not match the selected structure "${structure.id}".`,
+      op.structure_id,
+    );
+  }
+
+  const fieldById = new Map(structure.fields.map((f) => [f.id, f]));
+  for (const fieldId of Object.keys(op.fields)) {
+    if (!fieldById.has(fieldId)) {
+      throw new CanvasAgentParseError(
+        'unknown_structure_field',
+        `Unknown structure field "${fieldId}".`,
+        fieldId,
+      );
+    }
+  }
+
+  for (const field of structure.fields) {
+    const payload = op.fields[field.id];
+    const missing = payload === undefined || payload === null;
+    if (field.required && missing) {
+      throw new CanvasAgentParseError(
+        'missing_required_field',
+        `Required field "${field.id}" (${field.label}) is missing.`,
+        field.id,
+      );
+    }
+    if (missing) continue;
+
+    if (field.contentType === 'text') {
+      if (!('content' in payload) || typeof payload.content !== 'string') {
+        throw new CanvasAgentParseError(
+          'invalid_field_payload',
+          `Field "${field.id}" is TEXT and requires { "content": "..." }.`,
+          field.id,
+        );
+      }
+    } else if (field.contentType === 'equation') {
+      if (!('latex' in payload) || typeof payload.latex !== 'string') {
+        throw new CanvasAgentParseError(
+          'invalid_field_payload',
+          `Field "${field.id}" is EQUATION and requires { "latex": "..." }.`,
+          field.id,
+        );
+      }
+      const check = validateLatex(payload.latex, true);
+      if (!check.ok) {
+        throw new CanvasAgentParseError(
+          'invalid_latex',
+          `Invalid LaTeX for field "${field.id}": ${check.error}`,
+          field.id,
+        );
+      }
+    }
+  }
+
+  if (op.placement.mode === 'relative_to_element') {
+    const id = op.placement.anchor_element_id;
+    if (!ctx.allowedElementIds.has(id)) {
+      throw new CanvasAgentParseError(
+        'anchor_not_in_context',
+        `anchor_element_id "${id}" was not in the supplied canvas context.`,
+        id,
+      );
+    }
+  }
 }
 
 function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
@@ -163,6 +303,9 @@ function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
         id,
       );
     }
+  }
+  if (op.type === 'create_structured_note') {
+    validateStructuredNote(op, ctx);
   }
 }
 
@@ -210,13 +353,53 @@ export function parseCanvasAgentResponse(
   return { operations };
 }
 
+export interface DescribePlanOptions {
+  /** structure_id → human name for plan preview */
+  structureNames?: ReadonlyMap<string, string>;
+  /** structure_id → fieldId → label */
+  structureFieldLabels?: ReadonlyMap<string, ReadonlyMap<string, string>>;
+}
+
 /** Human-readable plan lines for the debug UI. */
-export function describeOperationPlan(ops: readonly CanvasOperation[]): string[] {
+export function describeOperationPlan(
+  ops: readonly CanvasOperation[],
+  options?: DescribePlanOptions,
+): string[] {
   return ops.map((op, i) => {
     const n = i + 1;
     if (op.type === 'update_text') {
       const preview = op.text.replace(/\s+/g, ' ').slice(0, 80);
       return `${n}. UPDATE TEXT\n   Target: ${op.target_element_id}\n   Text: ${preview}${op.text.length > 80 ? '…' : ''}`;
+    }
+    if (op.type === 'create_structured_note') {
+      const p = op.placement;
+      let placementLine = '';
+      if (p.mode === 'viewport_default') placementLine = 'Viewport Default';
+      else if (p.mode === 'absolute') placementLine = `absolute (${p.x}, ${p.y})`;
+      else placementLine = `${p.relation} ${p.anchor_element_id}`;
+      const structureName =
+        options?.structureNames?.get(op.structure_id) ?? op.structure_id;
+      const labels = options?.structureFieldLabels?.get(op.structure_id);
+      const fieldLines = Object.entries(op.fields)
+        .filter(([, v]) => v != null)
+        .map(([id, v]) => {
+          const label = labels?.get(id) ?? id;
+          if (v && 'content' in v) {
+            const preview = v.content.replace(/\s+/g, ' ').slice(0, 80);
+            return `   ${label}:\n   ${preview}${v.content.length > 80 ? '…' : ''}`;
+          }
+          if (v && 'latex' in v) {
+            return `   ${label}:\n   [equation] ${v.latex}`;
+          }
+          return `   ${label}: (empty)`;
+        });
+      return [
+        `${n}. CREATE STRUCTURED NOTE`,
+        `   Structure: ${structureName}`,
+        `   Placement: ${placementLine}`,
+        '   FIELDS',
+        ...fieldLines,
+      ].join('\n');
     }
     const p = op.placement;
     let placementLine = '';
