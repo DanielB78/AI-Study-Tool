@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createConceptSummaryStructure } from '../factory';
+import {
+  createConceptSummaryStructure,
+  createKnowledgeTreeStructure,
+} from '../factory';
 import {
   formatNoStructureSelected,
   formatNoteStructureForPrompt,
@@ -19,6 +22,20 @@ describe('formatNoteStructureForPrompt', () => {
     expect(text).toContain('Give a short title naming the concept.');
     expect(text).toContain('GEOMETRY (application-owned — do not change)');
     expect(text).toContain('NOT canvas knowledge');
+  });
+
+  it('includes NODE SECTION hierarchy rules without asking for coordinates', () => {
+    const s = createKnowledgeTreeStructure();
+    const text = formatNoteStructureForPrompt(s);
+    expect(text).toContain('NODE SECTION');
+    expect(text).toContain('TYPE: node_section');
+    expect(text).toContain('TREE_VERTICAL');
+    expect(text).toContain('MAX DEPTH:');
+    expect(text).toContain('MAX TOTAL NODES:');
+    expect(text).toContain('ROOT NODE INSTRUCTION:');
+    expect(text).toContain('CHILD NODE INSTRUCTION:');
+    expect(text).toContain('Do NOT return x/y coordinates');
+    expect(text).not.toMatch(/emit create_connector for tree/);
   });
 
   it('formats No Structure mode', () => {

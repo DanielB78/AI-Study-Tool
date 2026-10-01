@@ -14,9 +14,10 @@ import {
 import type { CanvasOperation } from './operations';
 import { resolvePlacement } from './placementService';
 import type { NoteStructure } from '../../structures/types';
+import { isNodeSection, isStructureField } from '../../structures/types';
 import {
+  computeStructuredNoteBounds,
   instantiateNoteStructure,
-  structureBoundsSize,
 } from '../../structures/instantiation';
 import type { StructureFieldValue } from '../../structures/fieldValues';
 
@@ -130,7 +131,30 @@ export function executeCanvasOperations(
         if (!structure) {
           throw new Error(`Unknown structure "${op.structure_id}" at execution time.`);
         }
-        const bounds = structureBoundsSize(structure);
+
+        const fieldValues = new Map<string, StructureFieldValue>();
+        for (const field of structure.fields) {
+          const payload = op.fields[field.id];
+          if (payload == null) continue;
+          if (isNodeSection(field) && 'root' in payload && payload.root) {
+            fieldValues.set(field.id, { kind: 'node_section', root: payload.root });
+          } else if (
+            isStructureField(field) &&
+            field.contentType === 'text' &&
+            'content' in payload
+          ) {
+            fieldValues.set(field.id, { kind: 'text', content: payload.content });
+          } else if (
+            isStructureField(field) &&
+            field.contentType === 'equation' &&
+            'latex' in payload
+          ) {
+            fieldValues.set(field.id, { kind: 'equation', latex: payload.latex });
+          }
+        }
+
+        // Place using effective bounds after Node Section layout expansion.
+        const bounds = computeStructuredNoteBounds(structure, fieldValues);
         const camera = target.getCamera();
         const elements = target.getElements();
         const placed = resolvePlacement({
@@ -141,17 +165,6 @@ export function executeCanvasOperations(
           elements,
           viewport,
         });
-
-        const fieldValues = new Map<string, StructureFieldValue>();
-        for (const field of structure.fields) {
-          const payload = op.fields[field.id];
-          if (payload == null) continue;
-          if (field.contentType === 'text' && 'content' in payload) {
-            fieldValues.set(field.id, { kind: 'text', content: payload.content });
-          } else if (field.contentType === 'equation' && 'latex' in payload) {
-            fieldValues.set(field.id, { kind: 'equation', latex: payload.latex });
-          }
-        }
 
         const instantiated = instantiateNoteStructure({
           structure,

@@ -9,7 +9,7 @@ export function StructureEditor() {
   const selectedFieldId = useStructureStore((s) => s.selectedFieldId);
   const setDraftName = useStructureStore((s) => s.setDraftName);
   const setDraftDescription = useStructureStore((s) => s.setDraftDescription);
-  const addField = useStructureStore((s) => s.addField);
+  const addComponent = useStructureStore((s) => s.addComponent);
   const updateField = useStructureStore((s) => s.updateField);
   const deleteField = useStructureStore((s) => s.deleteField);
   const duplicateField = useStructureStore((s) => s.duplicateField);
@@ -46,9 +46,29 @@ export function StructureEditor() {
           </label>
         </div>
         <div className="structure-editor-header-actions">
-          <button type="button" className="structure-btn" onClick={addField}>
-            + Field
-          </button>
+          <div className="structure-add-menu" role="group" aria-label="Add component">
+            <button
+              type="button"
+              className="structure-btn"
+              onClick={() => addComponent('text')}
+            >
+              + Text
+            </button>
+            <button
+              type="button"
+              className="structure-btn"
+              onClick={() => addComponent('equation')}
+            >
+              + Equation
+            </button>
+            <button
+              type="button"
+              className="structure-btn"
+              onClick={() => addComponent('node_section')}
+            >
+              + Node Section
+            </button>
+          </div>
           <button
             type="button"
             className="structure-btn primary"

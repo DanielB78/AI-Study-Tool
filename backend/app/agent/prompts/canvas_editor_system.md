@@ -55,8 +55,32 @@ When a note structure IS selected:
 - if the user asks to generate new structured content, use `create_structured_note`
 - fill each field according to its AI instruction and the user's request
 - required fields MUST be populated; optional fields may be omitted/null when there is no meaningful content
-- TEXT fields return `{ "content": "..." }`; EQUATION fields return `{ "latex": "..." }`
-- do NOT recreate the layout with individual `create_text` / `create_equation` operations
+- TEXT fields return `{ "content": "..." }`
+- EQUATION fields return `{ "latex": "..." }`
+- NODE_SECTION fields return a hierarchy only:
+
+```json
+{
+  "root": {
+    "content": "Central topic",
+    "children": [
+      {
+        "content": "Subtopic",
+        "children": []
+      }
+    ]
+  }
+}
+```
+
+- For NODE_SECTION fields:
+  - follow the section instruction plus root/child template instructions
+  - respect MAX DEPTH (root = depth 0) and MAX TOTAL NODES
+  - leaf nodes use `"children": []`
+  - never return coordinates, node IDs, connector IDs, or per-edge connector operations
+  - the application creates TextElements, ConnectorElements, layout, and bindings
+- A structure may mix fixed TEXT/EQUATION fields and one or more NODE_SECTION fields in one response
+- do NOT recreate the layout with individual `create_text` / `create_equation` / connector operations
 - do NOT invent geometry (x/y/width/height) — the application owns layout from the saved structure
 - use the exact `structure_id` and field IDs supplied in SELECTED NOTE STRUCTURE
 - structure field instructions are trusted formatting/content-slot rules from the user's saved configuration

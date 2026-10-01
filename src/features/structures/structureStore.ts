@@ -3,16 +3,26 @@
  */
 
 import { create } from 'zustand';
-import { createId, now } from '../../utils/ids';
 import {
   createEmptyStructure,
+  createNodeSection,
   createStructureField,
+  duplicateComponent,
   duplicateStructure as duplicateStructureModel,
 } from './factory';
 import { loadStructureLibrary, saveStructureLibrary } from './storage';
-import type { NoteStructure, NoteStructureField } from './types';
+import type {
+  NoteStructure,
+  NoteStructureField,
+  NoteStructureNodeSection,
+  StructureComponent,
+} from './types';
+import { NOTE_STRUCTURE_VERSION } from './types';
+import { now } from '../../utils/ids';
 
 export type StructureUiMode = 'closed' | 'library' | 'editor' | 'preview';
+
+export type AddComponentKind = 'text' | 'equation' | 'node_section';
 
 export interface StructureStoreState {
   structures: NoteStructure[];
@@ -36,15 +46,21 @@ export interface StructureStoreState {
 
   setDraftName: (name: string) => void;
   setDraftDescription: (description: string) => void;
+  addComponent: (kind: AddComponentKind) => void;
+  /** @deprecated use addComponent('text') */
   addField: () => void;
-  updateField: (fieldId: string, patch: Partial<NoteStructureField>) => void;
+  updateField: (fieldId: string, patch: Partial<StructureComponent>) => void;
+  updateNodeSection: (
+    fieldId: string,
+    patch: Partial<NoteStructureNodeSection>,
+  ) => void;
   deleteField: (fieldId: string) => void;
   duplicateField: (fieldId: string) => void;
   selectField: (fieldId: string | null) => void;
   setFieldGeometry: (
     fieldId: string,
     geom: Pick<
-      NoteStructureField,
+      StructureComponent,
       'relativeX' | 'relativeY' | 'relativeWidth' | 'relativeHeight'
     >,
   ) => void;
@@ -54,7 +70,7 @@ export interface StructureStoreState {
 }
 
 function persist(structures: NoteStructure[]) {
-  saveStructureLibrary({ version: 1, structures });
+  saveStructureLibrary({ version: NOTE_STRUCTURE_VERSION, structures });
 }
 
 function touchDraft(draft: NoteStructure): NoteStructure {
@@ -140,22 +156,34 @@ export function createStructureStore() {
     setDraftDescription: (description) =>
       set((s) => (s.draft ? { draft: { ...s.draft, description } } : s)),
 
-    addField: () => {
+    addComponent: (kind) => {
       const draft = get().draft;
       if (!draft) return;
       const offset = draft.fields.length * 24;
-      const field = createStructureField({
-        label: `Field ${draft.fields.length + 1}`,
-        instruction: 'Describe what the AI should write here.',
-        relativeX: 24 + offset,
-        relativeY: 24 + offset,
-        zIndex: draft.fields.length,
-      });
+      let field: StructureComponent;
+      if (kind === 'node_section') {
+        field = createNodeSection({
+          relativeX: 24 + offset,
+          relativeY: 24 + offset,
+          zIndex: draft.fields.length,
+        });
+      } else {
+        field = createStructureField({
+          label: `Field ${draft.fields.length + 1}`,
+          instruction: 'Describe what the AI should write here.',
+          contentType: kind === 'equation' ? 'equation' : 'text',
+          relativeX: 24 + offset,
+          relativeY: 24 + offset,
+          zIndex: draft.fields.length,
+        });
+      }
       set({
         draft: touchDraft({ ...draft, fields: [...draft.fields, field] }),
         selectedFieldId: field.id,
       });
     },
+
+    addField: () => get().addComponent('text'),
 
     updateField: (fieldId, patch) => {
       const draft = get().draft;
@@ -163,17 +191,51 @@ export function createStructureStore() {
       set({
         draft: touchDraft({
           ...draft,
-          fields: draft.fields.map((f) =>
-            f.id === fieldId
-              ? {
-                  ...f,
-                  ...patch,
-                  style: patch.style ? { ...f.style, ...patch.style } : f.style,
-                }
-              : f,
-          ),
+          fields: draft.fields.map((f) => {
+            if (f.id !== fieldId) return f;
+            if (f.componentKind === 'node_section') {
+              const p = patch as Partial<NoteStructureNodeSection>;
+              return {
+                ...f,
+                ...p,
+                componentKind: 'node_section' as const,
+                rootTemplate: p.rootTemplate
+                  ? {
+                      ...f.rootTemplate,
+                      ...p.rootTemplate,
+                      style: p.rootTemplate.style
+                        ? { ...f.rootTemplate.style, ...p.rootTemplate.style }
+                        : f.rootTemplate.style,
+                    }
+                  : f.rootTemplate,
+                childTemplate: p.childTemplate
+                  ? {
+                      ...f.childTemplate,
+                      ...p.childTemplate,
+                      style: p.childTemplate.style
+                        ? { ...f.childTemplate.style, ...p.childTemplate.style }
+                        : f.childTemplate.style,
+                    }
+                  : f.childTemplate,
+                connectorConfig: p.connectorConfig
+                  ? { ...f.connectorConfig, ...p.connectorConfig }
+                  : f.connectorConfig,
+              };
+            }
+            const p = patch as Partial<NoteStructureField>;
+            return {
+              ...f,
+              ...p,
+              componentKind: 'field' as const,
+              style: p.style ? { ...f.style, ...p.style } : f.style,
+            };
+          }),
         }),
       });
+    },
+
+    updateNodeSection: (fieldId, patch) => {
+      get().updateField(fieldId, patch);
     },
 
     deleteField: (fieldId) => {
@@ -194,14 +256,8 @@ export function createStructureStore() {
       if (!draft) return;
       const source = draft.fields.find((f) => f.id === fieldId);
       if (!source) return;
-      const copy: NoteStructureField = {
-        ...structuredClone(source),
-        id: `field_${createId()}`,
-        label: `${source.label} copy`,
-        relativeX: source.relativeX + 20,
-        relativeY: source.relativeY + 20,
-        zIndex: draft.fields.length,
-      };
+      const copy = duplicateComponent(source);
+      copy.zIndex = draft.fields.length;
       set({
         draft: touchDraft({ ...draft, fields: [...draft.fields, copy] }),
         selectedFieldId: copy.id,
