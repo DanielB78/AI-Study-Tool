@@ -17,6 +17,7 @@ import {
   DEFAULT_ROOT_NODE_STYLE,
   DEFAULT_STRUCTURE_FIELD_STYLE,
   NOTE_STRUCTURE_VERSION,
+  normalizeChildrenPlacement,
 } from './types';
 
 const STORAGE_KEY = 'ai-study-tool:note-structures:v1';
@@ -84,7 +85,15 @@ function migrateField(raw: Record<string, unknown>): NoteStructureField | null {
 
 function migrateNodeTemplate(
   raw: unknown,
-  fallback: { label: string; instruction: string; width: number; height: number; style: StructureFieldStyle },
+  fallback: {
+    label: string;
+    instruction: string;
+    width: number;
+    height: number;
+    relativeX: number;
+    relativeY: number;
+    style: StructureFieldStyle;
+  },
 ) {
   const t = isObject(raw) ? raw : {};
   return {
@@ -93,6 +102,8 @@ function migrateNodeTemplate(
       typeof t.instruction === 'string' ? t.instruction : fallback.instruction,
     width: typeof t.width === 'number' ? t.width : fallback.width,
     height: typeof t.height === 'number' ? t.height : fallback.height,
+    relativeX: typeof t.relativeX === 'number' ? t.relativeX : fallback.relativeX,
+    relativeY: typeof t.relativeY === 'number' ? t.relativeY : fallback.relativeY,
     style: migrateStyle(t.style ?? fallback.style),
   };
 }
@@ -122,19 +133,24 @@ function migrateNodeSection(
       label: 'Root Topic',
       instruction: 'Give the main subject or central concept in a short phrase.',
       width: 200,
-      height: 64,
+      height: 72,
+      relativeX: 140,
+      relativeY: 24,
       style: DEFAULT_ROOT_NODE_STYLE,
     }),
     childTemplate: migrateNodeTemplate(raw.childTemplate, {
       label: 'Concept Node',
       instruction:
-        'Give a concise subtopic name and one short explanatory sentence.',
+        'Give a concise concept name and short explanation.',
       width: 180,
-      height: 72,
+      height: 80,
+      relativeX: 150,
+      relativeY: 140,
       style: DEFAULT_CHILD_NODE_STYLE,
     }),
-    layoutMode:
-      raw.layoutMode === 'tree_horizontal' ? 'tree_horizontal' : 'tree_vertical',
+    childrenPlacement: normalizeChildrenPlacement(
+      raw.childrenPlacement ?? raw.layoutMode,
+    ),
     horizontalSpacing:
       typeof raw.horizontalSpacing === 'number' ? raw.horizontalSpacing : 28,
     verticalSpacing:

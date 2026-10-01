@@ -48,9 +48,12 @@ describe('note structure factory', () => {
     expect(isNodeSection(s.fields[0]!)).toBe(true);
     const ns = createNodeSection();
     expect(ns.componentKind).toBe('node_section');
+    expect(ns.childrenPlacement).toBe('below');
     expect(ns.maxDepth).toBeGreaterThan(0);
     expect(ns.rootTemplate.width).toBeGreaterThan(0);
+    expect(ns.rootTemplate.relativeX).toBeGreaterThanOrEqual(0);
     expect(ns.childTemplate.height).toBeGreaterThan(0);
+    expect(ns.childTemplate.relativeY).toBeGreaterThanOrEqual(0);
   });
 
   it('duplicateStructure gets a new id but keeps layout', () => {

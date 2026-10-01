@@ -177,7 +177,7 @@ function instantiateNodeSection(
         width: child.width,
         height: child.height,
       },
-      layoutMode: section.layoutMode,
+      childrenPlacement: section.childrenPlacement,
       style: section.connectorConfig,
       zIndex: nextZIndex(),
       metadata: {

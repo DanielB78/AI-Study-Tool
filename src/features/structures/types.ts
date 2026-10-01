@@ -12,11 +12,18 @@ import type {
   TextAlignment,
 } from '../../types/canvas';
 
-export const NOTE_STRUCTURE_VERSION = 2 as const;
+export const NOTE_STRUCTURE_VERSION = 3 as const;
 
 export type StructureFieldContentType = 'text' | 'equation';
 
-export type NodeSectionLayoutMode = 'tree_vertical' | 'tree_horizontal';
+/**
+ * How generated children expand from their parent.
+ * Replaces legacy tree_vertical / tree_horizontal names.
+ */
+export type NodeChildrenPlacement = 'below' | 'sideways' | 'around';
+
+/** @deprecated use NodeChildrenPlacement */
+export type NodeSectionLayoutMode = NodeChildrenPlacement;
 
 /** Style subset reused from TextElement when instantiating TEXT fields / nodes. */
 export interface StructureFieldStyle {
@@ -58,12 +65,19 @@ export interface NoteStructureField extends StructureComponentGeometry {
   style: StructureFieldStyle;
 }
 
-/** Visual + AI template for root or child nodes in a Node Section. */
+/**
+ * Visual + AI template for root or child nodes in a Node Section.
+ * relativeX/Y are design-time positions within the Node Section region
+ * (same interaction model as fixed structure textboxes).
+ */
 export interface NodeTemplate {
   label: string;
   instruction: string;
   width: number;
   height: number;
+  /** Design-time position within the Node Section (structure-relative offset from section origin). */
+  relativeX: number;
+  relativeY: number;
   style: StructureFieldStyle;
 }
 
@@ -78,7 +92,7 @@ export interface NodeSectionConnectorConfig {
 
 /**
  * Dynamic hierarchical region: LLM supplies content/hierarchy only;
- * app owns layout, IDs, and connectors.
+ * app owns layout, IDs, and connectors (real TextElements + ConnectorElements).
  */
 export interface NoteStructureNodeSection extends StructureComponentGeometry {
   componentKind: 'node_section';
@@ -89,7 +103,8 @@ export interface NoteStructureNodeSection extends StructureComponentGeometry {
   required: boolean;
   rootTemplate: NodeTemplate;
   childTemplate: NodeTemplate;
-  layoutMode: NodeSectionLayoutMode;
+  /** Children Placement: below | sideways | around */
+  childrenPlacement: NodeChildrenPlacement;
   horizontalSpacing: number;
   verticalSpacing: number;
   /** Root = depth 0. */
@@ -166,6 +181,12 @@ export const DEFAULT_NODE_SECTION_MAX_TOTAL_NODES = 50;
 export const NODE_SECTION_MAX_DEPTH_LIMIT = 8;
 export const NODE_SECTION_MAX_TOTAL_NODES_LIMIT = 100;
 
+export const NODE_CHILDREN_PLACEMENTS: readonly NodeChildrenPlacement[] = [
+  'below',
+  'sideways',
+  'around',
+] as const;
+
 export function isNodeSection(
   c: StructureComponent,
 ): c is NoteStructureNodeSection {
@@ -174,4 +195,23 @@ export function isNodeSection(
 
 export function isStructureField(c: StructureComponent): c is NoteStructureField {
   return c.componentKind === 'field';
+}
+
+/** Migrate legacy layoutMode strings → NodeChildrenPlacement. */
+export function normalizeChildrenPlacement(raw: unknown): NodeChildrenPlacement {
+  if (raw === 'below' || raw === 'tree_vertical') return 'below';
+  if (raw === 'sideways' || raw === 'tree_horizontal') return 'sideways';
+  if (raw === 'around') return 'around';
+  return 'below';
+}
+
+export function childrenPlacementLabel(mode: NodeChildrenPlacement): string {
+  switch (mode) {
+    case 'below':
+      return 'Below';
+    case 'sideways':
+      return 'Sideways';
+    case 'around':
+      return 'Around';
+  }
 }

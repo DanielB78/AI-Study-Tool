@@ -6,6 +6,7 @@ export type {
   StructureFieldContentType,
   StructureFieldStyle,
   NodeTemplate,
+  NodeChildrenPlacement,
   NodeSectionLayoutMode,
   NodeSectionConnectorConfig,
 } from './types';
@@ -16,8 +17,11 @@ export {
   DEFAULT_STRUCTURE_HEIGHT,
   DEFAULT_NODE_SECTION_MAX_DEPTH,
   DEFAULT_NODE_SECTION_MAX_TOTAL_NODES,
+  NODE_CHILDREN_PLACEMENTS,
   isNodeSection,
   isStructureField,
+  normalizeChildrenPlacement,
+  childrenPlacementLabel,
 } from './types';
 export {
   createEmptyStructure,

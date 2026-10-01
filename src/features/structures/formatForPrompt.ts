@@ -13,7 +13,7 @@ function formatNodeSection(section: NoteStructureNodeSection): string[] {
     `LABEL: ${section.label}`,
     `TYPE: node_section`,
     `REQUIRED: ${section.required ? 'true' : 'false'}`,
-    `LAYOUT: ${section.layoutMode === 'tree_vertical' ? 'TREE_VERTICAL' : 'TREE_HORIZONTAL'}`,
+    `CHILDREN PLACEMENT: ${section.childrenPlacement.toUpperCase()}`,
     `MAX DEPTH: ${section.maxDepth}`,
     `MAX TOTAL NODES: ${section.maxTotalNodes}`,
     ...(section.maxChildrenPerNode != null

@@ -1709,3 +1709,96 @@ textarea {
   flex-wrap: wrap;
   gap: 4px;
 }
+
+.structure-node-section-region {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1.5px dashed #475569;
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(248, 250, 252, 0.92), rgba(226, 232, 240, 0.75));
+  overflow: visible;
+}
+
+.structure-node-section-region.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.structure-node-section-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 0;
+  font-size: 0.68rem;
+  pointer-events: none;
+}
+
+.structure-node-section-header span {
+  color: var(--muted);
+  font-weight: 650;
+  letter-spacing: 0.03em;
+}
+
+.structure-node-section-hint {
+  margin: 2px 8px 6px;
+  font-size: 0.65rem;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.structure-node-section-clones {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.structure-connector-preview {
+  position: absolute;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 2;
+}
+
+.structure-node-template {
+  border-style: solid;
+}
+
+.structure-node-template.is-root-template {
+  border-color: #0f172a;
+}
+
+.structure-node-template.is-child-template {
+  border-color: #64748b;
+}
+
+.structure-node-template.is-preview-clone {
+  border-style: dashed;
+}
+
+.structure-node-instruction-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.08);
+  font-size: 0.65em;
+  font-weight: 700;
+  font-style: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: inherit;
+  opacity: 0.75;
+}
+
+.structure-placement-seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.structure-placement-seg .structure-btn.is-active {
+  background: var(--accent);
+  border-color: transparent;
+  color: #f0fdfa;
+}

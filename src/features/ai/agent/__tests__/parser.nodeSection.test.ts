@@ -95,10 +95,11 @@ describe('create_structured_note NODE_SECTION parsing', () => {
         [structure.id, new Map([[sectionId, 'Knowledge Tree']])],
       ]),
     });
-    expect(lines[0]).toContain('KNOWLEDGE TREE');
+    expect(lines[0]).toContain('CREATE NODE STRUCTURE');
+    expect(lines[0]).toContain('Knowledge Tree');
     expect(lines[0]).toContain('Electromagnetism');
     expect(lines[0]).toContain("Gauss's Law");
-    expect(lines[0]).toContain('Nodes:');
-    expect(lines[0]).toContain('Connectors:');
+    expect(lines[0]).toContain('TextElements');
+    expect(lines[0]).toContain('ConnectorElements');
   });
 });
