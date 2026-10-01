@@ -3,16 +3,18 @@ import type {
   NoteStructureNodeSection,
   StructureComponent,
   StructureFieldContentType,
-  NodeSectionLayoutMode,
+  NodeChildrenPlacement,
 } from '../types';
 import {
   NODE_SECTION_MAX_DEPTH_LIMIT,
   NODE_SECTION_MAX_TOTAL_NODES_LIMIT,
   isNodeSection,
 } from '../types';
+import type { SelectedNodeTemplatePart } from '../structureStore';
 
 interface StructureFieldInspectorProps {
   field: StructureComponent | null;
+  selectedNodeTemplatePart?: SelectedNodeTemplatePart;
   onChange: (patch: Partial<StructureComponent>) => void;
   onDuplicate: () => void;
   onDelete: () => void;
@@ -97,11 +99,13 @@ function StyleControls({
 
 function NodeSectionInspector({
   section,
+  selectedPart,
   onChange,
   onDuplicate,
   onDelete,
 }: {
   section: NoteStructureNodeSection;
+  selectedPart: SelectedNodeTemplatePart;
   onChange: (patch: Partial<NoteStructureNodeSection>) => void;
   onDuplicate: () => void;
   onDelete: () => void;
@@ -109,6 +113,12 @@ function NodeSectionInspector({
   return (
     <aside className="structure-inspector structure-inspector--node">
       <div className="structure-inspector-title">Node Section</div>
+      {selectedPart && (
+        <p className="structure-inspector-empty">
+          Editing {selectedPart === 'root' ? 'root' : 'child'} template — drag/resize on
+          canvas like a textbox.
+        </p>
+      )}
 
       <label className="structure-field-label">
         Name
@@ -129,18 +139,25 @@ function NodeSectionInspector({
         />
       </label>
 
-      <label className="structure-field-label">
-        Layout
-        <select
-          value={section.layoutMode}
-          onChange={(e) =>
-            onChange({ layoutMode: e.target.value as NodeSectionLayoutMode })
-          }
-        >
-          <option value="tree_vertical">Vertical Tree</option>
-          <option value="tree_horizontal">Horizontal Tree</option>
-        </select>
-      </label>
+      <div className="structure-inspector-group">
+        <div className="structure-inspector-subtitle">Children Placement</div>
+        <div className="structure-placement-seg" role="group" aria-label="Children placement">
+          {(['below', 'sideways', 'around'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              className={`structure-btn ghost${
+                section.childrenPlacement === mode ? ' is-active' : ''
+              }`}
+              onClick={() =>
+                onChange({ childrenPlacement: mode as NodeChildrenPlacement })
+              }
+            >
+              {mode === 'below' ? 'Below' : mode === 'sideways' ? 'Sideways' : 'Around'}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <label className="structure-field-check">
         <input
@@ -434,6 +451,7 @@ function NodeSectionInspector({
 
 export function StructureFieldInspector({
   field,
+  selectedNodeTemplatePart = null,
   onChange,
   onDuplicate,
   onDelete,
@@ -452,6 +470,7 @@ export function StructureFieldInspector({
     return (
       <NodeSectionInspector
         section={field}
+        selectedPart={selectedNodeTemplatePart}
         onChange={onChange}
         onDuplicate={onDuplicate}
         onDelete={onDelete}

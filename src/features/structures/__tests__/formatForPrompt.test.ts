@@ -29,13 +29,13 @@ describe('formatNoteStructureForPrompt', () => {
     const text = formatNoteStructureForPrompt(s);
     expect(text).toContain('NODE SECTION');
     expect(text).toContain('TYPE: node_section');
-    expect(text).toContain('TREE_VERTICAL');
+    expect(text).toContain('CHILDREN PLACEMENT: BELOW');
     expect(text).toContain('MAX DEPTH:');
     expect(text).toContain('MAX TOTAL NODES:');
     expect(text).toContain('ROOT NODE INSTRUCTION:');
     expect(text).toContain('CHILD NODE INSTRUCTION:');
     expect(text).toContain('Do NOT return x/y coordinates');
-    expect(text).not.toMatch(/emit create_connector for tree/);
+    expect(text).toContain('Do NOT emit create_text/create_connector for tree nodes');
   });
 
   it('formats No Structure mode', () => {

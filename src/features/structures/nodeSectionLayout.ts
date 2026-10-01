@@ -1,10 +1,11 @@
 /**
- * NodeSectionLayoutService — deterministic tree layout (no LLM coordinates).
+ * NodeSectionLayoutService — deterministic BELOW / SIDEWAYS / AROUND layout.
+ * Returns relative coordinates for TextElements — never images or raster content.
  */
 
 import type { HierarchyNode } from './hierarchy';
 import type {
-  NodeSectionLayoutMode,
+  NodeChildrenPlacement,
   NoteStructureNodeSection,
 } from './types';
 
@@ -25,7 +26,6 @@ export interface LaidOutNode {
 
 export interface NodeSectionLayoutResult {
   nodes: LaidOutNode[];
-  /** Parent layoutKey → child layoutKeys */
   edges: Array<{ parentKey: string; childKey: string }>;
   bounds: { width: number; height: number };
 }
@@ -40,7 +40,6 @@ interface MeasuredNode {
   width: number;
   height: number;
   children: MeasuredNode[];
-  /** Subtree span along the secondary axis (width for vertical, height for horizontal). */
   subtreeSpan: number;
 }
 
@@ -51,12 +50,21 @@ function measureTree(
   childIndex: number,
   parentKey: string | null,
   keyPrefix: string,
+  placement: NodeChildrenPlacement,
 ): MeasuredNode {
   const isRoot = depth === 0;
   const template = isRoot ? section.rootTemplate : section.childTemplate;
   const layoutKey = keyPrefix;
   const children = node.children.map((child, i) =>
-    measureTree(child, section, depth + 1, i, layoutKey, `${layoutKey}.${i}`),
+    measureTree(
+      child,
+      section,
+      depth + 1,
+      i,
+      layoutKey,
+      `${layoutKey}.${i}`,
+      placement,
+    ),
   );
 
   const measured: MeasuredNode = {
@@ -72,7 +80,7 @@ function measureTree(
     subtreeSpan: 0,
   };
 
-  if (section.layoutMode === 'tree_vertical') {
+  if (placement === 'below') {
     if (children.length === 0) {
       measured.subtreeSpan = measured.width;
     } else {
@@ -82,7 +90,7 @@ function measureTree(
         children.reduce((s, c) => s + c.subtreeSpan, 0) + gaps,
       );
     }
-  } else {
+  } else if (placement === 'sideways') {
     if (children.length === 0) {
       measured.subtreeSpan = measured.height;
     } else {
@@ -92,12 +100,15 @@ function measureTree(
         children.reduce((s, c) => s + c.subtreeSpan, 0) + gaps,
       );
     }
+  } else {
+    // around: span unused for radial; keep size for bounds later
+    measured.subtreeSpan = Math.max(measured.width, measured.height);
   }
 
   return measured;
 }
 
-function placeVertical(
+function placeBelow(
   node: MeasuredNode,
   left: number,
   top: number,
@@ -130,12 +141,12 @@ function placeVertical(
 
   for (const child of node.children) {
     edges.push({ parentKey: node.layoutKey, childKey: child.layoutKey });
-    placeVertical(child, cursor, childTop, hGap, vGap, out, edges);
+    placeBelow(child, cursor, childTop, hGap, vGap, out, edges);
     cursor += child.subtreeSpan + hGap;
   }
 }
 
-function placeHorizontal(
+function placeSideways(
   node: MeasuredNode,
   left: number,
   top: number,
@@ -168,8 +179,74 @@ function placeHorizontal(
 
   for (const child of node.children) {
     edges.push({ parentKey: node.layoutKey, childKey: child.layoutKey });
-    placeHorizontal(child, childLeft, cursor, hGap, vGap, out, edges);
+    placeSideways(child, childLeft, cursor, hGap, vGap, out, edges);
     cursor += child.subtreeSpan + vGap;
+  }
+}
+
+/**
+ * Deterministic radial layout: children evenly spaced around parent.
+ * Deeper levels expand outward along the same angular bias.
+ */
+function placeAround(
+  node: MeasuredNode,
+  cx: number,
+  cy: number,
+  section: NoteStructureNodeSection,
+  out: LaidOutNode[],
+  edges: NodeSectionLayoutResult['edges'],
+  parentAngle: number | null,
+): void {
+  const x = cx - node.width / 2;
+  const y = cy - node.height / 2;
+  out.push({
+    layoutKey: node.layoutKey,
+    content: node.content,
+    depth: node.depth,
+    childIndex: node.childIndex,
+    parentLayoutKey: node.parentLayoutKey,
+    x,
+    y,
+    width: node.width,
+    height: node.height,
+    isRoot: node.isRoot,
+  });
+
+  if (node.children.length === 0) return;
+
+  const n = node.children.length;
+  const baseRadius =
+    Math.max(node.width, node.height) / 2 +
+    Math.max(section.childTemplate.width, section.childTemplate.height) / 2 +
+    Math.max(section.horizontalSpacing, section.verticalSpacing);
+
+  // Evenly distribute; if parent has an angle, bias the fan outward from that direction.
+  const spread = n === 1 ? 0 : (Math.PI * 2) / n;
+  const startAngle =
+    parentAngle != null ? parentAngle - ((n - 1) * spread) / 2 : -Math.PI / 2;
+
+  for (let i = 0; i < n; i++) {
+    const child = node.children[i]!;
+    const angle = startAngle + i * spread;
+    const childCx = cx + Math.cos(angle) * baseRadius;
+    const childCy = cy + Math.sin(angle) * baseRadius;
+    edges.push({ parentKey: node.layoutKey, childKey: child.layoutKey });
+    placeAround(child, childCx, childCy, section, out, edges, angle);
+  }
+}
+
+function normalizeAroundPositions(nodes: LaidOutNode[]): void {
+  if (nodes.length === 0) return;
+  let minX = Infinity;
+  let minY = Infinity;
+  for (const n of nodes) {
+    minX = Math.min(minX, n.x);
+    minY = Math.min(minY, n.y);
+  }
+  const pad = 8;
+  for (const n of nodes) {
+    n.x = Math.round(n.x - minX + pad);
+    n.y = Math.round(n.y - minY + pad);
   }
 }
 
@@ -180,12 +257,23 @@ export function layoutNodeSectionHierarchy(
   root: HierarchyNode,
   section: NoteStructureNodeSection,
 ): NodeSectionLayoutResult {
-  const measured = measureTree(root, section, 0, 0, null, 'n0');
+  const placement = section.childrenPlacement;
+  const measured = measureTree(root, section, 0, 0, null, 'n0', placement);
   const nodes: LaidOutNode[] = [];
   const edges: NodeSectionLayoutResult['edges'] = [];
 
-  if (section.layoutMode === 'tree_vertical') {
-    placeVertical(
+  if (placement === 'below') {
+    placeBelow(
+      measured,
+      0,
+      0,
+      section.horizontalSpacing,
+      section.verticalSpacing,
+      nodes,
+      edges,
+    );
+  } else if (placement === 'sideways') {
+    placeSideways(
       measured,
       0,
       0,
@@ -195,15 +283,8 @@ export function layoutNodeSectionHierarchy(
       edges,
     );
   } else {
-    placeHorizontal(
-      measured,
-      0,
-      0,
-      section.horizontalSpacing,
-      section.verticalSpacing,
-      nodes,
-      edges,
-    );
+    placeAround(measured, 0, 0, section, nodes, edges, null);
+    normalizeAroundPositions(nodes);
   }
 
   let maxX = 0;
@@ -223,18 +304,41 @@ export function layoutNodeSectionHierarchy(
   };
 }
 
-/** Dummy hierarchy for structure-editor preview (no LLM). */
+/** Dummy hierarchy for structure-editor preview (no LLM). Placement-aware fan-out. */
 export function previewHierarchyForSection(
-  _layoutMode: NodeSectionLayoutMode,
+  placement: NodeChildrenPlacement,
 ): HierarchyNode {
+  if (placement === 'around') {
+    return {
+      content: 'Main Topic',
+      children: [
+        { content: 'Child A', children: [] },
+        { content: 'Child B', children: [] },
+        { content: 'Child C', children: [] },
+        { content: 'Child D', children: [] },
+      ],
+    };
+  }
+  if (placement === 'sideways') {
+    return {
+      content: 'Main Topic',
+      children: [
+        {
+          content: 'Child A',
+          children: [{ content: 'Child A1', children: [] }],
+        },
+        { content: 'Child B', children: [] },
+      ],
+    };
+  }
   return {
-    content: 'Root Example',
+    content: 'Main Topic',
     children: [
       {
-        content: 'Child Example',
-        children: [{ content: 'Child Example', children: [] }],
+        content: 'Child A',
+        children: [{ content: 'Child A1', children: [] }],
       },
-      { content: 'Child Example', children: [] },
+      { content: 'Child B', children: [] },
     ],
   };
 }

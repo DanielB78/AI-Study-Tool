@@ -1,5 +1,6 @@
 /**
- * Create a ConnectorElement bound to parent/child node elements.
+ * Create a ConnectorElement bound to parent/child node TextElements.
+ * Attachment edges depend on Children Placement (below / sideways / around).
  */
 
 import type {
@@ -9,7 +10,7 @@ import type {
   ArrowHeads,
 } from '../../types/canvas';
 import { createBaseFields } from '../../utils/ids';
-import type { NodeSectionLayoutMode } from './types';
+import type { NodeChildrenPlacement } from './types';
 
 export interface BoundConnectorStyle {
   connectorType: ConnectorType;
@@ -22,19 +23,41 @@ export interface BoundConnectorStyle {
 export interface BoundConnectorEndpoints {
   parent: { id: string; x: number; y: number; width: number; height: number };
   child: { id: string; x: number; y: number; width: number; height: number };
-  layoutMode: NodeSectionLayoutMode;
+  childrenPlacement: NodeChildrenPlacement;
   style: BoundConnectorStyle;
   zIndex: number;
   metadata?: Record<string, unknown>;
 }
 
-/** Attach to mid-edges based on tree orientation. */
+function edgePoint(
+  box: BoundConnectorEndpoints['parent'],
+  toward: BoundConnectorEndpoints['child'],
+): { x: number; y: number } {
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  const tx = toward.x + toward.width / 2;
+  const ty = toward.y + toward.height / 2;
+  const dx = tx - cx;
+  const dy = ty - cy;
+  if (Math.abs(dx) > Math.abs(dy)) {
+    return {
+      x: dx >= 0 ? box.x + box.width : box.x,
+      y: cy,
+    };
+  }
+  return {
+    x: cx,
+    y: dy >= 0 ? box.y + box.height : box.y,
+  };
+}
+
+/** Attach to mid-edges based on placement mode. */
 function attachmentPoints(
   parent: BoundConnectorEndpoints['parent'],
   child: BoundConnectorEndpoints['child'],
-  layoutMode: NodeSectionLayoutMode,
+  placement: NodeChildrenPlacement,
 ): { x1: number; y1: number; x2: number; y2: number } {
-  if (layoutMode === 'tree_vertical') {
+  if (placement === 'below') {
     return {
       x1: parent.x + parent.width / 2,
       y1: parent.y + parent.height,
@@ -42,19 +65,25 @@ function attachmentPoints(
       y2: child.y,
     };
   }
-  return {
-    x1: parent.x + parent.width,
-    y1: parent.y + parent.height / 2,
-    x2: child.x,
-    y2: child.y + child.height / 2,
-  };
+  if (placement === 'sideways') {
+    return {
+      x1: parent.x + parent.width,
+      y1: parent.y + parent.height / 2,
+      x2: child.x,
+      y2: child.y + child.height / 2,
+    };
+  }
+  // around: nearest edges between boxes
+  const p = edgePoint(parent, child);
+  const c = edgePoint(child, parent);
+  return { x1: p.x, y1: p.y, x2: c.x, y2: c.y };
 }
 
 export function createBoundConnector(input: BoundConnectorEndpoints): ConnectorElement {
   const { x1, y1, x2, y2 } = attachmentPoints(
     input.parent,
     input.child,
-    input.layoutMode,
+    input.childrenPlacement,
   );
   const minX = Math.min(x1, x2);
   const minY = Math.min(y1, y2);
@@ -75,6 +104,8 @@ export function createBoundConnector(input: BoundConnectorEndpoints): ConnectorE
       source: 'agent',
       operation: 'create_structured_note',
       relationshipType: 'parent_child',
+      parentNodeElementId: input.parent.id,
+      childNodeElementId: input.child.id,
       ...(input.metadata ?? {}),
     },
   });

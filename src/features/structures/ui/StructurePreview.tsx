@@ -1,12 +1,14 @@
 import type { NoteStructure } from '../types';
+import { isNodeSection, isStructureField } from '../types';
 import { StructureFieldBox } from './StructureFieldBox';
+import { StructureNodeSectionBox } from './StructureNodeSectionBox';
 
 interface StructurePreviewProps {
   structure: NoteStructure;
   maxWidth?: number;
 }
 
-/** Read-only layout preview — no LLM call; shows placeholder field content. */
+/** Read-only layout preview — no LLM; real structure components (not images). */
 export function StructurePreview({ structure, maxWidth = 420 }: StructurePreviewProps) {
   const scale = Math.min(1, maxWidth / structure.width);
   return (
@@ -19,17 +21,36 @@ export function StructurePreview({ structure, maxWidth = 420 }: StructurePreview
           height: structure.height * scale,
         }}
       >
-        {structure.fields.map((field) => (
-          <StructureFieldBox
-            key={field.id}
-            field={field}
-            selected={false}
-            scale={scale}
-            readOnly
-            onSelect={() => undefined}
-            onGeometryChange={() => undefined}
-          />
-        ))}
+        {structure.fields.map((field) => {
+          if (isNodeSection(field)) {
+            return (
+              <StructureNodeSectionBox
+                key={field.id}
+                section={field}
+                scale={scale}
+                selected={false}
+                selectedTemplatePart={null}
+                readOnly
+                onSelectSection={() => undefined}
+                onSelectTemplate={() => undefined}
+                onSectionGeometryChange={() => undefined}
+                onTemplateGeometryChange={() => undefined}
+              />
+            );
+          }
+          if (!isStructureField(field)) return null;
+          return (
+            <StructureFieldBox
+              key={field.id}
+              field={field}
+              selected={false}
+              scale={scale}
+              readOnly
+              onSelect={() => undefined}
+              onGeometryChange={() => undefined}
+            />
+          );
+        })}
       </div>
     </div>
   );

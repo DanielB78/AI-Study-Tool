@@ -78,7 +78,7 @@ When a note structure IS selected:
   - respect MAX DEPTH (root = depth 0) and MAX TOTAL NODES
   - leaf nodes use `"children": []`
   - never return coordinates, node IDs, connector IDs, or per-edge connector operations
-  - the application creates TextElements, ConnectorElements, layout, and bindings
+  - the application creates real TextElements and ConnectorElements (never images) using BELOW / SIDEWAYS / AROUND placement
 - A structure may mix fixed TEXT/EQUATION fields and one or more NODE_SECTION fields in one response
 - do NOT recreate the layout with individual `create_text` / `create_equation` / connector operations
 - do NOT invent geometry (x/y/width/height) — the application owns layout from the saved structure

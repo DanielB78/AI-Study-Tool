@@ -473,10 +473,12 @@ export function describeOperationPlan(
             const connectorCount = Math.max(0, nodeCount - 1);
             const tree = formatHierarchyTreePreview(root);
             return [
-              `   ${label.toUpperCase()}`,
+              `   CREATE NODE STRUCTURE`,
+              `   ${label}`,
+              `   Nodes: ${nodeCount} TextElements`,
+              `   Connections: ${connectorCount} ConnectorElements`,
+              '   Preview:',
               ...tree.map((line) => `   ${line}`),
-              `   Nodes: ${nodeCount}`,
-              `   Connectors: ${connectorCount}`,
             ];
           }
           if (v && 'content' in v) {

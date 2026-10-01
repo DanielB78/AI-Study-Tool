@@ -55,15 +55,23 @@ export function createStructureField(
   };
 }
 
-function createNodeTemplate(
+export function createNodeTemplate(
   partial: Partial<NodeTemplate> & { label: string; instruction: string },
-  defaults: { width: number; height: number; style: StructureFieldStyle },
+  defaults: {
+    width: number;
+    height: number;
+    style: StructureFieldStyle;
+    relativeX?: number;
+    relativeY?: number;
+  },
 ): NodeTemplate {
   return {
     label: partial.label,
     instruction: partial.instruction,
     width: partial.width ?? defaults.width,
     height: partial.height ?? defaults.height,
+    relativeX: partial.relativeX ?? defaults.relativeX ?? 24,
+    relativeY: partial.relativeY ?? defaults.relativeY ?? 24,
     style: { ...defaults.style, ...(partial.style ?? {}) },
   };
 }
@@ -74,6 +82,8 @@ export function createNodeSection(
     instruction?: string;
   } = {},
 ): NoteStructureNodeSection {
+  const relativeWidth = partial.relativeWidth ?? 480;
+  const relativeHeight = partial.relativeHeight ?? 320;
   return {
     componentKind: 'node_section',
     id: partial.id ?? `nodesection_${createId()}`,
@@ -84,8 +94,8 @@ export function createNodeSection(
     required: partial.required ?? true,
     relativeX: partial.relativeX ?? 24,
     relativeY: partial.relativeY ?? 24,
-    relativeWidth: partial.relativeWidth ?? 480,
-    relativeHeight: partial.relativeHeight ?? 320,
+    relativeWidth,
+    relativeHeight,
     zIndex: partial.zIndex ?? 0,
     rootTemplate:
       partial.rootTemplate ??
@@ -93,8 +103,16 @@ export function createNodeSection(
         {
           label: 'Root Topic',
           instruction: 'Give the main subject or central concept in a short phrase.',
+          relativeX: Math.round(relativeWidth / 2 - 100),
+          relativeY: 24,
         },
-        { width: 200, height: 64, style: DEFAULT_ROOT_NODE_STYLE },
+        {
+          width: 200,
+          height: 72,
+          style: DEFAULT_ROOT_NODE_STYLE,
+          relativeX: Math.round(relativeWidth / 2 - 100),
+          relativeY: 24,
+        },
       ),
     childTemplate:
       partial.childTemplate ??
@@ -102,11 +120,19 @@ export function createNodeSection(
         {
           label: 'Concept Node',
           instruction:
-            'Give a concise subtopic name and one short explanatory sentence.',
+            'Give a concise concept name and short explanation.',
+          relativeX: Math.round(relativeWidth / 2 - 90),
+          relativeY: 140,
         },
-        { width: 180, height: 72, style: DEFAULT_CHILD_NODE_STYLE },
+        {
+          width: 180,
+          height: 80,
+          style: DEFAULT_CHILD_NODE_STYLE,
+          relativeX: Math.round(relativeWidth / 2 - 90),
+          relativeY: 140,
+        },
       ),
-    layoutMode: partial.layoutMode ?? 'tree_vertical',
+    childrenPlacement: partial.childrenPlacement ?? 'below',
     horizontalSpacing: partial.horizontalSpacing ?? 28,
     verticalSpacing: partial.verticalSpacing ?? 36,
     maxDepth: partial.maxDepth ?? DEFAULT_NODE_SECTION_MAX_DEPTH,
@@ -199,7 +225,7 @@ export function createKnowledgeTreeStructure(): NoteStructure {
       relativeY: 24,
       relativeWidth: 672,
       relativeHeight: 512,
-      layoutMode: 'tree_vertical',
+      childrenPlacement: 'below',
       maxDepth: 4,
       maxTotalNodes: 30,
       rootTemplate: createNodeTemplate(
@@ -208,8 +234,16 @@ export function createKnowledgeTreeStructure(): NoteStructure {
           instruction: 'Main subject',
           width: 220,
           height: 70,
+          relativeX: 226,
+          relativeY: 24,
         },
-        { width: 220, height: 70, style: DEFAULT_ROOT_NODE_STYLE },
+        {
+          width: 220,
+          height: 70,
+          style: DEFAULT_ROOT_NODE_STYLE,
+          relativeX: 226,
+          relativeY: 24,
+        },
       ),
       childTemplate: createNodeTemplate(
         {
@@ -217,8 +251,16 @@ export function createKnowledgeTreeStructure(): NoteStructure {
           instruction: 'Sub-concept with a concise explanation',
           width: 190,
           height: 80,
+          relativeX: 241,
+          relativeY: 140,
         },
-        { width: 190, height: 80, style: DEFAULT_CHILD_NODE_STYLE },
+        {
+          width: 190,
+          height: 80,
+          style: DEFAULT_CHILD_NODE_STYLE,
+          relativeX: 241,
+          relativeY: 140,
+        },
       ),
     }),
   ];

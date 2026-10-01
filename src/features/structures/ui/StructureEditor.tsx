@@ -1,12 +1,15 @@
 import { StructureFieldBox } from './StructureFieldBox';
+import { StructureNodeSectionBox } from './StructureNodeSectionBox';
 import { StructureFieldInspector } from './StructureFieldInspector';
 import { useStructureStore } from '../structureStore';
+import { isNodeSection, isStructureField } from '../types';
 
 const EDITOR_SCALE = 0.85;
 
 export function StructureEditor() {
   const draft = useStructureStore((s) => s.draft);
   const selectedFieldId = useStructureStore((s) => s.selectedFieldId);
+  const selectedNodeTemplatePart = useStructureStore((s) => s.selectedNodeTemplatePart);
   const setDraftName = useStructureStore((s) => s.setDraftName);
   const setDraftDescription = useStructureStore((s) => s.setDraftDescription);
   const addComponent = useStructureStore((s) => s.addComponent);
@@ -15,6 +18,7 @@ export function StructureEditor() {
   const duplicateField = useStructureStore((s) => s.duplicateField);
   const selectField = useStructureStore((s) => s.selectField);
   const setFieldGeometry = useStructureStore((s) => s.setFieldGeometry);
+  const setNodeTemplateGeometry = useStructureStore((s) => s.setNodeTemplateGeometry);
   const saveDraft = useStructureStore((s) => s.saveDraft);
   const discardDraft = useStructureStore((s) => s.discardDraft);
 
@@ -64,7 +68,18 @@ export function StructureEditor() {
             <button
               type="button"
               className="structure-btn"
-              onClick={() => addComponent('node_section')}
+              onClick={() => {
+                addComponent('node_section');
+                // Select root template of the newly added section after store updates.
+                window.requestAnimationFrame(() => {
+                  const d = useStructureStore.getState().draft;
+                  const id = useStructureStore.getState().selectedFieldId;
+                  const field = d?.fields.find((f) => f.id === id);
+                  if (field && isNodeSection(field)) {
+                    selectField(field.id, 'root');
+                  }
+                });
+              }}
             >
               + Node Section
             </button>
@@ -98,25 +113,50 @@ export function StructureEditor() {
               height: draft.height * EDITOR_SCALE,
             }}
           >
-            {draft.fields.map((field) => (
-              <StructureFieldBox
-                key={field.id}
-                field={field}
-                selected={field.id === selectedFieldId}
-                scale={EDITOR_SCALE}
-                onSelect={() => selectField(field.id)}
-                onGeometryChange={(geom) => setFieldGeometry(field.id, geom)}
-              />
-            ))}
+            {draft.fields.map((field) => {
+              if (isNodeSection(field)) {
+                return (
+                  <StructureNodeSectionBox
+                    key={field.id}
+                    section={field}
+                    scale={EDITOR_SCALE}
+                    selected={field.id === selectedFieldId}
+                    selectedTemplatePart={
+                      field.id === selectedFieldId ? selectedNodeTemplatePart : null
+                    }
+                    onSelectSection={() => selectField(field.id, null)}
+                    onSelectTemplate={(part) => selectField(field.id, part)}
+                    onSectionGeometryChange={(geom) =>
+                      setFieldGeometry(field.id, geom)
+                    }
+                    onTemplateGeometryChange={(part, geom) =>
+                      setNodeTemplateGeometry(field.id, part, geom)
+                    }
+                  />
+                );
+              }
+              if (!isStructureField(field)) return null;
+              return (
+                <StructureFieldBox
+                  key={field.id}
+                  field={field}
+                  selected={field.id === selectedFieldId}
+                  scale={EDITOR_SCALE}
+                  onSelect={() => selectField(field.id)}
+                  onGeometryChange={(geom) => setFieldGeometry(field.id, geom)}
+                />
+              );
+            })}
           </div>
           <p className="structure-editor-hint">
-            Drag fields to move · drag corner to resize · placeholders show label + AI
-            instruction
+            Drag textboxes / node templates to move · corner to resize · Node Section
+            templates are real structure components (not images)
           </p>
         </div>
 
         <StructureFieldInspector
           field={selected}
+          selectedNodeTemplatePart={selectedNodeTemplatePart}
           onChange={(patch) => {
             if (!selected) return;
             updateField(selected.id, patch);

@@ -15,6 +15,7 @@ import type {
   NoteStructure,
   NoteStructureField,
   NoteStructureNodeSection,
+  NodeTemplate,
   StructureComponent,
 } from './types';
 import { NOTE_STRUCTURE_VERSION } from './types';
@@ -24,12 +25,17 @@ export type StructureUiMode = 'closed' | 'library' | 'editor' | 'preview';
 
 export type AddComponentKind = 'text' | 'equation' | 'node_section';
 
+/** Which part of a Node Section is selected in the editor. */
+export type SelectedNodeTemplatePart = 'root' | 'child' | null;
+
 export interface StructureStoreState {
   structures: NoteStructure[];
   uiMode: StructureUiMode;
   /** Structure being edited (draft; not saved until saveDraft). */
   draft: NoteStructure | null;
   selectedFieldId: string | null;
+  /** When selected field is a Node Section: which template is active. */
+  selectedNodeTemplatePart: SelectedNodeTemplatePart;
   /** Per-request AI selection (also snapshotted in ragDebugStore). */
   selectedStructureIdForAi: string | null;
 
@@ -56,13 +62,21 @@ export interface StructureStoreState {
   ) => void;
   deleteField: (fieldId: string) => void;
   duplicateField: (fieldId: string) => void;
-  selectField: (fieldId: string | null) => void;
+  selectField: (
+    fieldId: string | null,
+    nodeTemplatePart?: SelectedNodeTemplatePart,
+  ) => void;
   setFieldGeometry: (
     fieldId: string,
     geom: Pick<
       StructureComponent,
       'relativeX' | 'relativeY' | 'relativeWidth' | 'relativeHeight'
     >,
+  ) => void;
+  setNodeTemplateGeometry: (
+    fieldId: string,
+    part: 'root' | 'child',
+    geom: Pick<NodeTemplate, 'relativeX' | 'relativeY' | 'width' | 'height'>,
   ) => void;
 
   setSelectedStructureIdForAi: (id: string | null) => void;
@@ -84,25 +98,53 @@ export function createStructureStore() {
     uiMode: 'closed',
     draft: null,
     selectedFieldId: null,
+    selectedNodeTemplatePart: null,
     selectedStructureIdForAi: null,
 
-    openLibrary: () => set({ uiMode: 'library', draft: null, selectedFieldId: null }),
-    close: () => set({ uiMode: 'closed', draft: null, selectedFieldId: null }),
+    openLibrary: () =>
+      set({
+        uiMode: 'library',
+        draft: null,
+        selectedFieldId: null,
+        selectedNodeTemplatePart: null,
+      }),
+    close: () =>
+      set({
+        uiMode: 'closed',
+        draft: null,
+        selectedFieldId: null,
+        selectedNodeTemplatePart: null,
+      }),
     openPreview: (id) => {
       const s = get().structures.find((x) => x.id === id) ?? null;
       if (!s) return;
-      set({ uiMode: 'preview', draft: structuredClone(s), selectedFieldId: null });
+      set({
+        uiMode: 'preview',
+        draft: structuredClone(s),
+        selectedFieldId: null,
+        selectedNodeTemplatePart: null,
+      });
     },
 
     startNew: (name) => {
       const draft = createEmptyStructure(name ?? 'Untitled structure');
-      set({ uiMode: 'editor', draft, selectedFieldId: null });
+      set({
+        uiMode: 'editor',
+        draft,
+        selectedFieldId: null,
+        selectedNodeTemplatePart: null,
+      });
     },
 
     editStructure: (id) => {
       const s = get().structures.find((x) => x.id === id);
       if (!s) return;
-      set({ uiMode: 'editor', draft: structuredClone(s), selectedFieldId: null });
+      set({
+        uiMode: 'editor',
+        draft: structuredClone(s),
+        selectedFieldId: null,
+        selectedNodeTemplatePart: null,
+      });
     },
 
     saveDraft: () => {
@@ -116,11 +158,23 @@ export function createStructureStore() {
         (a, b) => b.updatedAt - a.updatedAt,
       );
       persist(structures);
-      set({ structures, uiMode: 'library', draft: null, selectedFieldId: null });
+      set({
+        structures,
+        uiMode: 'library',
+        draft: null,
+        selectedFieldId: null,
+        selectedNodeTemplatePart: null,
+      });
       return true;
     },
 
-    discardDraft: () => set({ uiMode: 'library', draft: null, selectedFieldId: null }),
+    discardDraft: () =>
+      set({
+        uiMode: 'library',
+        draft: null,
+        selectedFieldId: null,
+        selectedNodeTemplatePart: null,
+      }),
 
     deleteStructure: (id) => {
       const structures = get().structures.filter((s) => s.id !== id);
@@ -180,6 +234,7 @@ export function createStructureStore() {
       set({
         draft: touchDraft({ ...draft, fields: [...draft.fields, field] }),
         selectedFieldId: field.id,
+        selectedNodeTemplatePart: kind === 'node_section' ? 'root' : null,
       });
     },
 
@@ -264,10 +319,30 @@ export function createStructureStore() {
       });
     },
 
-    selectField: (fieldId) => set({ selectedFieldId: fieldId }),
+    selectField: (fieldId, nodeTemplatePart = null) =>
+      set({
+        selectedFieldId: fieldId,
+        selectedNodeTemplatePart: fieldId ? nodeTemplatePart : null,
+      }),
 
     setFieldGeometry: (fieldId, geom) => {
       get().updateField(fieldId, geom);
+    },
+
+    setNodeTemplateGeometry: (fieldId, part, geom) => {
+      const draft = get().draft;
+      if (!draft) return;
+      const field = draft.fields.find((f) => f.id === fieldId);
+      if (!field || field.componentKind !== 'node_section') return;
+      if (part === 'root') {
+        get().updateField(fieldId, {
+          rootTemplate: { ...field.rootTemplate, ...geom },
+        });
+      } else {
+        get().updateField(fieldId, {
+          childTemplate: { ...field.childTemplate, ...geom },
+        });
+      }
     },
 
     setSelectedStructureIdForAi: (id) => set({ selectedStructureIdForAi: id }),
