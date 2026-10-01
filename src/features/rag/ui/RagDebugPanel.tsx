@@ -14,6 +14,7 @@ import { computeDebugContext, useRagDebugStore } from '../ragDebugStore';
 import type { SemanticTreeNode } from '../semanticExpansion';
 
 type RagDebugPage =
+  | 'selected'
   | 'intent'
   | 'matches'
   | 'spatial'
@@ -21,6 +22,7 @@ type RagDebugPage =
   | 'context';
 
 const RAG_DEBUG_PAGES: { id: RagDebugPage; label: string }[] = [
+  { id: 'selected', label: 'Selected' },
   { id: 'intent', label: 'Intent' },
   { id: 'matches', label: 'Matches' },
   { id: 'spatial', label: 'Spatial' },
@@ -115,7 +117,7 @@ function SemanticTreeBranch({
  * expansion → copy LLM prompt / paste response (Manual LLM Mode by default).
  */
 export function RagDebugPanel() {
-  const [page, setPage] = useState<RagDebugPage>('matches');
+  const [page, setPage] = useState<RagDebugPage>('selected');
   const open = useRagDebugStore((s) => s.open);
   const prompt = useRagDebugStore((s) => s.prompt);
   const retrieving = useRagDebugStore((s) => s.retrieving);
@@ -125,6 +127,7 @@ export function RagDebugPanel() {
   const statusMessage = useRagDebugStore((s) => s.statusMessage);
   const candidates = useRagDebugStore((s) => s.candidates);
   const selectedAnchorIds = useRagDebugStore((s) => s.selectedAnchorIds);
+  const explicitSelectionIds = useRagDebugStore((s) => s.explicitSelectionIds);
   const spatialExpansionEnabled = useRagDebugStore((s) => s.spatialExpansionEnabled);
   const radius = useRagDebugStore((s) => s.radius);
   const semanticExpansionEnabled = useRagDebugStore((s) => s.semanticExpansionEnabled);
@@ -145,6 +148,7 @@ export function RagDebugPanel() {
   const lastRetrieveMeta = useRagDebugStore((s) => s.lastRetrieveMeta);
   const promptIntent = useRagDebugStore((s) => s.promptIntent);
   const elements = useCanvasStore((s) => s.document.elements);
+  const liveEditorSelectedIds = useCanvasStore((s) => s.selectedIds);
 
   const setPrompt = useRagDebugStore((s) => s.setPrompt);
   const setRadius = useRagDebugStore((s) => s.setRadius);
@@ -186,6 +190,7 @@ export function RagDebugPanel() {
           prompt,
           candidates,
           selectedAnchorIds,
+          explicitSelectionIds,
           spatialExpansionEnabled,
           radius,
           semanticExpansionEnabled,
@@ -200,6 +205,7 @@ export function RagDebugPanel() {
       prompt,
       candidates,
       selectedAnchorIds,
+      explicitSelectionIds,
       spatialExpansionEnabled,
       radius,
       semanticExpansionEnabled,
@@ -212,9 +218,14 @@ export function RagDebugPanel() {
   );
 
   const llmPrompt = useMemo(() => {
-    if (!prompt.trim() || selectedAnchorIds.length === 0) return null;
+    if (
+      !prompt.trim() ||
+      (selectedAnchorIds.length === 0 && explicitSelectionIds.length === 0)
+    ) {
+      return null;
+    }
     return buildLlmPrompt({ userPrompt: prompt, ragContext: context });
-  }, [prompt, context, selectedAnchorIds.length]);
+  }, [prompt, context, selectedAnchorIds.length, explicitSelectionIds.length]);
 
   const selectedSet = useMemo(() => new Set(selectedAnchorIds), [selectedAnchorIds]);
   const includedSet = useMemo(() => new Set(semanticIncludedIds), [semanticIncludedIds]);
@@ -224,7 +235,9 @@ export function RagDebugPanel() {
   );
   const busy = retrieving || sending || expanding;
   const manual = llmExecutionMode === 'manual';
-  const canBuildPrompt = selectedAnchorIds.length > 0 && prompt.trim().length > 0;
+  const canBuildPrompt =
+    prompt.trim().length > 0 &&
+    (selectedAnchorIds.length > 0 || explicitSelectionIds.length > 0);
   const canSendAutomatic = canBuildPrompt && !busy && !manual;
 
   return (
@@ -311,6 +324,8 @@ export function RagDebugPanel() {
           </div>
 
           <p className="rag-debug-summary-strip">
+            selected {context.stats.explicit_selection_count}
+            {' · '}
             anchors {context.stats.semantic_anchor_count}
             {' · '}
             spatial {context.stats.spatial_addition_count}
@@ -335,6 +350,51 @@ export function RagDebugPanel() {
           </nav>
 
           <div className="rag-debug-page" role="tabpanel">
+            {page === 'selected' && (
+              <section className="rag-debug-section">
+                <div className="rag-debug-section-title">
+                  Explicit canvas selection
+                </div>
+                <p className="rag-debug-meta">
+                  Captured from the editor selection when you Retrieve / Copy /
+                  Send. Distinct from RAG semantic-anchor checkboxes. Always
+                  included in context — no extra checkbox. Does not trigger
+                  spatial or semantic expansion.
+                </p>
+                <p className="rag-debug-meta">
+                  Captured for this prompt:{' '}
+                  <strong>{explicitSelectionIds.length}</strong>
+                  {' · '}
+                  Live editor selection: <strong>{liveEditorSelectedIds.length}</strong>
+                </p>
+                {context.explicitlySelectedElements.length === 0 ? (
+                  <p className="rag-debug-empty">
+                    No editor selection captured yet. Select canvas elements,
+                    then Retrieve (or Copy LLM prompt).
+                  </p>
+                ) : (
+                  <ul className="rag-debug-list">
+                    {context.explicitlySelectedElements.map((el) => (
+                      <li key={el.element_id} className="rag-debug-item is-selected">
+                        <div className="rag-debug-row tight">
+                          <input type="checkbox" checked readOnly disabled />
+                          <span className="rag-debug-badge explicit_selection">
+                            explicit_selection
+                          </span>
+                          <span className="rag-debug-id">{el.element_id}</span>
+                          <span className="rag-debug-meta">{el.element_type}</span>
+                        </div>
+                        <p className="rag-debug-preview">
+                          {previewText(el.text || '(no readable content)', 100)}
+                        </p>
+                        <p className="rag-debug-meta">Automatically included: Yes</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            )}
+
             {page === 'intent' && (
               <section className="rag-debug-section">
                 <div className="rag-debug-section-title">Prompt intent</div>
@@ -691,6 +751,10 @@ export function RagDebugPanel() {
                 <section className="rag-debug-section rag-debug-counts">
                   <div className="rag-debug-section-title">Final context</div>
                   <div>
+                    Explicit selection:{' '}
+                    <strong>{context.stats.explicit_selection_count}</strong>
+                  </div>
+                  <div>
                     Semantic anchors:{' '}
                     <strong>{context.stats.semantic_anchor_count}</strong>
                   </div>
@@ -724,6 +788,8 @@ export function RagDebugPanel() {
                     {(context.stats.truncated_by_element_budget ||
                       context.stats.truncated_by_character_budget) &&
                       ' · truncated'}
+                    {context.stats.required_context_exceeds_budget &&
+                      ' · required explicit/anchor context exceeds budget (kept)'}
                   </div>
                 </section>
 
@@ -788,8 +854,41 @@ export function RagDebugPanel() {
                 {previewOpen && (
                   <section className="rag-debug-section">
                     <div className="rag-debug-section-title">Context preview</div>
+                    {context.explicitlySelectedElements.length > 0 && (
+                      <>
+                        <div className="rag-debug-section-title">
+                          Explicitly selected canvas elements
+                        </div>
+                        <ul className="rag-debug-list compact">
+                          {context.explicitlySelectedElements.map((el) => (
+                            <li key={`ex-${el.element_id}`} className="rag-debug-item">
+                              <div className="rag-debug-row tight">
+                                <span className="rag-debug-badge explicit_selection">
+                                  explicit_selection
+                                </span>
+                                <span className="rag-debug-id">{el.element_id}</span>
+                              </div>
+                              <p className="rag-debug-meta">
+                                SOURCES: {el.sources.map((s) => s.type).join(', ')}
+                              </p>
+                              <p className="rag-debug-preview">
+                                {previewText(el.text, 100)}
+                              </p>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                    <div className="rag-debug-section-title">
+                      Retrieved supporting context
+                    </div>
                     <ul className="rag-debug-list compact">
-                      {context.allElements.map((el) => {
+                      {context.allElements
+                        .filter(
+                          (el) =>
+                            !el.sources.some((s) => s.type === 'explicit_selection'),
+                        )
+                        .map((el) => {
                         const neigh = el.sources.filter(
                           (s) => s.type === 'semantic_neighbor',
                         );

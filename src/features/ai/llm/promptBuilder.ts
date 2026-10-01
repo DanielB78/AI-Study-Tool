@@ -26,6 +26,11 @@ function formatRetrieval(el: RagContextElement): string[] {
   lines.push('RETRIEVAL:');
   lines.push(kinds.join(' + '));
 
+  if (el.sources.some((s) => s.type === 'explicit_selection')) {
+    lines.push('');
+    lines.push('EXPLICIT SELECTION: yes');
+  }
+
   if (el.similarity !== null) {
     lines.push('');
     lines.push('SIMILARITY:');
@@ -80,23 +85,59 @@ function formatElementBlock(el: RagContextElement): string {
 
 /**
  * Format the CANVAS CONTEXT section for the full LLM prompt.
- * Uses full TextElement text already resolved on RagContextElement.
- * Context is USER/data — never merged into trusted system instructions.
+ * Explicit selection is listed first; retrieved supporting context follows.
  */
 export function formatCanvasContextSection(context: RagContext): string {
   if (context.allElements.length === 0) {
     return ['CANVAS CONTEXT', '', '(none selected)'].join('\n');
   }
 
-  const blocks = context.allElements.map((el) => formatElementBlock(el));
-  return [
+  const parts: string[] = [
     'CANVAS CONTEXT',
     '',
-    'The following elements were retrieved for relevance. IDs are stable.',
-    'POSITION values are canvas world coordinates.',
-    '',
-    blocks.join(`\n\n${'-'.repeat(50)}\n\n`),
-  ].join('\n');
+    'Element IDs are stable. POSITION values are canvas world coordinates.',
+  ];
+
+  if (context.explicitlySelectedElements.length > 0) {
+    parts.push('');
+    parts.push('EXPLICIT USER SELECTION');
+    parts.push('');
+    parts.push(
+      'The following elements were selected by the user when this request was submitted.',
+    );
+    parts.push(
+      'Selection is a strong contextual signal but does not by itself require modification.',
+    );
+    parts.push(
+      'When the user says "this" / "these" / "this one", prefer these selected element(s).',
+    );
+    parts.push('');
+    parts.push(
+      context.explicitlySelectedElements
+        .map((el) => formatElementBlock(el))
+        .join(`\n\n${'-'.repeat(50)}\n\n`),
+    );
+  }
+
+  const supporting = context.allElements.filter(
+    (el) => !el.sources.some((s) => s.type === 'explicit_selection'),
+  );
+  if (supporting.length > 0) {
+    parts.push('');
+    parts.push('RETRIEVED CANVAS CONTEXT');
+    parts.push('');
+    parts.push(
+      'The following elements were retrieved for relevance (not user-selected).',
+    );
+    parts.push('');
+    parts.push(
+      supporting
+        .map((el) => formatElementBlock(el))
+        .join(`\n\n${'-'.repeat(50)}\n\n`),
+    );
+  }
+
+  return parts.join('\n');
 }
 
 export interface BuildLlmPromptInput {

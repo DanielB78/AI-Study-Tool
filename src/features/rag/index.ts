@@ -22,6 +22,12 @@ export {
   DEFAULT_RAG_SYSTEM_INSTRUCTION,
 } from './contextBuilder';
 export {
+  resolveExplicitSelection,
+  snapshotEditorSelection,
+  extractElementContextContent,
+} from './explicitSelection';
+export type { ExplicitSelectionInput } from './explicitSelection';
+export {
   semanticExpansionService,
   createSemanticExpansionService,
   buildSemanticTrees,
