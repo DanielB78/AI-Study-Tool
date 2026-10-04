@@ -3,13 +3,20 @@ import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App.tsx';
 import { useCanvasStore } from './store/canvasStore';
-import { debugRetrieve, useRagDebugStore } from './features/rag';
+import {
+  debugRetrieve,
+  startHandwritingRecognitionSync,
+  useRagDebugStore,
+} from './features/rag';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
   </StrictMode>,
 );
+
+// Debounced pen → region detect → TrOCR → EmbeddingGemma indexing.
+startHandwritingRecognitionSync();
 
 // Development-only RAG inspection (not production UI).
 if (import.meta.env.DEV) {

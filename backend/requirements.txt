@@ -16,5 +16,6 @@ sentence-transformers>=5.1.0
 transformers>=4.56.0
 torch>=2.4.0
 huggingface-hub>=0.34.0
+pillow>=10.4.0
 pytest>=8.3.0
 pytest-asyncio>=0.24.0

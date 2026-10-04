@@ -89,6 +89,7 @@ export function isSpatiallyEligible(el: SpatialElementLike): boolean {
   if (el.type === 'equation') return true;
   if (el.type === 'image') return true;
   if (el.type === 'graph') return true;
+  if (el.type === 'handwriting_region') return true;
   // Shape labels only when non-empty — no invented semantics.
   if (el.type === 'shape' && typeof el.label === 'string' && el.label.trim()) {
     return true;
@@ -153,8 +154,9 @@ export function findElementsNearAnchors(
 
 export function canvasElementsAsSpatial(
   elements: readonly CanvasElement[],
+  extra?: readonly SpatialElementLike[],
 ): SpatialElementLike[] {
-  return elements.map((el) => {
+  const base: SpatialElementLike[] = elements.map((el) => {
     if (el.type === 'text') {
       return {
         id: el.id,
@@ -221,6 +223,15 @@ export function canvasElementsAsSpatial(
       height: el.height,
     };
   });
+  if (!extra?.length) return base;
+  const seen = new Set(base.map((e) => e.id));
+  const out = [...base];
+  for (const el of extra) {
+    if (seen.has(el.id)) continue;
+    out.push(el);
+    seen.add(el.id);
+  }
+  return out;
 }
 
 export function textElementAsSpatial(el: TextElement): SpatialElementLike {

@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 class TextElementIndexRequest(BaseModel):
     board_id: str = Field(..., min_length=1, max_length=128)
     element_id: str = Field(..., min_length=1, max_length=128)
-    element_type: Literal["text"] = "text"
+    element_type: Literal["text", "handwriting_region"] = "text"
     text: str
     x: float
     y: float
@@ -32,6 +32,42 @@ class TextElementIndexRequest(BaseModel):
             raise ValueError("must be a finite number")
         return value
 
+
+# Alias kept for clarity at handwriting call sites.
+HandwritingRegionIndexRequest = TextElementIndexRequest
+
+
+class HandwritingLineImage(BaseModel):
+    """One rendered handwriting line (top→bottom order)."""
+
+    line_id: str = Field(..., min_length=1, max_length=128)
+    """PNG/JPEG data URL or raw base64."""
+    image_data: str = Field(..., min_length=1)
+
+
+class HandwritingRecognizeRequest(BaseModel):
+    """Recognize one or more handwriting-line images with local TrOCR."""
+
+    board_id: str | None = Field(default=None, max_length=128)
+    region_id: str | None = Field(default=None, max_length=128)
+    lines: list[HandwritingLineImage] = Field(..., min_length=1)
+
+
+class HandwritingLineResult(BaseModel):
+    line_id: str
+    recognized_text: str
+    status: Literal["ready", "empty", "failed"]
+    error: str | None = None
+
+
+class HandwritingRecognizeResponse(BaseModel):
+    region_id: str | None = None
+    combined_text: str
+    line_results: list[HandwritingLineResult]
+    recognizer_model: str
+    recognizer_provider: str
+    status: Literal["ready", "empty", "failed"]
+    usable_for_embedding: bool
 
 class GeometryUpdateRequest(BaseModel):
     x: float
