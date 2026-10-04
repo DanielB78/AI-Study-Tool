@@ -57,9 +57,11 @@ describe('buildLlmPrompt', () => {
   it('includes create_graph in available actions and output contract', () => {
     expect(CANVAS_EDITOR_SYSTEM_PROMPT).toContain('create_graph');
     expect(CANVAS_EDITOR_SYSTEM_PROMPT).toContain('GRAPH CREATION');
-    expect(CANVAS_EDITOR_SYSTEM_PROMPT).toContain('You cannot edit existing graphs');
+    expect(CANVAS_EDITOR_SYSTEM_PROMPT).toContain('GRAPH EDITING');
+    expect(CANVAS_EDITOR_SYSTEM_PROMPT).toContain('add_graph_expression');
     expect(built.finalLlmPrompt).toContain('create_graph');
     expect(CANVAS_AGENT_OUTPUT_CONTRACT).toContain('create_graph');
+    expect(CANVAS_AGENT_OUTPUT_CONTRACT).toContain('add_graph_expression');
     expect(CANVAS_AGENT_OUTPUT_CONTRACT).toContain('x**2');
   });
 

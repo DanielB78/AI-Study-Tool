@@ -205,23 +205,23 @@ describe('planner decision fixtures', () => {
     expect(ops.some((o) => o.type === 'create_graph')).toBe(false);
   });
 
-  it('add-to-existing-graph edit ops are rejected', () => {
+  it('add-to-existing-graph requires graph_id in context', () => {
     expect(() =>
       parseCanvasAgentResponse(
         JSON.stringify({
           operations: [
             {
               type: 'add_graph_expression',
-              target_element_id: 'graph_1',
-              expression: 'x**2',
+              graph_id: 'graph_1',
+              expression: { expression: 'x**2', visible: true },
             },
           ],
         }),
         {
-          allowedElementIds: new Set(['graph_1']),
-          elementTypes: new Map([['graph_1', 'graph']]),
+          allowedElementIds: new Set(['textbox_1']),
+          elementTypes: new Map([['textbox_1', 'text']]),
         },
       ),
-    ).toThrow(/not supported yet/i);
+    ).toThrow(/not in the supplied canvas context/i);
   });
 });

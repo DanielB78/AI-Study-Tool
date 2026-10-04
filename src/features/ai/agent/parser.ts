@@ -38,6 +38,13 @@ import {
   DEFAULT_GRAPH_VIEWPORT,
   isValidViewport,
 } from '../../graphs/types';
+import {
+  GraphOpParseError,
+  isGraphEditOperationType,
+  parseGraphEditOperation,
+  prettyCurve,
+  type GraphEditOperation,
+} from './graphOperations';
 
 export type ParseErrorCode =
   | 'empty'
@@ -64,7 +71,10 @@ export type ParseErrorCode =
   | 'invalid_graph_expression'
   | 'invalid_graph_viewport'
   | 'invalid_graph_domain'
-  | 'empty_graph_content';
+  | 'empty_graph_content'
+  | 'target_not_graph'
+  | 'expression_not_on_graph'
+  | 'point_not_on_graph';
 
 export class CanvasAgentParseError extends Error {
   readonly code: ParseErrorCode;
@@ -81,13 +91,17 @@ export class CanvasAgentParseError extends Error {
 export interface ParseContext {
   /** Element IDs included in the RAG context sent to the model. */
   allowedElementIds: ReadonlySet<string>;
-  /** Optional: map id → type for TextElement checks. */
+  /** Optional: map id → type for TextElement / GraphElement checks. */
   elementTypes?: ReadonlyMap<string, string>;
   /**
    * Structure selected for this request (snapshot).
    * null/undefined = No Structure mode (create_structured_note forbidden).
    */
   selectedStructure?: NoteStructure | null;
+  /** graph_id → expression ids currently on that graph (from CanvasDocument). */
+  graphExpressionIds?: ReadonlyMap<string, ReadonlySet<string>>;
+  /** graph_id → point ids currently on that graph. */
+  graphPointIds?: ReadonlyMap<string, ReadonlySet<string>>;
 }
 
 /** Strip optional ```json fences; still require JSON object body. */
@@ -447,20 +461,27 @@ function parseOperation(raw: unknown): CanvasOperation {
   if (raw.type === 'create_graph') {
     return parseCreateGraph(raw);
   }
-  // Explicitly reject future graph-edit ops so they never silently fall through.
-  if (
-    raw.type === 'update_graph' ||
-    raw.type === 'add_graph_expression' ||
-    raw.type === 'remove_graph_expression' ||
-    raw.type === 'update_graph_viewport' ||
-    raw.type === 'update_graph_settings' ||
-    raw.type === 'update_graph_expression'
-  ) {
-    throw new CanvasAgentParseError(
-      'unknown_operation',
-      `Graph editing is not supported yet ("${raw.type}"). Create a new graph with create_graph instead, or skip the operation.`,
-      String(raw.type),
-    );
+  if (isGraphEditOperationType(raw.type)) {
+    try {
+      return parseGraphEditOperation(raw);
+    } catch (err) {
+      if (err instanceof GraphOpParseError) {
+        throw new CanvasAgentParseError(
+          err.code === 'invalid_graph_expression'
+            ? 'invalid_graph_expression'
+            : err.code === 'invalid_graph_domain'
+              ? 'invalid_graph_domain'
+              : err.code === 'invalid_graph_viewport'
+                ? 'invalid_graph_viewport'
+                : err.code === 'empty_text'
+                  ? 'empty_text'
+                  : 'schema',
+          err.message,
+          err.detail,
+        );
+      }
+      throw err;
+    }
   }
   throw new CanvasAgentParseError(
     'unknown_operation',
@@ -605,6 +626,69 @@ function validateRelativePlacement(placement: Placement, ctx: ParseContext): voi
   }
 }
 
+function validateGraphTarget(graphId: string, ctx: ParseContext): void {
+  if (!ctx.allowedElementIds.has(graphId)) {
+    throw new CanvasAgentParseError(
+      'target_not_in_context',
+      `graph_id "${graphId}" was not in the supplied canvas context.`,
+      graphId,
+    );
+  }
+  const t = ctx.elementTypes?.get(graphId);
+  if (t !== undefined && t !== 'graph') {
+    throw new CanvasAgentParseError(
+      'target_not_graph',
+      `graph_id "${graphId}" is not a GraphElement.`,
+      graphId,
+    );
+  }
+}
+
+function validateExpressionOnGraph(
+  graphId: string,
+  expressionId: string,
+  ctx: ParseContext,
+): void {
+  const ids = ctx.graphExpressionIds?.get(graphId);
+  if (ids && !ids.has(expressionId)) {
+    throw new CanvasAgentParseError(
+      'expression_not_on_graph',
+      `expression_id "${expressionId}" is not on graph "${graphId}".`,
+      expressionId,
+    );
+  }
+}
+
+function validatePointOnGraph(
+  graphId: string,
+  pointId: string,
+  ctx: ParseContext,
+): void {
+  const ids = ctx.graphPointIds?.get(graphId);
+  if (ids && !ids.has(pointId)) {
+    throw new CanvasAgentParseError(
+      'point_not_on_graph',
+      `point_id "${pointId}" is not on graph "${graphId}".`,
+      pointId,
+    );
+  }
+}
+
+function validateGraphEdit(op: GraphEditOperation, ctx: ParseContext): void {
+  validateGraphTarget(op.graph_id, ctx);
+  if (
+    op.type === 'update_graph_expression' ||
+    op.type === 'remove_graph_expression' ||
+    op.type === 'set_graph_expression_visibility'
+  ) {
+    validateExpressionOnGraph(op.graph_id, op.expression_id, ctx);
+  }
+  if (op.type === 'update_graph_point' || op.type === 'remove_graph_point') {
+    validatePointOnGraph(op.graph_id, op.point_id, ctx);
+  }
+  // Final viewport validity for PATCH is checked at execute against live graph.
+}
+
 function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
   if (op.type === 'update_text') {
     if (!ctx.allowedElementIds.has(op.target_element_id)) {
@@ -631,6 +715,9 @@ function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
   }
   if (op.type === 'create_structured_note') {
     validateStructuredNote(op, ctx);
+  }
+  if (isGraphEditOperationType(op.type)) {
+    validateGraphEdit(op as GraphEditOperation, ctx);
   }
 }
 
@@ -706,13 +793,6 @@ function formatPlacementLine(p: Placement, style: 'short' | 'friendly' = 'short'
   return `${p.relation} ${p.anchor_element_id}`;
 }
 
-/** Pretty-ish display for plan UI — does not change machine expression. */
-function prettyGraphExpression(canonical: string): string {
-  return canonical
-    .replaceAll('**', '^')
-    .replace(/\*/g, '·');
-}
-
 /** Human-readable plan lines for the debug UI. */
 export function describeOperationPlan(
   ops: readonly CanvasOperation[],
@@ -769,7 +849,7 @@ export function describeOperationPlan(
         op.expressions.length === 0
           ? ['   (no curves)']
           : op.expressions.map(
-              (e) => `   • y = ${prettyGraphExpression(e.expression)}`,
+              (e) => `   • y = ${prettyCurve(e.expression)}`,
             );
       const pointLines =
         op.points.length === 0
@@ -803,6 +883,70 @@ export function describeOperationPlan(
         ...(labelBits.length ? [`   Axis labels: ${labelBits.join(', ')}`] : []),
         `   Placement: ${formatPlacementLine(op.placement, 'friendly')}`,
       ].join('\n');
+    }
+    if (isGraphEditOperationType(op.type)) {
+      const lines = [`${n}. EDIT GRAPH`, `   Graph: ${op.graph_id}`];
+      switch (op.type) {
+        case 'add_graph_expression':
+          lines.push(`   ADD CURVE`);
+          lines.push(`   y = ${prettyCurve(op.expression.expression)}`);
+          break;
+        case 'update_graph_expression':
+          lines.push(`   UPDATE CURVE ${op.expression_id}`);
+          if (op.expression) lines.push(`   y = ${prettyCurve(op.expression)}`);
+          if ('domain_min' in op || 'domain_max' in op) {
+            lines.push(
+              `   Domain: ${op.domain_min ?? '…'} → ${op.domain_max ?? '…'}`,
+            );
+          }
+          break;
+        case 'remove_graph_expression':
+          lines.push(`   REMOVE CURVE ${op.expression_id}`);
+          break;
+        case 'set_graph_expression_visibility':
+          lines.push(
+            `   ${op.visible ? 'SHOW' : 'HIDE'} CURVE ${op.expression_id}`,
+          );
+          break;
+        case 'update_graph_viewport': {
+          lines.push('   CHANGE VIEWPORT');
+          if ('x_min' in op || 'x_max' in op) {
+            lines.push(`   X: ${op.x_min ?? '…'} → ${op.x_max ?? '…'}`);
+          }
+          if ('y_min' in op || 'y_max' in op) {
+            lines.push(`   Y: ${op.y_min ?? '…'} → ${op.y_max ?? '…'}`);
+          }
+          break;
+        }
+        case 'update_graph_settings': {
+          lines.push('   UPDATE SETTINGS');
+          if ('title' in op) lines.push(`   Title: ${op.title ?? '(none)'}`);
+          if ('show_grid' in op) {
+            lines.push(`   Grid: ${op.show_grid ? 'On' : 'Off'}`);
+          }
+          if ('x_axis_label' in op) {
+            lines.push(`   X label: ${op.x_axis_label ?? '(none)'}`);
+          }
+          if ('y_axis_label' in op) {
+            lines.push(`   Y label: ${op.y_axis_label ?? '(none)'}`);
+          }
+          break;
+        }
+        case 'add_graph_point':
+          lines.push(
+            `   ADD POINT (${op.x}, ${op.y})${op.label ? ` ${op.label}` : ''}`,
+          );
+          break;
+        case 'update_graph_point':
+          lines.push(`   UPDATE POINT ${op.point_id}`);
+          break;
+        case 'remove_graph_point':
+          lines.push(`   REMOVE POINT ${op.point_id}`);
+          break;
+        default:
+          break;
+      }
+      return lines.join('\n');
     }
     const placementLine = formatPlacementLine(op.placement, 'short');
     const preview = op.text.replace(/\s+/g, ' ').slice(0, 80);

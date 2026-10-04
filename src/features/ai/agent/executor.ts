@@ -25,6 +25,10 @@ import {
   DEFAULT_GRAPH_HEIGHT,
   DEFAULT_GRAPH_WIDTH,
 } from '../../graphs/types';
+import {
+  applyGraphEditOperation,
+  isGraphEditOperationType,
+} from './graphOperations';
 
 export interface AgentExecutorTarget {
   getCamera: () => Camera;
@@ -208,6 +212,22 @@ export function executeCanvasOperations(
         });
         target.addElement(element, false);
         createdIds.push(element.id);
+      } else if (isGraphEditOperationType(op.type)) {
+        const graphId = op.graph_id;
+        target.updateElement(graphId, (el) => {
+          if (el.type !== 'graph') return el;
+          const next = applyGraphEditOperation(el, op);
+          return {
+            ...next,
+            metadata: {
+              ...next.metadata,
+              lastEditedBy: 'ai',
+              source: 'agent',
+              operation: op.type,
+            },
+          };
+        });
+        updatedIds.push(graphId);
       }
     }
   } finally {

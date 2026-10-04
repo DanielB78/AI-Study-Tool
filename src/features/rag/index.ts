@@ -50,6 +50,19 @@ export {
 } from './explicitSelection';
 export type { ExplicitSelectionInput } from './explicitSelection';
 export {
+  toGraphContextItem,
+  formatGraphContextItem,
+  formatGraphElementForContext,
+  summarizeGraphForDebug,
+} from './graphContext';
+export type {
+  GraphContextItem,
+  GraphContextExpression,
+  GraphContextPoint,
+  GraphContextViewport,
+  GraphContextSettings,
+} from './graphContext';
+export {
   semanticExpansionService,
   createSemanticExpansionService,
   buildSemanticTrees,

@@ -708,6 +708,8 @@ export function RagDebugPanel() {
                   <strong>{context.stats.spatial_equation_addition_count}</strong>
                   {' · img '}
                   <strong>{context.stats.spatial_image_addition_count}</strong>
+                  {' · graph '}
+                  <strong>{context.stats.spatial_graph_addition_count}</strong>
                   {' · '}
                   anchors selected: <strong>{selectedAnchorIds.length}</strong>
                 </p>
@@ -769,6 +771,12 @@ export function RagDebugPanel() {
                                   alt=""
                                   title={row.element_id}
                                 />
+                              )}
+                              {row.element_type === 'graph' && (
+                                <pre className="rag-debug-pre compact">
+                                  {(row.text || '(graph)').slice(0, 400)}
+                                  {(row.text?.length ?? 0) > 400 ? '…' : ''}
+                                </pre>
                               )}
                             </li>
                           );
@@ -943,6 +951,8 @@ export function RagDebugPanel() {
                     {context.stats.spatial_equation_addition_count}
                     {' · img '}
                     {context.stats.spatial_image_addition_count}
+                    {' · graph '}
+                    {context.stats.spatial_graph_addition_count}
                     )
                   </div>
                   <div>

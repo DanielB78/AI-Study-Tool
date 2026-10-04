@@ -79,6 +79,20 @@ function formatRetrieval(el: RagContextElement): string[] {
 
 function formatElementBlock(el: RagContextElement): string {
   const g = el.geometry;
+  if (el.element_type === 'graph') {
+    return [
+      el.text || 'GRAPH ELEMENT\n\n(empty graph)',
+      '',
+      'POSITION:',
+      `x: ${g.x}`,
+      `y: ${g.y}`,
+      `width: ${g.width}`,
+      `height: ${g.height}`,
+      '',
+      ...formatRetrieval(el),
+    ].join('\n');
+  }
+
   const isImage = el.element_type === 'image';
   const contentLines = isImage
     ? [

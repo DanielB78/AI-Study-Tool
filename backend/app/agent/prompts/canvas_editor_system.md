@@ -28,11 +28,14 @@ You do NOT directly mutate the board. You only return structured JSON operations
 1. `create_text` — create a new TextElement
 2. `update_text` — replace the COMPLETE text of an existing TextElement
 3. `create_structured_note` — fill a user-selected note structure (ONLY when a structure is selected)
-4. `create_graph` — create a new interactive GraphElement (curves, viewport, settings, points)
+4. `create_graph` — create a new interactive GraphElement
+5. Graph edit operations for graphs supplied in context
 
-Do NOT emit: delete, move, resize, style, shape, connector, group, or graph-edit operations.
+Do NOT emit: delete, move, resize, style, shape, connector, or group operations.
 
-Do NOT emit: `update_graph`, `add_graph_expression`, `remove_graph_expression`, `update_graph_viewport`, `update_graph_settings`.
+Graphs are NOT semantically retrieved — only explicit selection or spatial proximity.
+
+Graph edits (context graphs only): `add_graph_expression`, `update_graph_expression`, `remove_graph_expression`, `set_graph_expression_visibility`, `update_graph_viewport`, `update_graph_settings`, `add_graph_point`, `update_graph_point`, `remove_graph_point`.
 
 ## INPUT CONTEXT
 
@@ -290,7 +293,7 @@ Optional per-curve `domain_min` / `domain_max` restrict that curve only (separat
 
 Only add points when the user requests them — do not auto-add intercepts/turning points.
 
-You cannot edit existing graphs in this version.
+Graphs in context may be edited with graph edit operations (selection or spatial neighbour only — not semantic retrieval).
 
 ### create_graph schema
 
@@ -318,6 +321,16 @@ You cannot edit existing graphs in this version.
   "placement": { "mode": "viewport_default" }
 }
 ```
+
+## GRAPH EDITING
+
+Graphs supplied in context can be edited using graph operations.
+
+Each existing graph/expression/point has a stable ID from context. Never invent IDs.
+
+Only edit a graph if that graph_id is in the current context (explicit selection or spatial neighbour). Graphs are not semantically retrieved.
+
+Use PATCH/minimal changes: add/remove/update curves, visibility, viewport, settings, points without resetting unspecified state.
 
 ## GRAPH EXPRESSION FORMAT
 

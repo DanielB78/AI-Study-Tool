@@ -3,7 +3,8 @@
  * Finds canvas elements whose AABB distance to an anchor is ≤ radius.
  *
  * Operates over CANVAS ELEMENT GEOMETRY (not the embedding index).
- * ImageElements are spatial-only candidates: geometry + asset ref, no embeddings.
+ * ImageElements and GraphElements are spatial-only candidates:
+ * geometry (+ asset ref for images). Graphs have NO embeddings.
  */
 
 import type { CanvasElement, ImageElement, TextElement } from '../../types/canvas';
@@ -80,12 +81,14 @@ export function hashAssetRef(src: string): string {
 
 /**
  * Eligible types for spatial context.
- * Images are included even though they have no embedding / no text.
+ * Images and graphs are included even though they have no embedding.
+ * Graphs: geometry only for retrieval — structured state is enriched later.
  */
 export function isSpatiallyEligible(el: SpatialElementLike): boolean {
   if (el.type === 'text') return true;
   if (el.type === 'equation') return true;
   if (el.type === 'image') return true;
+  if (el.type === 'graph') return true;
   // Shape labels only when non-empty — no invented semantics.
   if (el.type === 'shape' && typeof el.label === 'string' && el.label.trim()) {
     return true;
@@ -195,6 +198,18 @@ export function canvasElementsAsSpatial(
         width: el.width,
         height: el.height,
         src: el.src,
+      };
+    }
+    if (el.type === 'graph') {
+      return {
+        id: el.id,
+        type: el.type,
+        x: el.x,
+        y: el.y,
+        width: el.width,
+        height: el.height,
+        // Structured graph body is filled from live CanvasDocument when
+        // building context — never embed graph content.
       };
     }
     return {
