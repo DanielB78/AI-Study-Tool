@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { useKeyboardShortcuts } from '../../canvas/hooks/useKeyboardShortcuts';
 import { AiFloatingPanel } from '../../features/ai';
+import { GraphEditorPanel } from '../../features/graphs/GraphEditorPanel';
 import { RagDebugPanel } from '../../features/rag/ui/RagDebugPanel';
 import { StructureLibraryPanel } from '../../features/structures';
 import { FloatingToolPalette } from './FloatingToolPalette';
@@ -15,6 +16,7 @@ export function EditorChrome() {
     <>
       <FloatingToolPalette fileInputRef={fileInputRef} />
       <ContextualToolbar />
+      <GraphEditorPanel />
       <AiFloatingPanel />
       <StructureLibraryPanel />
       {import.meta.env.DEV && <RagDebugPanel />}

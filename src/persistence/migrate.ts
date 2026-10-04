@@ -5,6 +5,7 @@ import type {
   ConnectorElement,
   DrawingElement,
   EquationElement,
+  GraphElement,
   ImageElement,
   ShapeElement,
   StyleDefaults,
@@ -12,6 +13,11 @@ import type {
 } from '../types/canvas';
 import { DOCUMENT_VERSION, DEFAULT_STYLE, createEmptyDocument } from '../types/canvas';
 import { nanoid } from 'nanoid';
+import {
+  DEFAULT_GRAPH_SETTINGS,
+  DEFAULT_GRAPH_VIEWPORT,
+  nextExpressionColor,
+} from '../features/graphs/types';
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -152,6 +158,66 @@ function migrateEquation(raw: Record<string, unknown>, z: number): EquationEleme
   };
 }
 
+function migrateGraph(raw: Record<string, unknown>, z: number): GraphElement {
+  const viewportRaw = isObject(raw.viewport) ? raw.viewport : {};
+  const settingsRaw = isObject(raw.settings) ? raw.settings : {};
+  const expressionsRaw = Array.isArray(raw.expressions) ? raw.expressions : [];
+  const pointsRaw = Array.isArray(raw.points) ? raw.points : [];
+
+  const expressions = expressionsRaw
+    .filter(isObject)
+    .map((expr, index) => {
+      const styleRaw = isObject(expr.style) ? expr.style : {};
+      return {
+        id: str(expr.id, `expr-${index}`),
+        sourceText: str(expr.sourceText, ''),
+        visible: bool(expr.visible, true),
+        domainMin:
+          typeof expr.domainMin === 'number' && Number.isFinite(expr.domainMin)
+            ? expr.domainMin
+            : null,
+        domainMax:
+          typeof expr.domainMax === 'number' && Number.isFinite(expr.domainMax)
+            ? expr.domainMax
+            : null,
+        style: {
+          color: str(styleRaw.color, nextExpressionColor(index)),
+          strokeWidth: num(styleRaw.strokeWidth, 2),
+        },
+      };
+    });
+
+  const points = pointsRaw.filter(isObject).map((p, index) => ({
+    id: str(p.id, `pt-${index}`),
+    x: num(p.x, 0),
+    y: num(p.y, 0),
+    visible: bool(p.visible, true),
+    label: str(p.label, ''),
+    color: str(p.color, '#111827'),
+  }));
+
+  return {
+    ...migrateBase(raw, z),
+    type: 'graph',
+    expressions,
+    points,
+    viewport: {
+      xMin: num(viewportRaw.xMin, DEFAULT_GRAPH_VIEWPORT.xMin),
+      xMax: num(viewportRaw.xMax, DEFAULT_GRAPH_VIEWPORT.xMax),
+      yMin: num(viewportRaw.yMin, DEFAULT_GRAPH_VIEWPORT.yMin),
+      yMax: num(viewportRaw.yMax, DEFAULT_GRAPH_VIEWPORT.yMax),
+    },
+    settings: {
+      showGrid: bool(settingsRaw.showGrid, DEFAULT_GRAPH_SETTINGS.showGrid),
+      showXAxis: bool(settingsRaw.showXAxis, DEFAULT_GRAPH_SETTINGS.showXAxis),
+      showYAxis: bool(settingsRaw.showYAxis, DEFAULT_GRAPH_SETTINGS.showYAxis),
+      xAxisLabel: str(settingsRaw.xAxisLabel, ''),
+      yAxisLabel: str(settingsRaw.yAxisLabel, ''),
+      title: str(settingsRaw.title, ''),
+    },
+  };
+}
+
 function migrateConnector(raw: Record<string, unknown>, z: number): ConnectorElement {
   const pts = Array.isArray(raw.points) ? raw.points : [0, 0, 1, 1];
   const points: [number, number, number, number] = [
@@ -204,6 +270,8 @@ export function migrateElement(raw: unknown, index: number): CanvasElement | nul
       return migrateDrawing(raw, index + 1);
     case 'image':
       return migrateImage(raw, index + 1);
+    case 'graph':
+      return migrateGraph(raw, index + 1);
     case 'connector':
       return migrateConnector(raw, index + 1);
     default:
@@ -217,7 +285,13 @@ export function migrateDocument(raw: unknown): CanvasDocument | null {
   if (!Array.isArray(raw.elements) || !isObject(raw.camera)) return null;
 
   const version = raw.version;
-  if (version !== 1 && version !== 2 && version !== 3 && version !== DOCUMENT_VERSION) {
+  if (
+    version !== 1 &&
+    version !== 2 &&
+    version !== 3 &&
+    version !== 4 &&
+    version !== DOCUMENT_VERSION
+  ) {
     return null;
   }
 
@@ -303,6 +377,8 @@ export function styleFromElement(el: CanvasElement, style: StyleDefaults): Style
         arrowHeads: el.arrowHeads,
       };
     case 'image':
+      return { ...style, opacity: el.opacity };
+    case 'graph':
       return { ...style, opacity: el.opacity };
     default:
       return style;

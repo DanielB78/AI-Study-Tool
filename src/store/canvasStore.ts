@@ -25,6 +25,12 @@ import {
 } from '../persistence/storage';
 import { styleFromElement } from '../persistence/migrate';
 import { ragSync } from '../features/rag/ragSync';
+import { createGraphElement } from '../features/graphs/createGraphElement';
+import {
+  DEFAULT_GRAPH_HEIGHT,
+  DEFAULT_GRAPH_WIDTH,
+} from '../features/graphs/types';
+import { useGraphUiStore } from '../features/graphs/graphUiStore';
 
 const MAX_HISTORY = 80;
 const persistence: PersistenceService = createLocalStoragePersistence();
@@ -117,6 +123,7 @@ export interface CanvasStore extends TransientUI, HistorySlice {
   ) => void;
 
   createTextAt: (worldX: number, worldY: number, width?: number) => string;
+  createGraphAt: (worldX: number, worldY: number) => string;
   commitDrawing: (absolutePoints: number[]) => void;
   commitShape: (draft: NonNullable<TransientUI['draftShape']>) => void;
   addImageFromFile: (file: File, worldX: number, worldY: number) => Promise<void>;
@@ -599,6 +606,19 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     return id;
   },
 
+  createGraphAt: (worldX, worldY) => {
+    const element = createGraphElement({
+      x: worldX - DEFAULT_GRAPH_WIDTH / 2,
+      y: worldY - DEFAULT_GRAPH_HEIGHT / 2,
+      zIndex: get().nextZIndex(),
+      opacity: get().style.opacity,
+    });
+    get().addElement(element, true);
+    set({ activeTool: 'select' });
+    useGraphUiStore.getState().openEditor(element.id);
+    return element.id;
+  },
+
   commitDrawing: (absolutePoints) => {
     if (absolutePoints.length < 4) {
       set({ draftPoints: null });
@@ -792,6 +812,8 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
               el.connectorType === 'arrow' ? style.arrowHeads : el.arrowHeads,
           });
         case 'image':
+          return touch({ ...el, opacity: style.opacity });
+        case 'graph':
           return touch({ ...el, opacity: style.opacity });
         default:
           return el;

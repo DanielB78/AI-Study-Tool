@@ -108,6 +108,9 @@ export function useKeyboardShortcuts(fileInputRef: React.RefObject<HTMLInputElem
         case 't':
           store.setTool('text');
           break;
+        case 'g':
+          store.setTool('graph');
+          break;
         case 'p':
           store.setTool('pen');
           break;
