@@ -19,6 +19,12 @@ function envInt(name: string, fallback: number): number {
 export const RAG_MAX_CONTEXT_ELEMENTS = envInt('VITE_RAG_MAX_CONTEXT_ELEMENTS', 12);
 export const RAG_MAX_CONTEXT_CHARACTERS = envInt('VITE_RAG_MAX_CONTEXT_CHARACTERS', 12_000);
 
+/**
+ * Separate multimodal image attachment budget.
+ * Images do not consume the text character budget.
+ */
+export const RAG_MAX_CONTEXT_IMAGES = envInt('VITE_RAG_MAX_CONTEXT_IMAGES', 4);
+
 /** Spatial radius (world units). Default/range are for the debug slider. */
 export const RAG_SPATIAL_RADIUS_MIN = 0;
 export const RAG_SPATIAL_RADIUS_MAX = envInt('VITE_RAG_SPATIAL_RADIUS_MAX', 2000);

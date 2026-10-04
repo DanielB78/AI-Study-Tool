@@ -2,6 +2,8 @@
  * RagContextBuilder — assembles LLM-ready canvas context from:
  * explicit editor selection + semantic anchors + spatial + semantic expansion.
  * Pure functions; no UI / no canvas renderer coupling.
+ *
+ * Textual context and multimodal image attachments are budgeted separately.
  */
 
 import type { MatchedChunk, RetrievedCandidate } from './ragRetrieval';
@@ -12,6 +14,7 @@ import type { WorldRect } from './geometry';
 import {
   RAG_MAX_CONTEXT_CHARACTERS,
   RAG_MAX_CONTEXT_ELEMENTS,
+  RAG_MAX_CONTEXT_IMAGES,
 } from './config';
 
 export type RetrievalSourceType =
@@ -71,22 +74,46 @@ export interface RagContextElement {
   nearest_distance: number | null;
   /** Best semantic-neighbor similarity if any */
   semantic_neighbor_similarity: number | null;
+  /** Image asset reference when element_type === 'image'. Not a caption. */
+  image_src?: string | null;
+}
+
+/** Multimodal attachment — binary/image data stays out of text context strings. */
+export interface RagContextImageAttachment {
+  element_id: string;
+  element_type: 'image';
+  /** Asset reference (data URL / storage URL) resolved from CanvasDocument. */
+  asset_src: string;
+  geometry: WorldRect;
+  sources: ElementProvenance[];
+  /** Nearest spatial distance if any; null for explicit-only. */
+  nearest_distance: number | null;
+  /** Why this image was selected into the attachment budget. */
+  selection_reason: 'explicit_selection' | 'spatial_neighbor';
 }
 
 export interface RagContextStats {
   explicit_selection_count: number;
   semantic_anchor_count: number;
   spatial_addition_count: number;
+  spatial_text_addition_count: number;
+  spatial_equation_addition_count: number;
+  spatial_image_addition_count: number;
   semantic_depth1_addition_count: number;
   semantic_depth2_addition_count: number;
   unique_semantic_addition_count: number;
+  image_attachment_count: number;
+  image_budget_excluded_count: number;
   total_unique_elements: number;
   character_count: number;
   word_count: number;
   truncated_by_element_budget: boolean;
   truncated_by_character_budget: boolean;
+  truncated_by_image_budget: boolean;
   /** True when required (explicit) context alone exceeds configured budgets. */
   required_context_exceeds_budget: boolean;
+  /** Element IDs dropped solely because MAX_CONTEXT_IMAGES was hit. */
+  image_budget_excluded_ids: string[];
 }
 
 export interface RagContext {
@@ -96,8 +123,10 @@ export interface RagContext {
   spatialElements: RagContextElement[];
   semanticNeighborElements: RagContextElement[];
   allElements: RagContextElement[];
+  /** Deduplicated multimodal attachments (actual images for the LLM). */
+  imageAttachments: RagContextImageAttachment[];
   stats: RagContextStats;
-  /** Deterministic serialized payload for the LLM */
+  /** Deterministic serialized payload for the LLM (text only — no raw bytes). */
   serialized: string;
 }
 
@@ -122,6 +151,7 @@ export interface BuildRagContextOptions {
   semanticNeighborHits?: SemanticNeighborHit[];
   maxElements?: number;
   maxCharacters?: number;
+  maxImages?: number;
 }
 
 function wordCount(text: string): number {
@@ -176,6 +206,10 @@ function refreshDerived(el: RagContextElement): void {
   el.semantic_neighbor_similarity = bestSemanticNeighborSim(el.sources);
 }
 
+function isImageElement(el: { element_type: string }): boolean {
+  return el.element_type === 'image';
+}
+
 function formatElementBlock(el: RagContextElement): string {
   const lines: string[] = [];
   lines.push('ELEMENT');
@@ -207,18 +241,48 @@ function formatElementBlock(el: RagContextElement): string {
   lines.push(
     `POSITION: x=${el.geometry.x}, y=${el.geometry.y}, width=${el.geometry.width}, height=${el.geometry.height}`,
   );
-  lines.push('TEXT:');
-  lines.push(el.text || '(empty)');
+  if (isImageElement(el)) {
+    lines.push('ATTACHED CANVAS IMAGE:');
+    lines.push(el.element_id);
+    lines.push('(image bytes are supplied as a multimodal attachment — not described here)');
+  } else {
+    lines.push('TEXT:');
+    lines.push(el.text || '(empty)');
+  }
   return lines.join('\n');
 }
 
-/** Deterministic serialization for LLM consumption. */
+function formatImageAttachmentBlock(att: RagContextImageAttachment): string {
+  const lines: string[] = [
+    'IMAGE',
+    `IMAGE ELEMENT ID: ${att.element_id}`,
+    `SOURCE: ${att.selection_reason}`,
+  ];
+  for (const s of att.sources) {
+    if (s.type === 'explicit_selection') {
+      lines.push('EXPLICIT_SELECTION: yes');
+    }
+    if (s.type === 'spatial') {
+      lines.push(`SPATIAL ANCHOR: ${s.anchor_element_id}`);
+      lines.push(`DISTANCE: ${s.distance.toFixed(1)}`);
+    }
+  }
+  lines.push(
+    `BOUNDS: x=${att.geometry.x}, y=${att.geometry.y}, width=${att.geometry.width}, height=${att.geometry.height}`,
+  );
+  lines.push('ATTACHED CANVAS IMAGE:');
+  lines.push(att.element_id);
+  return lines.join('\n');
+}
+
+/** Deterministic serialization for LLM consumption (text + image markers only). */
 export function serializeRagContext(
   query: string,
   elements: readonly RagContextElement[],
   explicitlySelected: readonly RagContextElement[] = [],
+  imageAttachments: readonly RagContextImageAttachment[] = [],
 ): string {
-  if (elements.length === 0) {
+  if (elements.length === 0 && imageAttachments.length === 0) {
     return 'CANVAS CONTEXT\n\n(none selected)';
   }
 
@@ -246,9 +310,19 @@ export function serializeRagContext(
     sections.push('RETRIEVED SUPPORTING CONTEXT');
     sections.push('');
     sections.push(supporting.map(formatElementBlock).join('\n\n'));
-  } else if (explicitlySelected.length === 0) {
+  } else if (explicitlySelected.length === 0 && elements.length > 0) {
     sections.push('');
     sections.push(elements.map(formatElementBlock).join('\n\n'));
+  }
+
+  if (imageAttachments.length > 0) {
+    sections.push('');
+    sections.push('CANVAS IMAGE CONTEXT');
+    sections.push(
+      'The following images are attached as multimodal input. Inspect the images directly; do not invent descriptions.',
+    );
+    sections.push('');
+    sections.push(imageAttachments.map(formatImageAttachmentBlock).join('\n\n'));
   }
 
   return sections.join('\n');
@@ -270,20 +344,53 @@ function attachSemanticNeighborSources(
   refreshDerived(existing);
 }
 
+function makeElement(
+  partial: Omit<
+    RagContextElement,
+    'inclusion' | 'similarity' | 'nearest_distance' | 'semantic_neighbor_similarity'
+  > &
+    Partial<
+      Pick<
+        RagContextElement,
+        'inclusion' | 'similarity' | 'nearest_distance' | 'semantic_neighbor_similarity'
+      >
+    >,
+): RagContextElement {
+  const el: RagContextElement = {
+    element_id: partial.element_id,
+    element_type: partial.element_type,
+    text: partial.text,
+    geometry: partial.geometry,
+    sources: partial.sources,
+    inclusion: partial.inclusion ?? 'semantic',
+    similarity: partial.similarity ?? null,
+    nearest_distance: partial.nearest_distance ?? null,
+    semantic_neighbor_similarity: partial.semantic_neighbor_similarity ?? null,
+    image_src: partial.image_src ?? null,
+  };
+  refreshDerived(el);
+  return el;
+}
+
 /**
  * Merge explicit selection + anchors + spatial + semantic-neighbor hits.
  * Dedupes by element_id. Explicit selections always survive budgeting.
  *
- * Budget priority (trim first → last):
+ * Text budget priority (trim first → last):
  * 1. semantic-neighbor additions
- * 2. spatial additions
- * Required (never trimmed for budget):
+ * 2. spatial text/equation additions
+ * Required (never trimmed for text budget):
  * - explicitly selected elements
  * - semantic anchors
+ *
+ * Image budget (separate):
+ * 1. explicitly selected images (required; may exceed budget → flag)
+ * 2. nearest spatial images
  */
 export function buildRagContext(options: BuildRagContextOptions): RagContext {
   const maxElements = options.maxElements ?? RAG_MAX_CONTEXT_ELEMENTS;
   const maxCharacters = options.maxCharacters ?? RAG_MAX_CONTEXT_CHARACTERS;
+  const maxImages = options.maxImages ?? RAG_MAX_CONTEXT_IMAGES;
   const explicitSelections = options.explicitSelections ?? [];
   const semanticNeighborHits = options.semanticNeighborHits ?? [];
 
@@ -291,17 +398,17 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
 
   // 1. Explicit editor selection — highest priority, always retained.
   for (const sel of explicitSelections) {
-    byId.set(sel.element_id, {
-      element_id: sel.element_id,
-      element_type: sel.element_type,
-      text: sel.text,
-      geometry: sel.geometry,
-      sources: [{ type: 'explicit_selection' }],
-      inclusion: 'explicit_selection',
-      similarity: null,
-      nearest_distance: null,
-      semantic_neighbor_similarity: null,
-    });
+    byId.set(
+      sel.element_id,
+      makeElement({
+        element_id: sel.element_id,
+        element_type: sel.element_type,
+        text: sel.text,
+        geometry: sel.geometry,
+        sources: [{ type: 'explicit_selection' }],
+        image_src: sel.image_src ?? null,
+      }),
+    );
   }
 
   // 2. Semantic anchors (merge into existing if also explicitly selected).
@@ -313,31 +420,30 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
         similarity: anchor.similarity,
         matched_chunks: anchor.matched_chunks,
       });
-      // Prefer live canvas text already on explicit selection; keep longer if needed.
       if (anchor.text.length > existing.text.length) existing.text = anchor.text;
       refreshDerived(existing);
       continue;
     }
-    byId.set(anchor.element_id, {
-      element_id: anchor.element_id,
-      element_type: anchor.element_type,
-      text: anchor.text,
-      geometry: anchor.geometry,
-      sources: [
-        {
-          type: 'semantic',
-          similarity: anchor.similarity,
-          matched_chunks: anchor.matched_chunks,
-        },
-      ],
-      inclusion: 'semantic',
-      similarity: anchor.similarity,
-      nearest_distance: null,
-      semantic_neighbor_similarity: null,
-    });
+    byId.set(
+      anchor.element_id,
+      makeElement({
+        element_id: anchor.element_id,
+        element_type: anchor.element_type,
+        text: anchor.text,
+        geometry: anchor.geometry,
+        sources: [
+          {
+            type: 'semantic',
+            similarity: anchor.similarity,
+            matched_chunks: anchor.matched_chunks,
+          },
+        ],
+        similarity: anchor.similarity,
+      }),
+    );
   }
 
-  // 3. Collect spatial candidates.
+  // 3. Collect spatial candidates — split images vs textual.
   type SpatialCandidate = {
     element_id: string;
     element_type: string;
@@ -345,44 +451,52 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     geometry: WorldRect;
     spatialSources: SpatialSource[];
     nearest: number;
+    image_src?: string;
   };
-  const spatialMap = new Map<string, SpatialCandidate>();
+  const spatialTextMap = new Map<string, SpatialCandidate>();
+  const spatialImageMap = new Map<string, SpatialCandidate>();
 
   for (const hit of options.spatialHits) {
-    if (byId.has(hit.element_id)) {
-      const existing = byId.get(hit.element_id)!;
-      existing.sources.push({
-        type: 'spatial',
-        anchor_element_id: hit.anchor_element_id,
-        distance: hit.distance,
-      });
-      refreshDerived(existing);
-      continue;
-    }
-
-    const prev = spatialMap.get(hit.element_id);
     const source: SpatialSource = {
       type: 'spatial',
       anchor_element_id: hit.anchor_element_id,
       distance: hit.distance,
     };
+
+    if (byId.has(hit.element_id)) {
+      const existing = byId.get(hit.element_id)!;
+      existing.sources.push(source);
+      if (hit.image_src && !existing.image_src) {
+        existing.image_src = hit.image_src;
+      }
+      refreshDerived(existing);
+      continue;
+    }
+
+    const targetMap = hit.element_type === 'image' ? spatialImageMap : spatialTextMap;
+    const prev = targetMap.get(hit.element_id);
     if (!prev) {
-      spatialMap.set(hit.element_id, {
+      targetMap.set(hit.element_id, {
         element_id: hit.element_id,
         element_type: hit.element_type,
         text: hit.text,
         geometry: hit.geometry,
         spatialSources: [source],
         nearest: hit.distance,
+        image_src: hit.image_src,
       });
     } else {
       prev.spatialSources.push(source);
       if (hit.distance < prev.nearest) prev.nearest = hit.distance;
       if (hit.text.length > prev.text.length) prev.text = hit.text;
+      if (hit.image_src && !prev.image_src) prev.image_src = hit.image_src;
     }
   }
 
-  const spatialOrdered = Array.from(spatialMap.values()).sort(
+  const spatialTextOrdered = Array.from(spatialTextMap.values()).sort(
+    (a, b) => a.nearest - b.nearest || a.element_id.localeCompare(b.element_id),
+  );
+  const spatialImageOrdered = Array.from(spatialImageMap.values()).sort(
     (a, b) => a.nearest - b.nearest || a.element_id.localeCompare(b.element_id),
   );
 
@@ -393,7 +507,8 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     (a) => byId.get(a.element_id)!,
   );
 
-  // Required elements for budget baseline (unique).
+  // Required elements for text budget baseline (unique). Images still listed
+  // in allElements but do not consume character budget.
   const requiredElements: RagContextElement[] = [];
   const seenRequired = new Set<string>();
   for (const el of [...explicitlySelectedElements, ...semanticAnchors]) {
@@ -402,20 +517,24 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     requiredElements.push(el);
   }
 
-  let charUsed = requiredElements.reduce((n, el) => n + el.text.length, 0);
+  const requiredTextForBudget = requiredElements.filter((el) => !isImageElement(el));
+  let charUsed = requiredTextForBudget.reduce((n, el) => n + el.text.length, 0);
   let truncatedByElements = false;
   let truncatedByChars = false;
   const requiredExceedsBudget =
-    requiredElements.length > maxElements || charUsed > maxCharacters;
+    requiredTextForBudget.length > maxElements || charUsed > maxCharacters;
 
   if (requiredExceedsBudget) {
-    truncatedByElements = requiredElements.length > maxElements;
+    truncatedByElements = requiredTextForBudget.length > maxElements;
     truncatedByChars = charUsed > maxCharacters;
   }
 
+  // Spatial textual additions (text / equation / labeled shape).
   const spatialElements: RagContextElement[] = [];
-  for (const cand of spatialOrdered) {
-    const acceptedCount = requiredElements.length + spatialElements.length;
+  for (const cand of spatialTextOrdered) {
+    const acceptedCount =
+      requiredTextForBudget.length +
+      spatialElements.filter((e) => !isImageElement(e)).length;
     if (acceptedCount >= maxElements) {
       truncatedByElements = true;
       break;
@@ -426,23 +545,21 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
       break;
     }
 
-    const el: RagContextElement = {
+    const el = makeElement({
       element_id: cand.element_id,
       element_type: cand.element_type,
       text: cand.text,
       geometry: cand.geometry,
       sources: [...cand.spatialSources],
-      inclusion: 'spatial',
-      similarity: null,
       nearest_distance: cand.nearest,
-      semantic_neighbor_similarity: null,
-    };
+      image_src: cand.image_src ?? null,
+    });
     spatialElements.push(el);
     byId.set(el.element_id, el);
     charUsed = nextChars;
   }
 
-  // 4. Semantic neighbor hits.
+  // 4. Semantic neighbor hits (textual only path).
   type SemCand = {
     element_id: string;
     element_type: string;
@@ -481,15 +598,15 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
   );
 
   const semanticNeighborElements: RagContextElement[] = [];
-  charUsed = [...requiredElements, ...spatialElements].reduce(
-    (n, el) => n + el.text.length,
-    0,
-  );
+  charUsed = [
+    ...requiredTextForBudget,
+    ...spatialElements.filter((e) => !isImageElement(e)),
+  ].reduce((n, el) => n + el.text.length, 0);
 
   for (const cand of semOrdered) {
     const acceptedCount =
-      requiredElements.length +
-      spatialElements.length +
+      requiredTextForBudget.length +
+      spatialElements.filter((e) => !isImageElement(e)).length +
       semanticNeighborElements.length;
     if (acceptedCount >= maxElements) {
       truncatedByElements = true;
@@ -508,23 +625,156 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
       depth: hit.depth,
       similarity: hit.similarity,
     }));
-    const el: RagContextElement = {
+    const el = makeElement({
       element_id: cand.element_id,
       element_type: cand.element_type,
       text: cand.text,
       geometry: cand.geometry,
       sources,
-      inclusion: 'semantic_neighbor',
-      similarity: null,
-      nearest_distance: null,
       semantic_neighbor_similarity: cand.bestSim,
-    };
+    });
     semanticNeighborElements.push(el);
     byId.set(el.element_id, el);
     charUsed = nextChars;
   }
 
-  // allElements: explicit first, then anchors not already listed, then additions.
+  // 5. Image attachment budget — explicit images first, then nearest spatial.
+  type ImageCand = {
+    element_id: string;
+    geometry: WorldRect;
+    sources: ElementProvenance[];
+    nearest: number | null;
+    asset_src: string;
+    selection_reason: 'explicit_selection' | 'spatial_neighbor';
+    explicitOrder: number;
+  };
+
+  const imageCandMap = new Map<string, ImageCand>();
+
+  explicitSelections.forEach((sel, index) => {
+    if (sel.element_type !== 'image') return;
+    const existing = byId.get(sel.element_id);
+    const src = sel.image_src ?? existing?.image_src;
+    if (!src) return;
+    imageCandMap.set(sel.element_id, {
+      element_id: sel.element_id,
+      geometry: sel.geometry,
+      sources: existing?.sources ? [...existing.sources] : [{ type: 'explicit_selection' }],
+      nearest: existing?.nearest_distance ?? null,
+      asset_src: src,
+      selection_reason: 'explicit_selection',
+      explicitOrder: index,
+    });
+  });
+
+  // Spatial image candidates (and merge provenance onto explicit images).
+  for (const cand of spatialImageOrdered) {
+    const src = cand.image_src;
+    if (!src) continue;
+    const existing = imageCandMap.get(cand.element_id);
+    if (existing) {
+      for (const s of cand.spatialSources) {
+        if (
+          !existing.sources.some(
+            (x) =>
+              x.type === 'spatial' &&
+              x.anchor_element_id === s.anchor_element_id &&
+              x.distance === s.distance,
+          )
+        ) {
+          existing.sources.push(s);
+        }
+      }
+      if (existing.nearest === null || cand.nearest < existing.nearest) {
+        existing.nearest = cand.nearest;
+      }
+      continue;
+    }
+    imageCandMap.set(cand.element_id, {
+      element_id: cand.element_id,
+      geometry: cand.geometry,
+      sources: [...cand.spatialSources],
+      nearest: cand.nearest,
+      asset_src: src,
+      selection_reason: 'spatial_neighbor',
+      explicitOrder: Number.POSITIVE_INFINITY,
+    });
+  }
+
+  // Also attach images that were only reached via byId merge (e.g. explicit+spatial).
+  for (const el of byId.values()) {
+    if (!isImageElement(el) || !el.image_src) continue;
+    if (imageCandMap.has(el.element_id)) continue;
+    const isExplicit = el.sources.some((s) => s.type === 'explicit_selection');
+    imageCandMap.set(el.element_id, {
+      element_id: el.element_id,
+      geometry: el.geometry,
+      sources: [...el.sources],
+      nearest: el.nearest_distance,
+      asset_src: el.image_src,
+      selection_reason: isExplicit ? 'explicit_selection' : 'spatial_neighbor',
+      explicitOrder: isExplicit
+        ? explicitSelections.findIndex((s) => s.element_id === el.element_id)
+        : Number.POSITIVE_INFINITY,
+    });
+  }
+
+  const imageOrdered = Array.from(imageCandMap.values()).sort((a, b) => {
+    const aExplicit = a.selection_reason === 'explicit_selection' ? 0 : 1;
+    const bExplicit = b.selection_reason === 'explicit_selection' ? 0 : 1;
+    if (aExplicit !== bExplicit) return aExplicit - bExplicit;
+    if (a.explicitOrder !== b.explicitOrder) return a.explicitOrder - b.explicitOrder;
+    const aDist = a.nearest ?? Number.POSITIVE_INFINITY;
+    const bDist = b.nearest ?? Number.POSITIVE_INFINITY;
+    if (aDist !== bDist) return aDist - bDist;
+    return a.element_id.localeCompare(b.element_id);
+  });
+
+  const imageAttachments: RagContextImageAttachment[] = [];
+  const imageBudgetExcludedIds: string[] = [];
+  let truncatedByImageBudget = false;
+
+  for (const cand of imageOrdered) {
+    const isRequired = cand.selection_reason === 'explicit_selection';
+    if (!isRequired && imageAttachments.length >= maxImages) {
+      truncatedByImageBudget = true;
+      imageBudgetExcludedIds.push(cand.element_id);
+      continue;
+    }
+    if (isRequired && imageAttachments.length >= maxImages) {
+      // Still include required explicit images; flag budget overrun.
+      truncatedByImageBudget = true;
+    }
+    imageAttachments.push({
+      element_id: cand.element_id,
+      element_type: 'image',
+      asset_src: cand.asset_src,
+      geometry: cand.geometry,
+      sources: cand.sources,
+      nearest_distance: cand.nearest,
+      selection_reason: cand.selection_reason,
+    });
+
+    // Ensure spatial image elements appear in spatialElements / byId for UI.
+    if (!byId.has(cand.element_id)) {
+      const el = makeElement({
+        element_id: cand.element_id,
+        element_type: 'image',
+        text: '',
+        geometry: cand.geometry,
+        sources: [...cand.sources],
+        nearest_distance: cand.nearest,
+        image_src: cand.asset_src,
+      });
+      spatialElements.push(el);
+      byId.set(el.element_id, el);
+    } else {
+      const existing = byId.get(cand.element_id)!;
+      if (!existing.image_src) existing.image_src = cand.asset_src;
+    }
+  }
+
+  // allElements: explicit first, then anchors, then spatial (incl. images), then neighbors.
   const allElements: RagContextElement[] = [];
   const inAll = new Set<string>();
   for (const el of explicitlySelectedElements) {
@@ -539,6 +789,14 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
   }
   for (const el of spatialElements) {
     if (inAll.has(el.element_id)) continue;
+    // Skip spatial images that were budget-excluded.
+    if (
+      isImageElement(el) &&
+      imageBudgetExcludedIds.includes(el.element_id) &&
+      !imageAttachments.some((a) => a.element_id === el.element_id)
+    ) {
+      continue;
+    }
     allElements.push(el);
     inAll.add(el.element_id);
   }
@@ -548,8 +806,15 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     inAll.add(el.element_id);
   }
 
-  const totalChars = allElements.reduce((n, el) => n + el.text.length, 0);
-  const totalWords = allElements.reduce((n, el) => n + wordCount(el.text), 0);
+  // Spatial elements list should only include those that made it into context.
+  const spatialElementsFinal = spatialElements.filter((el) => inAll.has(el.element_id));
+
+  const totalChars = allElements
+    .filter((el) => !isImageElement(el))
+    .reduce((n, el) => n + el.text.length, 0);
+  const totalWords = allElements
+    .filter((el) => !isImageElement(el))
+    .reduce((n, el) => n + wordCount(el.text), 0);
 
   const additionIds = new Set<string>();
   let depth1 = 0;
@@ -570,37 +835,52 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     else if (minDepth >= 2) depth2 += 1;
   }
 
-  // Spatial additions = elements in spatialElements array (not required-only merges).
-  const spatialAdditionCount = spatialElements.length;
+  let spatialTextCount = 0;
+  let spatialEquationCount = 0;
+  let spatialImageCount = 0;
+  for (const el of spatialElementsFinal) {
+    if (el.element_type === 'image') spatialImageCount += 1;
+    else if (el.element_type === 'equation') spatialEquationCount += 1;
+    else spatialTextCount += 1;
+  }
 
   const stats: RagContextStats = {
     explicit_selection_count: explicitlySelectedElements.length,
     semantic_anchor_count: new Set(options.semanticAnchors.map((a) => a.element_id))
       .size,
-    spatial_addition_count: spatialAdditionCount,
+    spatial_addition_count: spatialElementsFinal.length,
+    spatial_text_addition_count: spatialTextCount,
+    spatial_equation_addition_count: spatialEquationCount,
+    spatial_image_addition_count: spatialImageCount,
     semantic_depth1_addition_count: depth1,
     semantic_depth2_addition_count: depth2,
     unique_semantic_addition_count: additionIds.size,
+    image_attachment_count: imageAttachments.length,
+    image_budget_excluded_count: imageBudgetExcludedIds.length,
     total_unique_elements: allElements.length,
     character_count: totalChars,
     word_count: totalWords,
     truncated_by_element_budget: truncatedByElements,
     truncated_by_character_budget: truncatedByChars,
+    truncated_by_image_budget: truncatedByImageBudget,
     required_context_exceeds_budget: requiredExceedsBudget,
+    image_budget_excluded_ids: imageBudgetExcludedIds,
   };
 
   return {
     query: options.query,
     explicitlySelectedElements,
     semanticAnchors,
-    spatialElements,
+    spatialElements: spatialElementsFinal,
     semanticNeighborElements,
     allElements,
+    imageAttachments,
     stats,
     serialized: serializeRagContext(
       options.query,
       allElements,
       explicitlySelectedElements,
+      imageAttachments,
     ),
   };
 }

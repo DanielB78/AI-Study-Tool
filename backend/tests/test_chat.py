@@ -9,10 +9,21 @@ from app.main import create_app
 
 
 class FakeProvider(LLMProvider):
-    def __init__(self, text: str = "hello", *, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        text: str = "hello",
+        *,
+        error: Exception | None = None,
+        supports_image_input: bool = True,
+    ) -> None:
         self.text = text
         self.error = error
-        self.calls: list[dict[str, str | None]] = []
+        self._supports_image_input = supports_image_input
+        self.calls: list[dict] = []
+
+    @property
+    def supports_image_input(self) -> bool:
+        return self._supports_image_input
 
     async def generate(
         self,
@@ -20,12 +31,14 @@ class FakeProvider(LLMProvider):
         *,
         system_instruction: str | None = None,
         canvas_context: str | None = None,
+        image_attachments=None,
     ) -> str:
         self.calls.append(
             {
                 "prompt": prompt,
                 "system_instruction": system_instruction,
                 "canvas_context": canvas_context,
+                "image_attachments": list(image_attachments or []),
             }
         )
         if self.error is not None:
@@ -90,6 +103,7 @@ def test_chat_success_mocked_provider() -> None:
             "prompt": "Explain Faraday's law simply",
             "system_instruction": None,
             "canvas_context": None,
+            "image_attachments": [],
         }
     ]
 
@@ -190,3 +204,54 @@ def test_chat_missing_api_key_via_real_provider(settings_no_key: Settings) -> No
     assert res.status_code == 503
     assert res.json()["error"]["code"] == "missing_api_key"
     assert "OPENAI_API_KEY" in res.json()["error"]["message"]
+
+
+def test_chat_with_image_attachments_mock() -> None:
+    settings = Settings(llm_provider="mock", openai_api_key="", llm_supports_image_input=True)
+    service = build_llm_service(settings)
+    app = create_app()
+
+    def override() -> LLMService:
+        return service
+
+    from app.llm import service as service_module
+
+    app.dependency_overrides[service_module.get_llm_service] = override
+    client = TestClient(app)
+    res = client.post(
+        "/api/chat",
+        json={
+            "prompt": "Explain the diagram",
+            "image_attachments": [
+                {
+                    "element_id": "image_27",
+                    "data_url": "data:image/png;base64,aaa",
+                }
+            ],
+        },
+    )
+    assert res.status_code == 200
+    text = res.json()["text"]
+    assert "image_attachments received: 1" in text
+    assert "image_27" in text
+
+
+def test_chat_vision_unsupported() -> None:
+    provider = FakeProvider(supports_image_input=False)
+    client = make_client(provider)
+    res = client.post(
+        "/api/chat",
+        json={
+            "prompt": "Explain the diagram",
+            "image_attachments": [
+                {
+                    "element_id": "image_27",
+                    "data_url": "data:image/png;base64,aaa",
+                }
+            ],
+        },
+    )
+    assert res.status_code == 422
+    body = res.json()
+    assert body["error"]["code"] == "vision_unsupported"
+    assert "image_27" in body["error"]["message"]

@@ -86,7 +86,10 @@ describe('Manual LLM Mode', () => {
   });
 
   it('Ask AI does not invoke the LLM provider in manual mode', async () => {
-    const service: AiService = { sendPrompt: vi.fn(async () => ({ text: 'nope' })) };
+    const service: AiService = {
+      sendPrompt: vi.fn(async () => ({ text: 'nope' })),
+      supportsImageInput: () => true,
+    };
     const store = createTestAiStore(service);
     store.getState().setPrompt('Explain Gauss');
     await store.getState().sendPrompt();

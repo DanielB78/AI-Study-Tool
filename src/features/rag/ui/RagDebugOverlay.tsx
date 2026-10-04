@@ -27,6 +27,7 @@ export function RagDebugOverlay() {
   const semanticMaxNeighbours = useRagDebugStore((s) => s.semanticMaxNeighbours);
   const semanticExpandResponse = useRagDebugStore((s) => s.semanticExpandResponse);
   const semanticIncludedIds = useRagDebugStore((s) => s.semanticIncludedIds);
+  const spatialExcludedIds = useRagDebugStore((s) => s.spatialExcludedIds);
   const camera = useCanvasStore((s) => s.document.camera);
   const elements = useCanvasStore((s) => s.document.elements);
 
@@ -58,6 +59,7 @@ export function RagDebugOverlay() {
         selectedStructureId: useRagDebugStore.getState().selectedStructureId,
         spatialExpansionEnabled,
         radius,
+        spatialExcludedIds,
         semanticExpansionEnabled,
         semanticExpansionDepth,
         semanticMaxNeighbours,
@@ -74,6 +76,7 @@ export function RagDebugOverlay() {
     explicitSelectionIds,
     spatialExpansionEnabled,
     radius,
+    spatialExcludedIds,
     semanticExpansionEnabled,
     semanticExpansionDepth,
     semanticMaxNeighbours,

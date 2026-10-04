@@ -1,9 +1,16 @@
 /**
  * LlmPromptBuilder — builds the COMPLETE text that would be sent to an LLM.
  * Now includes the Canvas Editor Agent instructions + JSON output contract.
+ *
+ * Image attachments are listed as markers in the text prompt; actual image
+ * bytes travel separately as multimodal input (see BuiltLlmPrompt.imageAttachments).
  */
 
-import type { RagContext, RagContextElement } from '../../rag/contextBuilder';
+import type {
+  RagContext,
+  RagContextElement,
+  RagContextImageAttachment,
+} from '../../rag/contextBuilder';
 import {
   formatNoStructureSelected,
   formatNoteStructureForPrompt,
@@ -25,6 +32,8 @@ export interface BuiltLlmPrompt {
   noteStructureSection: string;
   /** Full deterministic prompt ready to paste into ChatGPT. */
   finalLlmPrompt: string;
+  /** Multimodal image attachments (actual assets — not encoded into prompt text). */
+  imageAttachments: RagContextImageAttachment[];
 }
 
 function formatRetrieval(el: RagContextElement): string[] {
@@ -70,14 +79,22 @@ function formatRetrieval(el: RagContextElement): string[] {
 
 function formatElementBlock(el: RagContextElement): string {
   const g = el.geometry;
+  const isImage = el.element_type === 'image';
+  const contentLines = isImage
+    ? [
+        'ATTACHED CANVAS IMAGE:',
+        el.element_id,
+        '(image bytes supplied as multimodal attachment — not described here)',
+      ]
+    : ['TEXT:', el.text || '(empty)'];
+
   const parts = [
     'CANVAS ELEMENT',
     '',
     `ID: ${el.element_id}`,
     `TYPE: ${el.element_type}`,
     '',
-    'TEXT:',
-    el.text || '(empty)',
+    ...contentLines,
     '',
     'POSITION:',
     `x: ${g.x}`,
@@ -90,12 +107,68 @@ function formatElementBlock(el: RagContextElement): string {
   return parts.join('\n');
 }
 
+function formatImageContextSection(
+  attachments: readonly RagContextImageAttachment[],
+): string {
+  if (attachments.length === 0) return '';
+
+  const blocks = attachments.map((att) => {
+    const reasonLines: string[] = [];
+    if (att.selection_reason === 'explicit_selection') {
+      reasonLines.push('Included because the user explicitly selected this image.');
+    } else {
+      const spatial = att.sources.find((s) => s.type === 'spatial');
+      if (spatial && spatial.type === 'spatial') {
+        reasonLines.push(
+          `The following image was included because it is spatially near ${spatial.anchor_element_id}.`,
+        );
+      } else {
+        reasonLines.push(
+          'The following image was included because it is spatially near a semantic anchor.',
+        );
+      }
+    }
+    for (const s of att.sources) {
+      if (s.type === 'spatial') {
+        reasonLines.push(`SPATIAL ANCHOR: ${s.anchor_element_id}`);
+        reasonLines.push(`DISTANCE: ${s.distance.toFixed(1)}`);
+      }
+    }
+    return [
+      'IMAGE',
+      '',
+      ...reasonLines,
+      '',
+      'IMAGE ELEMENT ID:',
+      att.element_id,
+      '',
+      'ATTACHED CANVAS IMAGE:',
+      att.element_id,
+      '',
+      'BOUNDS:',
+      `x: ${att.geometry.x}`,
+      `y: ${att.geometry.y}`,
+      `width: ${att.geometry.width}`,
+      `height: ${att.geometry.height}`,
+    ].join('\n');
+  });
+
+  return [
+    'CANVAS IMAGE CONTEXT',
+    '',
+    'Inspect the attached images directly. Do not invent captions or descriptions.',
+    '',
+    blocks.join(`\n\n${'-'.repeat(50)}\n\n`),
+  ].join('\n');
+}
+
 /**
  * Format the CANVAS CONTEXT section for the full LLM prompt.
  * Explicit selection is listed first; retrieved supporting context follows.
+ * Image elements appear as attachment markers (not textual descriptions).
  */
 export function formatCanvasContextSection(context: RagContext): string {
-  if (context.allElements.length === 0) {
+  if (context.allElements.length === 0 && context.imageAttachments.length === 0) {
     return ['CANVAS CONTEXT', '', '(none selected)'].join('\n');
   }
 
@@ -105,7 +178,10 @@ export function formatCanvasContextSection(context: RagContext): string {
     'Element IDs are stable. POSITION values are canvas world coordinates.',
   ];
 
-  if (context.explicitlySelectedElements.length > 0) {
+  const textualExplicit = context.explicitlySelectedElements.filter(
+    (el) => el.element_type !== 'image',
+  );
+  if (textualExplicit.length > 0) {
     parts.push('');
     parts.push('EXPLICIT USER SELECTION');
     parts.push('');
@@ -120,14 +196,16 @@ export function formatCanvasContextSection(context: RagContext): string {
     );
     parts.push('');
     parts.push(
-      context.explicitlySelectedElements
+      textualExplicit
         .map((el) => formatElementBlock(el))
         .join(`\n\n${'-'.repeat(50)}\n\n`),
     );
   }
 
   const supporting = context.allElements.filter(
-    (el) => !el.sources.some((s) => s.type === 'explicit_selection'),
+    (el) =>
+      el.element_type !== 'image' &&
+      !el.sources.some((s) => s.type === 'explicit_selection'),
   );
   if (supporting.length > 0) {
     parts.push('');
@@ -142,6 +220,12 @@ export function formatCanvasContextSection(context: RagContext): string {
         .map((el) => formatElementBlock(el))
         .join(`\n\n${'-'.repeat(50)}\n\n`),
     );
+  }
+
+  const imageSection = formatImageContextSection(context.imageAttachments);
+  if (imageSection) {
+    parts.push('');
+    parts.push(imageSection);
   }
 
   return parts.join('\n');
@@ -162,6 +246,7 @@ export interface BuildLlmPromptInput {
  *
  * Separation:
  * - CANVAS CONTEXT = factual/contextual knowledge
+ * - CANVAS IMAGE CONTEXT = attachment markers (bytes stay out of the string)
  * - SELECTED NOTE STRUCTURE = output format
  * - USER REQUEST = task
  */
@@ -177,6 +262,7 @@ export function buildLlmPrompt(input: BuildLlmPromptInput): BuiltLlmPrompt {
   const noteStructureSection = input.selectedStructure
     ? formatNoteStructureForPrompt(input.selectedStructure)
     : formatNoStructureSelected();
+  const imageAttachments = [...input.ragContext.imageAttachments];
 
   const finalLlmPrompt = [
     'SYSTEM INSTRUCTIONS',
@@ -217,5 +303,6 @@ export function buildLlmPrompt(input: BuildLlmPromptInput): BuiltLlmPrompt {
     ragContextSection,
     noteStructureSection,
     finalLlmPrompt,
+    imageAttachments,
   };
 }

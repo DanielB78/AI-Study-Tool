@@ -2,9 +2,11 @@ import { AI_API_BASE_URL, AI_REQUEST_TIMEOUT_MS } from '../config';
 import {
   AI_USER_ERROR_MESSAGE,
   AiRequestError,
+  inferClientSupportsImageInput,
   type ChatRequest,
   type ChatRequestOptions,
   type ChatResponse,
+  type LlmImageAttachment,
 } from '../models/types';
 
 export interface AiService {
@@ -13,6 +15,8 @@ export interface AiService {
     signal?: AbortSignal,
     options?: ChatRequestOptions,
   ): Promise<ChatResponse>;
+  /** Client-side capability hint (backend enforces). */
+  supportsImageInput(): boolean;
 }
 
 function parseErrorBody(data: unknown): { code: string; message: string } | null {
@@ -25,8 +29,23 @@ function parseErrorBody(data: unknown): { code: string; message: string } | null
   return { code, message };
 }
 
+function normalizeAttachments(
+  attachments: LlmImageAttachment[] | null | undefined,
+): LlmImageAttachment[] | undefined {
+  if (!attachments || attachments.length === 0) return undefined;
+  return attachments
+    .filter((a) => a.element_id && a.data_url)
+    .map((a) => ({
+      element_id: a.element_id,
+      data_url: a.data_url,
+      media_type: a.media_type ?? null,
+    }));
+}
+
 export function createAiService(baseUrl: string = AI_API_BASE_URL): AiService {
   return {
+    supportsImageInput: () => inferClientSupportsImageInput(),
+
     async sendPrompt(
       prompt: string,
       externalSignal?: AbortSignal,
@@ -35,6 +54,19 @@ export function createAiService(baseUrl: string = AI_API_BASE_URL): AiService {
       const trimmed = prompt.trim();
       if (!trimmed) {
         throw new AiRequestError('Prompt cannot be empty.', 'invalid_prompt', 422);
+      }
+
+      const imageAttachments = normalizeAttachments(options?.imageAttachments);
+      if (
+        imageAttachments &&
+        imageAttachments.length > 0 &&
+        !inferClientSupportsImageInput()
+      ) {
+        throw new AiRequestError(
+          `This LLM provider does not support image input, but ${imageAttachments.length} canvas image(s) are in context (${imageAttachments.map((a) => a.element_id).join(', ')}). Switch to a vision-capable model or exclude the images.`,
+          'vision_unsupported',
+          422,
+        );
       }
 
       const controller = new AbortController();
@@ -48,6 +80,7 @@ export function createAiService(baseUrl: string = AI_API_BASE_URL): AiService {
       const canvas = options?.canvasContext?.trim();
       if (system) body.system_instruction = system;
       if (canvas) body.canvas_context = canvas;
+      if (imageAttachments) body.image_attachments = imageAttachments;
 
       try {
         const res = await fetch(`${baseUrl}/api/chat`, {
@@ -67,7 +100,15 @@ export function createAiService(baseUrl: string = AI_API_BASE_URL): AiService {
         if (!res.ok) {
           const parsed = parseErrorBody(data);
           console.warn('[ai] request failed', res.status, parsed ?? data);
-          throw new AiRequestError(AI_USER_ERROR_MESSAGE, parsed?.code ?? 'http_error', res.status);
+          const message =
+            parsed?.code === 'vision_unsupported' && parsed.message
+              ? parsed.message
+              : AI_USER_ERROR_MESSAGE;
+          throw new AiRequestError(
+            message,
+            parsed?.code ?? 'http_error',
+            res.status,
+          );
         }
 
         const text = (data as ChatResponse | null)?.text;
