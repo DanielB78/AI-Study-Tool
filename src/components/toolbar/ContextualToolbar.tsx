@@ -7,8 +7,11 @@ import {
   StrokeFormattingControls,
 } from './FormattingControls';
 import { OpacityControl } from './CtxPopover';
+import { useGraphUiStore } from '../../features/graphs/graphUiStore';
+import { DEFAULT_GRAPH_VIEWPORT } from '../../features/graphs/types';
+import { touch } from '../../utils/ids';
 
-type ContextMode = 'text' | 'shape' | 'stroke' | 'image' | 'multi' | null;
+type ContextMode = 'text' | 'shape' | 'stroke' | 'image' | 'graph' | 'multi' | null;
 
 function resolveMode(
   activeTool: string,
@@ -30,6 +33,7 @@ function resolveMode(
     return 'stroke';
   }
   if (selectedTypes.includes('image')) return 'image';
+  if (activeTool === 'graph' || selectedTypes.includes('graph')) return 'graph';
   return null;
 }
 
@@ -117,6 +121,24 @@ export function ContextualToolbar() {
     useCanvasStore.getState().setEditingTextId(text.id);
   };
 
+  const graph = selected.find((el) => el.type === 'graph');
+  const openGraphEditor = useGraphUiStore((s) => s.openEditor);
+  const enterInteract = useGraphUiStore((s) => s.enterInteract);
+  const interactingGraphId = useGraphUiStore((s) => s.interactingGraphId);
+  const exitInteract = useGraphUiStore((s) => s.exitInteract);
+
+  const resetGraphView = () => {
+    if (!graph || graph.type !== 'graph') return;
+    const store = useCanvasStore.getState();
+    store.pushHistory();
+    store.updateElement(graph.id, (el) =>
+      el.type === 'graph'
+        ? touch({ ...el, viewport: { ...DEFAULT_GRAPH_VIEWPORT } })
+        : el,
+    );
+    store.persist();
+  };
+
   return (
     <div className="ctx-bar" role="toolbar" aria-label="Formatting options">
       <div className="ctx-pill">
@@ -152,6 +174,35 @@ export function ContextualToolbar() {
             onCommit={(v) => onCommit({ opacity: v })}
           />
         )}
+        {mode === 'graph' && graph && (
+          <>
+            <button
+              type="button"
+              className="ctx-chip"
+              onClick={() => openGraphEditor(graph.id)}
+            >
+              Edit Graph
+            </button>
+            <button
+              type="button"
+              className="ctx-chip"
+              onClick={() => {
+                if (interactingGraphId === graph.id) exitInteract();
+                else enterInteract(graph.id);
+              }}
+            >
+              {interactingGraphId === graph.id ? 'Exit Interact' : 'Interact'}
+            </button>
+            <button type="button" className="ctx-chip" onClick={resetGraphView}>
+              Reset View
+            </button>
+            <OpacityControl
+              value={style.opacity}
+              onChange={(v) => onLive({ opacity: v })}
+              onCommit={(v) => onCommit({ opacity: v })}
+            />
+          </>
+        )}
         {mode === 'multi' && (
           <OpacityControl
             value={style.opacity}
@@ -166,6 +217,7 @@ export function ContextualToolbar() {
               mode === 'shape' ||
               mode === 'stroke' ||
               mode === 'image' ||
+              mode === 'graph' ||
               mode === 'multi') && <div className="ctx-divider" aria-hidden />}
             <ArrangePopover
               count={selected.length}

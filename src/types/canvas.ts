@@ -1,8 +1,14 @@
 /** Canonical canvas document model — source of truth for the board. */
 
 import { nanoid } from 'nanoid';
+import type {
+  GraphExpression,
+  GraphPoint,
+  GraphSettings,
+  GraphViewport,
+} from '../features/graphs/types';
 
-export const DOCUMENT_VERSION = 3 as const;
+export const DOCUMENT_VERSION = 4 as const;
 
 export type ShapeType =
   | 'rectangle'
@@ -21,6 +27,7 @@ export type ToolType =
   | 'pan'
   | 'text'
   | 'equation'
+  | 'graph'
   | 'pen'
   | 'line'
   | 'arrow'
@@ -124,6 +131,15 @@ export interface ImageElement extends BaseElement {
   naturalHeight: number;
 }
 
+/** Interactive graphing calculator — canvas geometry is separate from GraphViewport. */
+export interface GraphElement extends BaseElement {
+  type: 'graph';
+  expressions: GraphExpression[];
+  points: GraphPoint[];
+  viewport: GraphViewport;
+  settings: GraphSettings;
+}
+
 export interface ConnectorElement extends BaseElement {
   type: 'connector';
   connectorType: ConnectorType;
@@ -142,6 +158,7 @@ export type CanvasElement =
   | ShapeElement
   | DrawingElement
   | ImageElement
+  | GraphElement
   | ConnectorElement;
 
 export type CanvasElementType = CanvasElement['type'];

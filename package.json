@@ -14,16 +14,22 @@
   },
   "dependencies": {
     "@types/katex": "^0.16.8",
+    "chart.js": "^4.5.1",
+    "chartjs-plugin-zoom": "^2.2.0",
+    "hammerjs": "^2.0.8",
     "katex": "^0.16.47",
     "konva": "^10.6.0",
     "lucide-react": "^1.47.0",
+    "mathjs": "^15.2.0",
     "nanoid": "^6.0.1",
     "react": "^19.2.8",
+    "react-chartjs-2": "^5.3.1",
     "react-dom": "^19.2.8",
     "react-konva": "^19.3.0",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@types/mathjs": "^9.4.1",
     "@types/node": "^24.13.6",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
