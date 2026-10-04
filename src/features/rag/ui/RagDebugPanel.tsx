@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useCanvasStore } from '../../../store/canvasStore';
 import { buildLlmPrompt } from '../../ai/llm';
 import { StructureSelector } from '../../structures/ui/StructureSelector';
@@ -18,6 +18,8 @@ import {
   RAG_SPATIAL_RADIUS_STEP,
 } from '../config';
 import { computeDebugContext, useRagDebugStore } from '../ragDebugStore';
+import { useHandwritingDebugStore } from '../handwritingDebugStore';
+import { DEFAULT_HANDWRITING_REGION_CONFIG } from '../handwritingConfig';
 import type { SemanticTreeNode } from '../semanticExpansion';
 
 type RagDebugPage =
@@ -27,6 +29,7 @@ type RagDebugPage =
   | 'matches'
   | 'spatial'
   | 'semantic'
+  | 'handwriting'
   | 'context';
 
 const RAG_DEBUG_PAGES: { id: RagDebugPage; label: string }[] = [
@@ -36,6 +39,7 @@ const RAG_DEBUG_PAGES: { id: RagDebugPage; label: string }[] = [
   { id: 'matches', label: 'Matches' },
   { id: 'spatial', label: 'Spatial' },
   { id: 'semantic', label: 'Semantic' },
+  { id: 'handwriting', label: 'Handwriting' },
   { id: 'context', label: 'Context' },
 ];
 
@@ -199,6 +203,28 @@ export function RagDebugPanel() {
   const copyRetrievalDebugData = useRagDebugStore((s) => s.copyRetrievalDebugData);
   const closePanel = useRagDebugStore((s) => s.closePanel);
   const togglePanel = useRagDebugStore((s) => s.togglePanel);
+
+  const hwShowRegions = useHandwritingDebugStore((s) => s.showRegions);
+  const hwShowLines = useHandwritingDebugStore((s) => s.showLines);
+  const hwConfig = useHandwritingDebugStore((s) => s.config);
+  const hwResult = useHandwritingDebugStore((s) => s.result);
+  const hwSelectedRegionId = useHandwritingDebugStore((s) => s.selectedRegionId);
+  const hwSelectedLineId = useHandwritingDebugStore((s) => s.selectedLineId);
+  const setHwShowRegions = useHandwritingDebugStore((s) => s.setShowRegions);
+  const setHwShowLines = useHandwritingDebugStore((s) => s.setShowLines);
+  const setHwConfigPatch = useHandwritingDebugStore((s) => s.setConfigPatch);
+  const resetHwConfig = useHandwritingDebugStore((s) => s.resetConfig);
+  const selectHwRegion = useHandwritingDebugStore((s) => s.selectRegion);
+  const selectHwLine = useHandwritingDebugStore((s) => s.selectLine);
+  const refreshHwDetection = useHandwritingDebugStore((s) => s.refreshDetection);
+  const ensureHwDetection = useHandwritingDebugStore((s) => s.ensureDetection);
+
+  // Keep handwriting stats fresh while that debug page is open.
+  useEffect(() => {
+    if (page === 'handwriting') {
+      ensureHwDetection();
+    }
+  }, [page, elements, ensureHwDetection]);
 
   const liveStructureId = useStructureStore((s) => s.selectedStructureIdForAi);
   const structures = useStructureStore((s) => s.structures);
@@ -945,6 +971,235 @@ export function RagDebugPanel() {
                   </>
                 )}
               </section>
+            )}
+
+            {page === 'handwriting' && (
+              <>
+                <section className="rag-debug-section">
+                  <div className="rag-debug-section-title">
+                    Handwriting region detection
+                  </div>
+                  <p className="rag-debug-meta">
+                    Geometric grouping of pen strokes into lines → regions (world
+                    coordinates). No OCR, embeddings, or LLM. Overlays are transient
+                    and not stored in CanvasDocument.
+                  </p>
+                  <label className="rag-debug-check">
+                    <input
+                      type="checkbox"
+                      checked={hwShowRegions}
+                      onChange={(e) => {
+                        setHwShowRegions(e.target.checked);
+                        if (e.target.checked) ensureHwDetection({ force: true });
+                      }}
+                    />
+                    Show handwriting regions
+                  </label>
+                  <label className="rag-debug-check">
+                    <input
+                      type="checkbox"
+                      checked={hwShowLines}
+                      onChange={(e) => {
+                        setHwShowLines(e.target.checked);
+                        if (e.target.checked) ensureHwDetection({ force: true });
+                      }}
+                    />
+                    Show handwriting lines
+                  </label>
+                  <div className="rag-debug-row">
+                    <button
+                      type="button"
+                      className="rag-debug-btn"
+                      onClick={() => refreshHwDetection()}
+                    >
+                      Refresh detection
+                    </button>
+                    <button
+                      type="button"
+                      className="rag-debug-btn ghost"
+                      onClick={() => resetHwConfig()}
+                    >
+                      Reset thresholds
+                    </button>
+                  </div>
+                </section>
+
+                <section className="rag-debug-section rag-debug-counts">
+                  <div className="rag-debug-section-title">Detection statistics</div>
+                  <div>
+                    Total strokes: <strong>{hwResult.scale.totalStrokeCount}</strong>
+                  </div>
+                  <div>
+                    Detected lines: <strong>{hwResult.lines.length}</strong>
+                  </div>
+                  <div>
+                    Detected regions: <strong>{hwResult.regions.length}</strong>
+                  </div>
+                  <div>
+                    Typical stroke height:{' '}
+                    <strong>{hwResult.scale.typicalStrokeHeight.toFixed(1)}</strong>
+                  </div>
+                  <div>
+                    Typical stroke width:{' '}
+                    <strong>{hwResult.scale.typicalStrokeWidth.toFixed(1)}</strong>
+                  </div>
+                  <div>
+                    Median line height:{' '}
+                    <strong>{hwResult.scale.medianLineHeight.toFixed(1)}</strong>
+                  </div>
+                  <div className="rag-debug-meta">
+                    Scale from {hwResult.scale.strokeCountUsedForScale} stroke(s)
+                    (outliers excluded)
+                  </div>
+                </section>
+
+                <section className="rag-debug-section">
+                  <div className="rag-debug-section-title">Thresholds</div>
+                  {(
+                    [
+                      ['lineVerticalTolerance', 'Line vertical tolerance', 0.1, 2, 0.05],
+                      ['maxHorizontalGapForLine', 'Horizontal line gap', 0.5, 8, 0.1],
+                      ['maxVerticalGapForRegion', 'Region vertical gap', 0.3, 4, 0.1],
+                      [
+                        'minHorizontalOverlapRatio',
+                        'Min horizontal overlap',
+                        0,
+                        1,
+                        0.05,
+                      ],
+                      ['alignmentTolerance', 'Alignment tolerance', 0.2, 4, 0.1],
+                      ['smallMarkThreshold', 'Small-mark threshold', 0.1, 1, 0.05],
+                      ['regionPadding', 'Region padding', 0, 1.5, 0.05],
+                    ] as const
+                  ).map(([key, label, min, max, step]) => (
+                    <label key={key} className="rag-debug-label">
+                      {label}: {hwConfig[key].toFixed(2)}
+                      <input
+                        type="range"
+                        min={min}
+                        max={max}
+                        step={step}
+                        value={hwConfig[key]}
+                        onChange={(e) => {
+                          setHwConfigPatch({ [key]: Number(e.target.value) });
+                          if (!hwShowRegions && !hwShowLines) {
+                            ensureHwDetection({ force: true });
+                          }
+                        }}
+                      />
+                    </label>
+                  ))}
+                  <p className="rag-debug-meta">
+                    Defaults: vTol=
+                    {DEFAULT_HANDWRITING_REGION_CONFIG.lineVerticalTolerance}, hGap=
+                    {DEFAULT_HANDWRITING_REGION_CONFIG.maxHorizontalGapForLine}, rGap=
+                    {DEFAULT_HANDWRITING_REGION_CONFIG.maxVerticalGapForRegion}
+                  </p>
+                </section>
+
+                <section className="rag-debug-section">
+                  <div className="rag-debug-section-title">Regions</div>
+                  {hwResult.regions.length === 0 ? (
+                    <p className="rag-debug-empty">
+                      No handwriting regions. Draw with the Pen tool, then Refresh.
+                    </p>
+                  ) : (
+                    <ul className="rag-debug-list compact">
+                      {hwResult.regions.map((r) => (
+                        <li
+                          key={r.id}
+                          className={`rag-debug-item${
+                            hwSelectedRegionId === r.id ? ' is-selected' : ''
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            className="rag-debug-row tight"
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              padding: 0,
+                              cursor: 'pointer',
+                              width: '100%',
+                              textAlign: 'left',
+                            }}
+                            onClick={() => {
+                              selectHwRegion(r.id);
+                              if (!hwShowRegions) setHwShowRegions(true);
+                            }}
+                          >
+                            <span className="rag-debug-badge spatial">{r.id}</span>
+                            <span className="rag-debug-meta">
+                              {r.lineCount} lines · {r.strokeCount} strokes
+                            </span>
+                          </button>
+                          <p className="rag-debug-meta">
+                            Bounds: x={r.rawBounds.x.toFixed(1)}, y=
+                            {r.rawBounds.y.toFixed(1)}, w=
+                            {r.rawBounds.width.toFixed(1)}, h=
+                            {r.rawBounds.height.toFixed(1)}
+                          </p>
+                          {hwSelectedRegionId === r.id && (
+                            <>
+                              <p className="rag-debug-meta">
+                                Lines: {r.lineIds.join(', ')}
+                              </p>
+                              <p className="rag-debug-meta">
+                                Strokes: {r.strokeIds.join(', ')}
+                              </p>
+                            </>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+
+                <section className="rag-debug-section">
+                  <div className="rag-debug-section-title">Lines</div>
+                  {hwResult.lines.length === 0 ? (
+                    <p className="rag-debug-empty">No lines detected.</p>
+                  ) : (
+                    <ul className="rag-debug-list compact">
+                      {hwResult.lines.map((line) => (
+                        <li
+                          key={line.id}
+                          className={`rag-debug-item${
+                            hwSelectedLineId === line.id ? ' is-selected' : ''
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            className="rag-debug-row tight"
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              padding: 0,
+                              cursor: 'pointer',
+                              width: '100%',
+                              textAlign: 'left',
+                            }}
+                            onClick={() => {
+                              selectHwLine(line.id);
+                              if (!hwShowLines) setHwShowLines(true);
+                            }}
+                          >
+                            <span className="rag-debug-badge both">{line.id}</span>
+                            <span className="rag-debug-meta">
+                              {line.strokeIds.length} strokes
+                            </span>
+                          </button>
+                          <p className="rag-debug-meta">
+                            y={line.centerY.toFixed(1)} · h=
+                            {line.height.toFixed(1)} · strokes L→R:{' '}
+                            {line.strokeIdsLeftToRight.join(', ')}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              </>
             )}
 
             {page === 'context' && (

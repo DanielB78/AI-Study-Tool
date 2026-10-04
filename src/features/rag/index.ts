@@ -100,3 +100,26 @@ export type {
 export { useRagDebugStore, computeDebugContext } from './ragDebugStore';
 export { RagDebugPanel } from './ui/RagDebugPanel';
 export { RagDebugOverlay } from './ui/RagDebugOverlay';
+export { HandwritingDebugOverlay } from './ui/HandwritingDebugOverlay';
+export {
+  detectHandwritingRegions,
+  extractDrawingStrokes,
+  strokeBoundsFromDrawing,
+  estimateHandwritingScale,
+  handwritingContentKey,
+} from './handwritingRegionDetector';
+export type {
+  HandwritingDetectionResult,
+  HandwritingLine,
+  HandwritingRegion,
+  StrokeBounds,
+} from './handwritingTypes';
+export {
+  DEFAULT_HANDWRITING_REGION_CONFIG,
+  mergeHandwritingConfig,
+} from './handwritingConfig';
+export type { HandwritingRegionDetectionConfig } from './handwritingConfig';
+export {
+  useHandwritingDebugStore,
+  createHandwritingDebugStore,
+} from './handwritingDebugStore';
