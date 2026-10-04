@@ -6,6 +6,7 @@
 import type { Camera, CanvasElement, StyleDefaults, TextElement } from '../../../types/canvas';
 import { ragSync } from '../../rag/ragSync';
 import { createAiTextElement, estimateTextHeight } from '../canvas/createAiTextElement';
+import { createAiGraphElement } from '../canvas/createAiGraphElement';
 import {
   AI_TEXT_DEFAULT_WIDTH,
   getDefaultViewportSize,
@@ -20,6 +21,10 @@ import {
   instantiateNoteStructure,
 } from '../../structures/instantiation';
 import type { StructureFieldValue } from '../../structures/fieldValues';
+import {
+  DEFAULT_GRAPH_HEIGHT,
+  DEFAULT_GRAPH_WIDTH,
+} from '../../graphs/types';
 
 export interface AgentExecutorTarget {
   getCamera: () => Camera;
@@ -178,6 +183,31 @@ export function executeCanvasOperations(
           target.addElement(el, false);
           createdIds.push(el.id);
         }
+      } else if (op.type === 'create_graph') {
+        const camera = target.getCamera();
+        const elements = target.getElements();
+        const width = DEFAULT_GRAPH_WIDTH;
+        const height = DEFAULT_GRAPH_HEIGHT;
+        const placed = resolvePlacement({
+          placement: op.placement,
+          width,
+          height,
+          camera,
+          elements,
+          viewport,
+        });
+        const zIndex = target.nextZIndex();
+        // Expressions were already strict-validated + canonicalized in the parser.
+        const canonical = op.expressions.map((e) => e.expression);
+        const element = createAiGraphElement(op, canonical, {
+          x: placed.x,
+          y: placed.y,
+          zIndex,
+          width,
+          height,
+        });
+        target.addElement(element, false);
+        createdIds.push(element.id);
       }
     }
   } finally {

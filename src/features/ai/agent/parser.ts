@@ -9,6 +9,11 @@ import {
   type AbsolutePlacement,
   type CanvasAgentResponse,
   type CanvasOperation,
+  type CreateGraphExpressionSpec,
+  type CreateGraphOperation,
+  type CreateGraphPointSpec,
+  type CreateGraphSettingsSpec,
+  type CreateGraphViewportSpec,
   type CreateStructuredNoteOperation,
   type CreateTextOperation,
   type Placement,
@@ -27,6 +32,12 @@ import {
 import type { NoteStructure } from '../../structures/types';
 import { isNodeSection, isStructureField } from '../../structures/types';
 import { validateLatex } from '../../equations/latex';
+import { encodeGraphExpression } from '../../graphs/expressionCodec';
+import {
+  DEFAULT_GRAPH_SETTINGS,
+  DEFAULT_GRAPH_VIEWPORT,
+  isValidViewport,
+} from '../../graphs/types';
 
 export type ParseErrorCode =
   | 'empty'
@@ -49,7 +60,11 @@ export type ParseErrorCode =
   | 'invalid_latex'
   | 'hierarchy_too_deep'
   | 'hierarchy_too_large'
-  | 'hierarchy_too_many_children';
+  | 'hierarchy_too_many_children'
+  | 'invalid_graph_expression'
+  | 'invalid_graph_viewport'
+  | 'invalid_graph_domain'
+  | 'empty_graph_content';
 
 export class CanvasAgentParseError extends Error {
   readonly code: ParseErrorCode;
@@ -204,6 +219,207 @@ function parseStructuredNote(raw: Record<string, unknown>): CreateStructuredNote
   };
 }
 
+function optionalFiniteNumber(
+  v: unknown,
+  field: string,
+): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== 'number' || !Number.isFinite(v)) {
+    throw new CanvasAgentParseError(
+      'schema',
+      `${field} must be a finite number or null.`,
+    );
+  }
+  return v;
+}
+
+function parseGraphExpressionSpec(
+  raw: unknown,
+  index: number,
+): CreateGraphExpressionSpec {
+  if (!isRecord(raw)) {
+    throw new CanvasAgentParseError(
+      'schema',
+      `expressions[${index}] must be an object.`,
+    );
+  }
+  const expression = requireNonEmptyString(
+    raw.expression,
+    `expressions[${index}].expression`,
+  );
+  const visible = typeof raw.visible === 'boolean' ? raw.visible : true;
+  const domain_min = optionalFiniteNumber(
+    raw.domain_min,
+    `expressions[${index}].domain_min`,
+  );
+  const domain_max = optionalFiniteNumber(
+    raw.domain_max,
+    `expressions[${index}].domain_max`,
+  );
+  if (
+    domain_min != null &&
+    domain_max != null &&
+    !(domain_min < domain_max)
+  ) {
+    throw new CanvasAgentParseError(
+      'invalid_graph_domain',
+      `expressions[${index}] domain_min must be less than domain_max.`,
+    );
+  }
+
+  // Strict AI contract — GraphExpressionCodec, same pipeline as human graphs.
+  const encoded = encodeGraphExpression(expression, 'strict');
+  if (!encoded.ok) {
+    throw new CanvasAgentParseError(
+      'invalid_graph_expression',
+      `Invalid graph expression at index ${index}: ${encoded.error}`,
+      expression,
+    );
+  }
+
+  return {
+    expression: encoded.canonical,
+    visible,
+    domain_min,
+    domain_max,
+  };
+}
+
+function parseGraphPointSpec(raw: unknown, index: number): CreateGraphPointSpec {
+  if (!isRecord(raw)) {
+    throw new CanvasAgentParseError('schema', `points[${index}] must be an object.`);
+  }
+  const x = raw.x;
+  const y = raw.y;
+  if (typeof x !== 'number' || !Number.isFinite(x) || typeof y !== 'number' || !Number.isFinite(y)) {
+    throw new CanvasAgentParseError(
+      'schema',
+      `points[${index}] requires finite x and y numbers.`,
+    );
+  }
+  const label = typeof raw.label === 'string' ? raw.label : '';
+  const visible = typeof raw.visible === 'boolean' ? raw.visible : true;
+  return { x, y, label, visible };
+}
+
+function parseGraphViewport(raw: unknown): CreateGraphViewportSpec {
+  const defaults = DEFAULT_GRAPH_VIEWPORT;
+  if (raw === undefined || raw === null) {
+    return {
+      x_min: defaults.xMin,
+      x_max: defaults.xMax,
+      y_min: defaults.yMin,
+      y_max: defaults.yMax,
+    };
+  }
+  if (!isRecord(raw)) {
+    throw new CanvasAgentParseError('schema', 'viewport must be an object.');
+  }
+  const read = (key: string, fallback: number): number => {
+    const v = raw[key];
+    if (v === undefined || v === null) return fallback;
+    if (typeof v !== 'number' || !Number.isFinite(v)) {
+      throw new CanvasAgentParseError(
+        'invalid_graph_viewport',
+        `viewport.${key} must be a finite number.`,
+      );
+    }
+    return v;
+  };
+  const viewport: CreateGraphViewportSpec = {
+    x_min: read('x_min', defaults.xMin),
+    x_max: read('x_max', defaults.xMax),
+    y_min: read('y_min', defaults.yMin),
+    y_max: read('y_max', defaults.yMax),
+  };
+  if (
+    !isValidViewport({
+      xMin: viewport.x_min,
+      xMax: viewport.x_max,
+      yMin: viewport.y_min,
+      yMax: viewport.y_max,
+    })
+  ) {
+    throw new CanvasAgentParseError(
+      'invalid_graph_viewport',
+      'viewport requires x_min < x_max and y_min < y_max.',
+    );
+  }
+  return viewport;
+}
+
+function parseGraphSettings(raw: unknown): CreateGraphSettingsSpec {
+  const d = DEFAULT_GRAPH_SETTINGS;
+  if (raw === undefined || raw === null) {
+    return {
+      title: null,
+      x_axis_label: null,
+      y_axis_label: null,
+      show_grid: d.showGrid,
+      show_x_axis: d.showXAxis,
+      show_y_axis: d.showYAxis,
+    };
+  }
+  if (!isRecord(raw)) {
+    throw new CanvasAgentParseError('schema', 'settings must be an object.');
+  }
+  const strOrNull = (v: unknown): string | null => {
+    if (v === null || v === undefined) return null;
+    if (typeof v !== 'string') {
+      throw new CanvasAgentParseError('schema', 'settings string fields must be string or null.');
+    }
+    const t = v.trim();
+    return t.length ? t : null;
+  };
+  const bool = (v: unknown, fallback: boolean): boolean => {
+    if (v === undefined || v === null) return fallback;
+    if (typeof v !== 'boolean') {
+      throw new CanvasAgentParseError('schema', 'settings boolean fields must be boolean.');
+    }
+    return v;
+  };
+  return {
+    title: strOrNull(raw.title),
+    x_axis_label: strOrNull(raw.x_axis_label),
+    y_axis_label: strOrNull(raw.y_axis_label),
+    show_grid: bool(raw.show_grid, d.showGrid),
+    show_x_axis: bool(raw.show_x_axis, d.showXAxis),
+    show_y_axis: bool(raw.show_y_axis, d.showYAxis),
+  };
+}
+
+function parseCreateGraph(raw: Record<string, unknown>): CreateGraphOperation {
+  if (!Array.isArray(raw.expressions)) {
+    throw new CanvasAgentParseError('schema', 'create_graph needs an expressions array.');
+  }
+  if (!Array.isArray(raw.points)) {
+    throw new CanvasAgentParseError('schema', 'create_graph needs a points array (use [] if none).');
+  }
+
+  const expressions = raw.expressions.map((item, i) => parseGraphExpressionSpec(item, i));
+  const points = raw.points.map((item, i) => parseGraphPointSpec(item, i));
+
+  if (expressions.length === 0 && points.length === 0) {
+    throw new CanvasAgentParseError(
+      'empty_graph_content',
+      'create_graph requires at least one expression or point.',
+    );
+  }
+
+  const viewport = parseGraphViewport(raw.viewport);
+  const settings = parseGraphSettings(raw.settings);
+  const placement = parsePlacement(raw.placement);
+
+  return {
+    type: 'create_graph',
+    expressions,
+    points,
+    viewport,
+    settings,
+    placement,
+  };
+}
+
 function parseOperation(raw: unknown): CanvasOperation {
   if (!isRecord(raw) || typeof raw.type !== 'string') {
     throw new CanvasAgentParseError('schema', 'Each operation needs a type.');
@@ -227,6 +443,24 @@ function parseOperation(raw: unknown): CanvasOperation {
   }
   if (raw.type === 'create_structured_note') {
     return parseStructuredNote(raw);
+  }
+  if (raw.type === 'create_graph') {
+    return parseCreateGraph(raw);
+  }
+  // Explicitly reject future graph-edit ops so they never silently fall through.
+  if (
+    raw.type === 'update_graph' ||
+    raw.type === 'add_graph_expression' ||
+    raw.type === 'remove_graph_expression' ||
+    raw.type === 'update_graph_viewport' ||
+    raw.type === 'update_graph_settings' ||
+    raw.type === 'update_graph_expression'
+  ) {
+    throw new CanvasAgentParseError(
+      'unknown_operation',
+      `Graph editing is not supported yet ("${raw.type}"). Create a new graph with create_graph instead, or skip the operation.`,
+      String(raw.type),
+    );
   }
   throw new CanvasAgentParseError(
     'unknown_operation',
@@ -359,6 +593,18 @@ function validateStructuredNote(
   }
 }
 
+function validateRelativePlacement(placement: Placement, ctx: ParseContext): void {
+  if (placement.mode !== 'relative_to_element') return;
+  const id = placement.anchor_element_id;
+  if (!ctx.allowedElementIds.has(id)) {
+    throw new CanvasAgentParseError(
+      'anchor_not_in_context',
+      `anchor_element_id "${id}" was not in the supplied canvas context.`,
+      id,
+    );
+  }
+}
+
 function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
   if (op.type === 'update_text') {
     if (!ctx.allowedElementIds.has(op.target_element_id)) {
@@ -377,15 +623,11 @@ function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
       );
     }
   }
-  if (op.type === 'create_text' && op.placement.mode === 'relative_to_element') {
-    const id = op.placement.anchor_element_id;
-    if (!ctx.allowedElementIds.has(id)) {
-      throw new CanvasAgentParseError(
-        'anchor_not_in_context',
-        `anchor_element_id "${id}" was not in the supplied canvas context.`,
-        id,
-      );
-    }
+  if (op.type === 'create_text') {
+    validateRelativePlacement(op.placement, ctx);
+  }
+  if (op.type === 'create_graph') {
+    validateRelativePlacement(op.placement, ctx);
   }
   if (op.type === 'create_structured_note') {
     validateStructuredNote(op, ctx);
@@ -443,6 +685,34 @@ export interface DescribePlanOptions {
   structureFieldLabels?: ReadonlyMap<string, ReadonlyMap<string, string>>;
 }
 
+function formatPlacementLine(p: Placement, style: 'short' | 'friendly' = 'short'): string {
+  if (p.mode === 'viewport_default') {
+    return style === 'friendly' ? 'In front of you' : 'viewport_default';
+  }
+  if (p.mode === 'absolute') return `absolute (${p.x}, ${p.y})`;
+  if (style === 'friendly') {
+    const rel =
+      p.relation === 'near'
+        ? 'Near'
+        : p.relation === 'left_of'
+          ? 'Left of'
+          : p.relation === 'right_of'
+            ? 'Right of'
+            : p.relation === 'above'
+              ? 'Above'
+              : 'Below';
+    return `${rel} ${p.anchor_element_id}`;
+  }
+  return `${p.relation} ${p.anchor_element_id}`;
+}
+
+/** Pretty-ish display for plan UI — does not change machine expression. */
+function prettyGraphExpression(canonical: string): string {
+  return canonical
+    .replaceAll('**', '^')
+    .replace(/\*/g, '·');
+}
+
 /** Human-readable plan lines for the debug UI. */
 export function describeOperationPlan(
   ops: readonly CanvasOperation[],
@@ -455,11 +725,7 @@ export function describeOperationPlan(
       return `${n}. UPDATE TEXT\n   Target: ${op.target_element_id}\n   Text: ${preview}${op.text.length > 80 ? '…' : ''}`;
     }
     if (op.type === 'create_structured_note') {
-      const p = op.placement;
-      let placementLine = '';
-      if (p.mode === 'viewport_default') placementLine = 'Viewport Default';
-      else if (p.mode === 'absolute') placementLine = `absolute (${p.x}, ${p.y})`;
-      else placementLine = `${p.relation} ${p.anchor_element_id}`;
+      const placementLine = formatPlacementLine(op.placement, 'short');
       const structureName =
         options?.structureNames?.get(op.structure_id) ?? op.structure_id;
       const labels = options?.structureFieldLabels?.get(op.structure_id);
@@ -493,16 +759,52 @@ export function describeOperationPlan(
       return [
         `${n}. CREATE STRUCTURED NOTE`,
         `   Structure: ${structureName}`,
-        `   Placement: ${placementLine}`,
+        `   Placement: ${placementLine === 'viewport_default' ? 'Viewport Default' : placementLine}`,
         '   FIELDS',
         ...fieldLines,
       ].join('\n');
     }
-    const p = op.placement;
-    let placementLine = '';
-    if (p.mode === 'viewport_default') placementLine = 'viewport_default';
-    else if (p.mode === 'absolute') placementLine = `absolute (${p.x}, ${p.y})`;
-    else placementLine = `${p.relation} ${p.anchor_element_id}`;
+    if (op.type === 'create_graph') {
+      const curveLines =
+        op.expressions.length === 0
+          ? ['   (no curves)']
+          : op.expressions.map(
+              (e) => `   • y = ${prettyGraphExpression(e.expression)}`,
+            );
+      const pointLines =
+        op.points.length === 0
+          ? []
+          : [
+              '   Points:',
+              ...op.points.map(
+                (p) =>
+                  `   • (${p.x}, ${p.y})${p.label ? ` ${p.label}` : ''}`,
+              ),
+            ];
+      const titleLine = op.settings.title
+        ? [`   Title: ${op.settings.title}`]
+        : [];
+      const labelBits: string[] = [];
+      if (op.settings.x_axis_label) {
+        labelBits.push(`x: ${op.settings.x_axis_label}`);
+      }
+      if (op.settings.y_axis_label) {
+        labelBits.push(`y: ${op.settings.y_axis_label}`);
+      }
+      return [
+        `${n}. CREATE GRAPH`,
+        '   Curves:',
+        ...curveLines,
+        ...pointLines,
+        ...titleLine,
+        `   X range: ${op.viewport.x_min} → ${op.viewport.x_max}`,
+        `   Y range: ${op.viewport.y_min} → ${op.viewport.y_max}`,
+        `   Grid: ${op.settings.show_grid ? 'On' : 'Off'}`,
+        ...(labelBits.length ? [`   Axis labels: ${labelBits.join(', ')}`] : []),
+        `   Placement: ${formatPlacementLine(op.placement, 'friendly')}`,
+      ].join('\n');
+    }
+    const placementLine = formatPlacementLine(op.placement, 'short');
     const preview = op.text.replace(/\s+/g, ' ').slice(0, 80);
     return `${n}. CREATE TEXT\n   Placement: ${placementLine}\n   Text: ${preview}${op.text.length > 80 ? '…' : ''}`;
   });
