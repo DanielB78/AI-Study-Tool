@@ -47,6 +47,11 @@ function formatRetrieval(el: RagContextElement): string[] {
     lines.push('EXPLICIT SELECTION: yes');
   }
 
+  if (el.sources.some((s) => s.type === 'explicit_region_selection')) {
+    lines.push('');
+    lines.push('EXPLICIT REGION SELECTION: yes');
+  }
+
   if (el.similarity !== null) {
     lines.push('');
     lines.push('SIMILARITY:');
@@ -79,6 +84,20 @@ function formatRetrieval(el: RagContextElement): string[] {
 
 function formatElementBlock(el: RagContextElement): string {
   const g = el.geometry;
+  if (el.element_type === 'graph') {
+    return [
+      el.text || 'GRAPH ELEMENT\n\n(empty graph)',
+      '',
+      'POSITION:',
+      `x: ${g.x}`,
+      `y: ${g.y}`,
+      `width: ${g.width}`,
+      `height: ${g.height}`,
+      '',
+      ...formatRetrieval(el),
+    ].join('\n');
+  }
+
   const isImage = el.element_type === 'image';
   const contentLines = isImage
     ? [
@@ -112,54 +131,116 @@ function formatImageContextSection(
 ): string {
   if (attachments.length === 0) return '';
 
-  const blocks = attachments.map((att) => {
-    const reasonLines: string[] = [];
-    if (att.selection_reason === 'explicit_selection') {
-      reasonLines.push('Included because the user explicitly selected this image.');
-    } else {
-      const spatial = att.sources.find((s) => s.type === 'spatial');
-      if (spatial && spatial.type === 'spatial') {
-        reasonLines.push(
-          `The following image was included because it is spatially near ${spatial.anchor_element_id}.`,
-        );
-      } else {
-        reasonLines.push(
-          'The following image was included because it is spatially near a semantic anchor.',
-        );
-      }
-    }
-    for (const s of att.sources) {
-      if (s.type === 'spatial') {
-        reasonLines.push(`SPATIAL ANCHOR: ${s.anchor_element_id}`);
-        reasonLines.push(`DISTANCE: ${s.distance.toFixed(1)}`);
-      }
-    }
-    return [
-      'IMAGE',
-      '',
-      ...reasonLines,
-      '',
-      'IMAGE ELEMENT ID:',
-      att.element_id,
-      '',
-      'ATTACHED CANVAS IMAGE:',
-      att.element_id,
-      '',
-      'BOUNDS:',
-      `x: ${att.geometry.x}`,
-      `y: ${att.geometry.y}`,
-      `width: ${att.geometry.width}`,
-      `height: ${att.geometry.height}`,
-    ].join('\n');
-  });
+  const regionAtts = attachments.filter(
+    (a) => a.selection_reason === 'explicit_region_selection',
+  );
+  const imageAtts = attachments.filter(
+    (a) => a.selection_reason !== 'explicit_region_selection',
+  );
 
-  return [
-    'CANVAS IMAGE CONTEXT',
-    '',
-    'Inspect the attached images directly. Do not invent captions or descriptions.',
-    '',
-    blocks.join(`\n\n${'-'.repeat(50)}\n\n`),
-  ].join('\n');
+  const parts: string[] = [];
+
+  if (regionAtts.length > 0) {
+    const blocks = regionAtts.map((att) => {
+      const g = att.geometry;
+      return [
+        'SELECTED CANVAS REGION IMAGE',
+        '',
+        'Attachment required — attach this image alongside the prompt.',
+        'Status: Attachment required',
+        '',
+        'SOURCE: explicit_region_selection',
+        '',
+        'BOUNDS:',
+        `x: ${g.x}`,
+        `y: ${g.y}`,
+        `width: ${g.width}`,
+        `height: ${g.height}`,
+        '',
+        'INCLUDED ELEMENT IDS:',
+        att.region?.included_element_ids.join(', ') || '(none)',
+        '',
+        'ATTACHED CANVAS REGION IMAGE:',
+        att.element_id,
+        '',
+        '[MANUAL ATTACHMENT]',
+        `Attach the selected canvas region image (${att.element_id}) as a multimodal image input.`,
+        'Clipboard text cannot include the binary image — attach the thumbnail/export manually.',
+      ].join('\n');
+    });
+    parts.push(
+      [
+        'SELECTED CANVAS REGION',
+        '',
+        'The user explicitly selected the following region of the canvas.',
+        'The corresponding image is attached.',
+        'The region may contain handwritten text, mathematics, sketches, diagrams, or relationships between canvas elements.',
+        'Use the visual content when interpreting references such as:',
+        '"this"',
+        '"these"',
+        '"what I wrote"',
+        '"this diagram"',
+        '',
+        'Do NOT invent a machine transcription.',
+        '',
+        blocks.join(`\n\n${'-'.repeat(50)}\n\n`),
+      ].join('\n'),
+    );
+  }
+
+  if (imageAtts.length > 0) {
+    const blocks = imageAtts.map((att) => {
+      const reasonLines: string[] = [];
+      if (att.selection_reason === 'explicit_selection') {
+        reasonLines.push('Included because the user explicitly selected this image.');
+      } else {
+        const spatial = att.sources.find((s) => s.type === 'spatial');
+        if (spatial && spatial.type === 'spatial') {
+          reasonLines.push(
+            `The following image was included because it is spatially near ${spatial.anchor_element_id}.`,
+          );
+        } else {
+          reasonLines.push(
+            'The following image was included because it is spatially near a semantic anchor.',
+          );
+        }
+      }
+      for (const s of att.sources) {
+        if (s.type === 'spatial') {
+          reasonLines.push(`SPATIAL ANCHOR: ${s.anchor_element_id}`);
+          reasonLines.push(`DISTANCE: ${s.distance.toFixed(1)}`);
+        }
+      }
+      return [
+        'IMAGE',
+        '',
+        ...reasonLines,
+        '',
+        'IMAGE ELEMENT ID:',
+        att.element_id,
+        '',
+        'ATTACHED CANVAS IMAGE:',
+        att.element_id,
+        '',
+        'BOUNDS:',
+        `x: ${att.geometry.x}`,
+        `y: ${att.geometry.y}`,
+        `width: ${att.geometry.width}`,
+        `height: ${att.geometry.height}`,
+      ].join('\n');
+    });
+    parts.push(
+      [
+        'CANVAS IMAGE CONTEXT',
+        '',
+        'Inspect the attached images directly. Do not invent captions or descriptions.',
+        '',
+        blocks.join(`\n\n${'-'.repeat(50)}\n\n`),
+      ].join('\n'),
+    );
+  }
+
+  return parts.join('\n\n');
 }
 
 /**
@@ -168,7 +249,11 @@ function formatImageContextSection(
  * Image elements appear as attachment markers (not textual descriptions).
  */
 export function formatCanvasContextSection(context: RagContext): string {
-  if (context.allElements.length === 0 && context.imageAttachments.length === 0) {
+  if (
+    context.allElements.length === 0 &&
+    context.imageAttachments.length === 0 &&
+    !context.regionImageContext
+  ) {
     return ['CANVAS CONTEXT', '', '(none selected)'].join('\n');
   }
 
@@ -205,7 +290,10 @@ export function formatCanvasContextSection(context: RagContext): string {
   const supporting = context.allElements.filter(
     (el) =>
       el.element_type !== 'image' &&
-      !el.sources.some((s) => s.type === 'explicit_selection'),
+      !el.sources.some(
+        (s) =>
+          s.type === 'explicit_selection' || s.type === 'explicit_region_selection',
+      ),
   );
   if (supporting.length > 0) {
     parts.push('');

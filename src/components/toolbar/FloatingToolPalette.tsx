@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import {
   ArrowUpRight,
+  ChartLine,
   Hand,
   Image as ImageIcon,
   MousePointer2,
@@ -161,6 +162,16 @@ export function FloatingToolPalette({ fileInputRef }: FloatingToolPaletteProps) 
             onClick={() => {
               closeShapes();
               setTool('text');
+            }}
+          />
+          <ToolButton
+            label="Graph"
+            shortcut="G"
+            icon={ChartLine}
+            active={activeTool === 'graph'}
+            onClick={() => {
+              closeShapes();
+              setTool('graph');
             }}
           />
           <ToolButton

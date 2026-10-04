@@ -25,6 +25,12 @@ import {
 } from '../persistence/storage';
 import { styleFromElement } from '../persistence/migrate';
 import { ragSync } from '../features/rag/ragSync';
+import { createGraphElement } from '../features/graphs/createGraphElement';
+import {
+  DEFAULT_GRAPH_HEIGHT,
+  DEFAULT_GRAPH_WIDTH,
+} from '../features/graphs/types';
+import { useGraphUiStore } from '../features/graphs/graphUiStore';
 
 const MAX_HISTORY = 80;
 const persistence: PersistenceService = createLocalStoragePersistence();
@@ -39,6 +45,12 @@ export interface TransientUI {
   editingShapeLabelId: string | null;
   isSpacePanning: boolean;
   marquee: { x: number; y: number; width: number; height: number } | null;
+  /**
+   * Last completed marquee region in world coordinates.
+   * Survives after the transient `marquee` rect is cleared on pointer-up.
+   * Cleared when the user click-selects without a marquee or clears selection.
+   */
+  lastMarqueeRegion: { x: number; y: number; width: number; height: number } | null;
   draftPoints: number[] | null;
   draftShape: {
     kind: DraftShapeKind;
@@ -69,6 +81,7 @@ export interface CanvasStore extends TransientUI, HistorySlice {
   setCamera: (camera: Camera | ((c: Camera) => Camera)) => void;
   setSpacePanning: (value: boolean) => void;
   setMarquee: (marquee: TransientUI['marquee']) => void;
+  setLastMarqueeRegion: (region: TransientUI['lastMarqueeRegion']) => void;
   setDraftPoints: (points: number[] | null) => void;
   setDraftShape: (draft: TransientUI['draftShape']) => void;
   setSnapGuides: (guides: TransientUI['snapGuides']) => void;
@@ -117,6 +130,7 @@ export interface CanvasStore extends TransientUI, HistorySlice {
   ) => void;
 
   createTextAt: (worldX: number, worldY: number, width?: number) => string;
+  createGraphAt: (worldX: number, worldY: number) => string;
   commitDrawing: (absolutePoints: number[]) => void;
   commitShape: (draft: NonNullable<TransientUI['draftShape']>) => void;
   addImageFromFile: (file: File, worldX: number, worldY: number) => Promise<void>;
@@ -163,6 +177,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   editingShapeLabelId: null,
   isSpacePanning: false,
   marquee: null,
+  lastMarqueeRegion: null,
   draftPoints: null,
   draftShape: null,
   clipboard: [],
@@ -215,6 +230,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
 
   setSpacePanning: (value) => set({ isSpacePanning: value }),
   setMarquee: (marquee) => set({ marquee }),
+  setLastMarqueeRegion: (region) => set({ lastMarqueeRegion: region }),
   setDraftPoints: (points) => set({ draftPoints: points }),
   setDraftShape: (draft) => set({ draftShape: draft }),
   setSnapGuides: (guides) => set({ snapGuides: guides }),
@@ -250,7 +266,12 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   },
 
   clearSelection: () =>
-    set({ selectedIds: [], editingTextId: null, editingShapeLabelId: null }),
+    set({
+      selectedIds: [],
+      editingTextId: null,
+      editingShapeLabelId: null,
+      lastMarqueeRegion: null,
+    }),
 
   pushHistory: () => {
     const { document, past, historySuspended } = get();
@@ -599,6 +620,19 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     return id;
   },
 
+  createGraphAt: (worldX, worldY) => {
+    const element = createGraphElement({
+      x: worldX - DEFAULT_GRAPH_WIDTH / 2,
+      y: worldY - DEFAULT_GRAPH_HEIGHT / 2,
+      zIndex: get().nextZIndex(),
+      opacity: get().style.opacity,
+    });
+    get().addElement(element, true);
+    set({ activeTool: 'select' });
+    useGraphUiStore.getState().openEditor(element.id);
+    return element.id;
+  },
+
   commitDrawing: (absolutePoints) => {
     if (absolutePoints.length < 4) {
       set({ draftPoints: null });
@@ -792,6 +826,8 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
               el.connectorType === 'arrow' ? style.arrowHeads : el.arrowHeads,
           });
         case 'image':
+          return touch({ ...el, opacity: style.opacity });
+        case 'graph':
           return touch({ ...el, opacity: style.opacity });
         default:
           return el;

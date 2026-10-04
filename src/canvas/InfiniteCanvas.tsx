@@ -12,6 +12,7 @@ import { ElementRenderer } from './elements/ElementRenderer';
 import { SelectionTransformer } from './elements/SelectionTransformer';
 import { TextEditorOverlay } from './TextEditorOverlay';
 import { EquationHtmlLayer } from './EquationHtmlLayer';
+import { GraphHtmlLayer } from './GraphHtmlLayer';
 import { DraftShapePreview } from './DraftShapePreview';
 import {
   normalizeRect,
@@ -20,9 +21,10 @@ import {
   zoomAtPoint,
 } from '../utils/coordinates';
 import { snapPosition } from '../utils/snap';
-import { ZOOM_STEP, isShapeTool, type EquationElement } from '../types/canvas';
+import { ZOOM_STEP, isShapeTool, type EquationElement, type GraphElement } from '../types/canvas';
 import { ragSync } from '../features/rag/ragSync';
 import { RagDebugOverlay } from '../features/rag/ui/RagDebugOverlay';
+import { useGraphUiStore } from '../features/graphs/graphUiStore';
 
 function getCursor(
   tool: string,
@@ -33,6 +35,7 @@ function getCursor(
     return isPanning ? 'grabbing' : 'grab';
   }
   if (tool === 'text') return 'text';
+  if (tool === 'graph') return 'crosshair';
   if (
     tool === 'pen' ||
     tool === 'line' ||
@@ -93,6 +96,7 @@ export function InfiniteCanvas() {
   const setEditingTextId = useCanvasStore((s) => s.setEditingTextId);
   const setEditingShapeLabelId = useCanvasStore((s) => s.setEditingShapeLabelId);
   const setMarquee = useCanvasStore((s) => s.setMarquee);
+  const setLastMarqueeRegion = useCanvasStore((s) => s.setLastMarqueeRegion);
   const setDraftPoints = useCanvasStore((s) => s.setDraftPoints);
   const setDraftShape = useCanvasStore((s) => s.setDraftShape);
   const setSnapGuides = useCanvasStore((s) => s.setSnapGuides);
@@ -101,6 +105,7 @@ export function InfiniteCanvas() {
   const updateElement = useCanvasStore((s) => s.updateElement);
   const updateElements = useCanvasStore((s) => s.updateElements);
   const createTextAt = useCanvasStore((s) => s.createTextAt);
+  const createGraphAt = useCanvasStore((s) => s.createGraphAt);
   const commitDrawing = useCanvasStore((s) => s.commitDrawing);
   const commitShape = useCanvasStore((s) => s.commitShape);
   const addImageFromFile = useCanvasStore((s) => s.addImageFromFile);
@@ -110,8 +115,33 @@ export function InfiniteCanvas() {
   const camera = document.camera;
   const elements = document.elements;
 
+  const interactingGraphId = useGraphUiStore((s) => s.interactingGraphId);
+  const enterInteract = useGraphUiStore((s) => s.enterInteract);
+  const exitInteract = useGraphUiStore((s) => s.exitInteract);
+  const openGraphEditor = useGraphUiStore((s) => s.openEditor);
+
   const isSelectMode = activeTool === 'select' && !isSpacePanning;
   const canInteractWithObjects = isSelectMode;
+
+  // Escape exits graph interaction mode.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (!useGraphUiStore.getState().interactingGraphId) return;
+      e.preventDefault();
+      exitInteract();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [exitInteract]);
+
+  // Clear interaction when selection changes away from the interacting graph.
+  useEffect(() => {
+    if (!interactingGraphId) return;
+    if (!selectedIds.includes(interactingGraphId)) {
+      exitInteract();
+    }
+  }, [selectedIds, interactingGraphId, exitInteract]);
 
   const getWorldPointer = useCallback((): { x: number; y: number } | null => {
     const stage = stageRef.current;
@@ -229,7 +259,15 @@ export function InfiniteCanvas() {
       return;
     }
 
+    if (tool === 'graph' && clickedEmpty) {
+      window.setTimeout(() => createGraphAt(world.x, world.y), 0);
+      return;
+    }
+
     if (tool === 'select' && clickedEmpty) {
+      if (useGraphUiStore.getState().interactingGraphId) {
+        exitInteract();
+      }
       marqueeState.current = {
         startX: world.x,
         startY: world.y,
@@ -344,6 +382,13 @@ export function InfiniteCanvas() {
       marqueeState.current = null;
       setMarquee(null);
       if (box && (box.width > 2 || box.height > 2)) {
+        // Persist world-coordinate region for LLM visual context (marquee itself is cleared).
+        setLastMarqueeRegion({
+          x: box.x,
+          y: box.y,
+          width: box.width,
+          height: box.height,
+        });
         const hits = useCanvasStore
           .getState()
           .document.elements.filter((el) =>
@@ -361,6 +406,8 @@ export function InfiniteCanvas() {
         } else {
           select(hits);
         }
+      } else {
+        setLastMarqueeRegion(null);
       }
     }
   };
@@ -372,9 +419,11 @@ export function InfiniteCanvas() {
       if (!additive && current.includes(id) && current.length > 1) {
         return;
       }
+      // Click selection is element-based — clear any prior marquee region snapshot.
+      setLastMarqueeRegion(null);
       select([id], additive);
     },
-    [canInteractWithObjects, select],
+    [canInteractWithObjects, select, setLastMarqueeRegion],
   );
 
   const onDragStartElement = useCallback(
@@ -559,16 +608,23 @@ export function InfiniteCanvas() {
               key={el.id}
               element={el}
               listening={
-                canInteractWithObjects ||
-                (activeTool === 'text' && el.type === 'text')
+                (canInteractWithObjects ||
+                  (activeTool === 'text' && el.type === 'text')) &&
+                !(interactingGraphId === el.id)
               }
               isEditingText={editingTextId === el.id}
+              interactingGraph={interactingGraphId === el.id}
               onSelect={onSelectElement}
               onDragStart={onDragStartElement}
               onDragMove={onDragMoveElement}
               onDragEnd={onDragEndElement}
               onEditText={onEditText}
               onEditShapeLabel={onEditShapeLabel}
+              onInteractGraph={(id) => {
+                select([id]);
+                enterInteract(id);
+                openGraphEditor(id);
+              }}
             />
           ))}
 
@@ -627,11 +683,14 @@ export function InfiniteCanvas() {
           <SelectionTransformer
             selectedIds={selectedIds.filter((id) => {
               const el = elements.find((e) => e.id === id);
-              return el && !el.locked;
+              return el && !el.locked && id !== interactingGraphId;
             })}
             elements={elements}
             enabled={
-              canInteractWithObjects && !editingTextId && !editingShapeLabelId
+              canInteractWithObjects &&
+              !editingTextId &&
+              !editingShapeLabelId &&
+              !interactingGraphId
             }
           />
         </Layer>
@@ -645,6 +704,11 @@ export function InfiniteCanvas() {
         editingId={null}
       />
 
+      <GraphHtmlLayer
+        graphs={elements.filter((el): el is GraphElement => el.type === 'graph')}
+        camera={camera}
+        selectedIds={selectedIds}
+      />
       {editingTarget && (
         <TextEditorOverlay
           target={editingTarget}

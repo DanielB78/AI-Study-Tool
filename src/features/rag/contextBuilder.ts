@@ -19,12 +19,19 @@ import {
 
 export type RetrievalSourceType =
   | 'explicit_selection'
+  | 'explicit_region_selection'
   | 'semantic'
   | 'spatial'
   | 'semantic_neighbor';
 
 export interface ExplicitSelectionSource {
   type: 'explicit_selection';
+}
+
+/** Provenance for content included because it intersects an explicit marquee region. */
+export interface ExplicitRegionSelectionSource {
+  type: 'explicit_region_selection';
+  world_bounds: WorldRect;
 }
 
 export interface SemanticSource {
@@ -49,12 +56,14 @@ export interface SemanticNeighborSource {
 
 export type ElementProvenance =
   | ExplicitSelectionSource
+  | ExplicitRegionSelectionSource
   | SemanticSource
   | SpatialSource
   | SemanticNeighborSource;
 
 export type ElementInclusion =
   | 'explicit_selection'
+  | 'explicit_region_selection'
   | 'semantic'
   | 'spatial'
   | 'semantic_neighbor'
@@ -81,15 +90,35 @@ export interface RagContextElement {
 /** Multimodal attachment — binary/image data stays out of text context strings. */
 export interface RagContextImageAttachment {
   element_id: string;
-  element_type: 'image';
-  /** Asset reference (data URL / storage URL) resolved from CanvasDocument. */
+  element_type: 'image' | 'region';
+  /** Asset reference (data URL / storage URL) resolved from CanvasDocument or region render. */
   asset_src: string;
   geometry: WorldRect;
   sources: ElementProvenance[];
-  /** Nearest spatial distance if any; null for explicit-only. */
+  /** Nearest spatial distance if any; null for explicit-only / region. */
   nearest_distance: number | null;
-  /** Why this image was selected into the attachment budget. */
-  selection_reason: 'explicit_selection' | 'spatial_neighbor';
+  /**
+   * Why this image was selected into the attachment budget.
+   * Priority: explicit_region_selection > explicit_selection > spatial_neighbor.
+   */
+  selection_reason:
+    | 'explicit_region_selection'
+    | 'explicit_selection'
+    | 'spatial_neighbor';
+  /** Present when element_type === 'region'. */
+  region?: {
+    included_element_ids: string[];
+    contains_unstructured_visuals: boolean;
+  };
+}
+
+/** Selected-region visual context (transient — not stored in CanvasDocument). */
+export interface CanvasRegionImageContext {
+  worldBounds: WorldRect;
+  imageAttachment: RagContextImageAttachment;
+  provenance: ExplicitRegionSelectionSource;
+  includedElementIds: string[];
+  containsUnstructuredVisuals: boolean;
 }
 
 export interface RagContextStats {
@@ -99,11 +128,13 @@ export interface RagContextStats {
   spatial_text_addition_count: number;
   spatial_equation_addition_count: number;
   spatial_image_addition_count: number;
+  spatial_graph_addition_count: number;
   semantic_depth1_addition_count: number;
   semantic_depth2_addition_count: number;
   unique_semantic_addition_count: number;
   image_attachment_count: number;
   image_budget_excluded_count: number;
+  region_image_attachment_count: number;
   total_unique_elements: number;
   character_count: number;
   word_count: number;
@@ -125,6 +156,8 @@ export interface RagContext {
   allElements: RagContextElement[];
   /** Deduplicated multimodal attachments (actual images for the LLM). */
   imageAttachments: RagContextImageAttachment[];
+  /** Transient selected-region visual context (null when no region image). */
+  regionImageContext: CanvasRegionImageContext | null;
   stats: RagContextStats;
   /** Deterministic serialized payload for the LLM (text only — no raw bytes). */
   serialized: string;
@@ -140,10 +173,27 @@ export interface SemanticAnchorInput {
   text: string;
 }
 
+/** Pre-rendered selected-region image (from CanvasRegionRenderer). */
+export interface RegionImageInput {
+  worldBounds: WorldRect;
+  asset_src: string;
+  includedElementIds: string[];
+  containsUnstructuredVisuals: boolean;
+}
+
 export interface BuildRagContextOptions {
   query: string;
   /** Editor selection snapshot — highest priority, always retained. */
   explicitSelections?: ExplicitSelectionInput[];
+  /**
+   * Structured elements intersecting an explicit marquee region.
+   * Merged with explicitSelections (deduped by element_id); provenance tagged.
+   */
+  regionStructuredSelections?: ExplicitSelectionInput[];
+  /** World bounds of the snapshotted marquee (for provenance). */
+  regionBounds?: WorldRect | null;
+  /** When visual content was detected and rendered — attach as required multimodal input. */
+  regionImage?: RegionImageInput | null;
   semanticAnchors: SemanticAnchorInput[];
   /** Raw spatial hits (may include duplicates across anchors / overlap with anchors) */
   spatialHits: SpatialHit[];
@@ -210,6 +260,10 @@ function isImageElement(el: { element_type: string }): boolean {
   return el.element_type === 'image';
 }
 
+function isGraphElement(el: { element_type: string }): boolean {
+  return el.element_type === 'graph';
+}
+
 function formatElementBlock(el: RagContextElement): string {
   const lines: string[] = [];
   lines.push('ELEMENT');
@@ -218,6 +272,9 @@ function formatElementBlock(el: RagContextElement): string {
   lines.push(`SOURCE: ${el.inclusion}`);
   if (el.sources.some((s) => s.type === 'explicit_selection')) {
     lines.push('EXPLICIT_SELECTION: yes');
+  }
+  if (el.sources.some((s) => s.type === 'explicit_region_selection')) {
+    lines.push('EXPLICIT_REGION_SELECTION: yes');
   }
   if (el.similarity !== null) {
     lines.push(`SIMILARITY: ${el.similarity.toFixed(4)}`);
@@ -245,6 +302,9 @@ function formatElementBlock(el: RagContextElement): string {
     lines.push('ATTACHED CANVAS IMAGE:');
     lines.push(el.element_id);
     lines.push('(image bytes are supplied as a multimodal attachment — not described here)');
+  } else if (isGraphElement(el)) {
+    // Structured GraphContext body (already includes GRAPH ELEMENT header).
+    lines.push(el.text || '(empty graph)');
   } else {
     lines.push('TEXT:');
     lines.push(el.text || '(empty)');
@@ -253,6 +313,22 @@ function formatElementBlock(el: RagContextElement): string {
 }
 
 function formatImageAttachmentBlock(att: RagContextImageAttachment): string {
+  if (att.element_type === 'region' || att.selection_reason === 'explicit_region_selection') {
+    const lines: string[] = [
+      'SELECTED CANVAS REGION IMAGE',
+      `REGION ID: ${att.element_id}`,
+      'SOURCE: explicit_region_selection',
+      `BOUNDS: x=${att.geometry.x}, y=${att.geometry.y}, width=${att.geometry.width}, height=${att.geometry.height}`,
+    ];
+    if (att.region?.included_element_ids.length) {
+      lines.push(`INCLUDED ELEMENTS: ${att.region.included_element_ids.join(', ')}`);
+    }
+    lines.push('ATTACHED CANVAS REGION IMAGE:');
+    lines.push(att.element_id);
+    lines.push('(image bytes are supplied as a multimodal attachment — not OCR’d here)');
+    return lines.join('\n');
+  }
+
   const lines: string[] = [
     'IMAGE',
     `IMAGE ELEMENT ID: ${att.element_id}`,
@@ -275,14 +351,41 @@ function formatImageAttachmentBlock(att: RagContextImageAttachment): string {
   return lines.join('\n');
 }
 
+function formatSelectedRegionSection(
+  region: CanvasRegionImageContext | null,
+): string {
+  if (!region) return '';
+  const g = region.worldBounds;
+  return [
+    'SELECTED CANVAS REGION',
+    '',
+    'The user explicitly selected the following region of the canvas.',
+    'The corresponding image is attached.',
+    'The region may contain handwritten text, mathematics, sketches, diagrams, or relationships between canvas elements.',
+    'Use the visual content when interpreting references such as "this", "these", "what I wrote", or "this diagram".',
+    'Do NOT invent a machine transcription.',
+    '',
+    'SOURCE: explicit_region_selection',
+    `BOUNDS: x=${g.x}, y=${g.y}, width=${g.width}, height=${g.height}`,
+    `INCLUDED ELEMENTS: ${region.includedElementIds.join(', ') || '(none)'}`,
+    'ATTACHED CANVAS REGION IMAGE:',
+    region.imageAttachment.element_id,
+  ].join('\n');
+}
+
 /** Deterministic serialization for LLM consumption (text + image markers only). */
 export function serializeRagContext(
   query: string,
   elements: readonly RagContextElement[],
   explicitlySelected: readonly RagContextElement[] = [],
   imageAttachments: readonly RagContextImageAttachment[] = [],
+  regionImageContext: CanvasRegionImageContext | null = null,
 ): string {
-  if (elements.length === 0 && imageAttachments.length === 0) {
+  if (
+    elements.length === 0 &&
+    imageAttachments.length === 0 &&
+    !regionImageContext
+  ) {
     return 'CANVAS CONTEXT\n\n(none selected)';
   }
 
@@ -291,6 +394,12 @@ export function serializeRagContext(
     `QUERY: ${query}`,
     `ELEMENTS: ${elements.length}`,
   ];
+
+  const regionSection = formatSelectedRegionSection(regionImageContext);
+  if (regionSection) {
+    sections.push('');
+    sections.push(regionSection);
+  }
 
   if (explicitlySelected.length > 0) {
     sections.push('');
@@ -303,26 +412,33 @@ export function serializeRagContext(
   }
 
   const supporting = elements.filter(
-    (el) => !el.sources.some((s) => s.type === 'explicit_selection'),
+    (el) =>
+      !el.sources.some(
+        (s) =>
+          s.type === 'explicit_selection' || s.type === 'explicit_region_selection',
+      ),
   );
   if (supporting.length > 0) {
     sections.push('');
     sections.push('RETRIEVED SUPPORTING CONTEXT');
     sections.push('');
     sections.push(supporting.map(formatElementBlock).join('\n\n'));
-  } else if (explicitlySelected.length === 0 && elements.length > 0) {
+  } else if (explicitlySelected.length === 0 && elements.length > 0 && !regionImageContext) {
     sections.push('');
     sections.push(elements.map(formatElementBlock).join('\n\n'));
   }
 
-  if (imageAttachments.length > 0) {
+  const nonRegionImages = imageAttachments.filter(
+    (a) => a.selection_reason !== 'explicit_region_selection',
+  );
+  if (nonRegionImages.length > 0) {
     sections.push('');
     sections.push('CANVAS IMAGE CONTEXT');
     sections.push(
       'The following images are attached as multimodal input. Inspect the images directly; do not invent descriptions.',
     );
     sections.push('');
-    sections.push(imageAttachments.map(formatImageAttachmentBlock).join('\n\n'));
+    sections.push(nonRegionImages.map(formatImageAttachmentBlock).join('\n\n'));
   }
 
   return sections.join('\n');
@@ -373,28 +489,38 @@ function makeElement(
 }
 
 /**
- * Merge explicit selection + anchors + spatial + semantic-neighbor hits.
- * Dedupes by element_id. Explicit selections always survive budgeting.
+ * Merge explicit selection + region + anchors + spatial + semantic-neighbor hits.
+ * Dedupes by element_id. Explicit / region selections always survive budgeting.
  *
  * Text budget priority (trim first → last):
  * 1. semantic-neighbor additions
  * 2. spatial text/equation additions
  * Required (never trimmed for text budget):
  * - explicitly selected elements
+ * - region-structured elements
  * - semantic anchors
  *
- * Image budget (separate):
- * 1. explicitly selected images (required; may exceed budget → flag)
- * 2. nearest spatial images
+ * Image budget (separate), priority high → low:
+ * 1. explicit region selection image (required)
+ * 2. explicitly selected images (required; may exceed budget → flag)
+ * 3. nearest spatial images (dropped first under budget pressure)
  */
 export function buildRagContext(options: BuildRagContextOptions): RagContext {
   const maxElements = options.maxElements ?? RAG_MAX_CONTEXT_ELEMENTS;
   const maxCharacters = options.maxCharacters ?? RAG_MAX_CONTEXT_CHARACTERS;
   const maxImages = options.maxImages ?? RAG_MAX_CONTEXT_IMAGES;
   const explicitSelections = options.explicitSelections ?? [];
+  const regionStructuredSelections = options.regionStructuredSelections ?? [];
+  const regionBounds = options.regionBounds ?? null;
+  const regionImage = options.regionImage ?? null;
   const semanticNeighborHits = options.semanticNeighborHits ?? [];
 
   const byId = new Map<string, RagContextElement>();
+
+  const regionProvenance = (): ExplicitRegionSelectionSource | null =>
+    regionBounds
+      ? { type: 'explicit_region_selection', world_bounds: { ...regionBounds } }
+      : null;
 
   // 1. Explicit editor selection — highest priority, always retained.
   for (const sel of explicitSelections) {
@@ -406,6 +532,36 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
         text: sel.text,
         geometry: sel.geometry,
         sources: [{ type: 'explicit_selection' }],
+        image_src: sel.image_src ?? null,
+      }),
+    );
+  }
+
+  // 1b. Region-structured elements (e.g. textboxes inside marquee) — merge / add.
+  for (const sel of regionStructuredSelections) {
+    const regionSource = regionProvenance();
+    const existing = byId.get(sel.element_id);
+    if (existing) {
+      if (
+        regionSource &&
+        !existing.sources.some((s) => s.type === 'explicit_region_selection')
+      ) {
+        existing.sources.push(regionSource);
+      }
+      if (sel.text.length > existing.text.length) existing.text = sel.text;
+      refreshDerived(existing);
+      continue;
+    }
+    byId.set(
+      sel.element_id,
+      makeElement({
+        element_id: sel.element_id,
+        element_type: sel.element_type,
+        text: sel.text,
+        geometry: sel.geometry,
+        sources: regionSource
+          ? [regionSource]
+          : [{ type: 'explicit_selection' }],
         image_src: sel.image_src ?? null,
       }),
     );
@@ -500,9 +656,15 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     (a, b) => a.nearest - b.nearest || a.element_id.localeCompare(b.element_id),
   );
 
-  const explicitlySelectedElements: RagContextElement[] = explicitSelections.map(
-    (s) => byId.get(s.element_id)!,
-  );
+  const explicitlySelectedElements: RagContextElement[] = [];
+  const seenExplicit = new Set<string>();
+  for (const sel of [...explicitSelections, ...regionStructuredSelections]) {
+    if (seenExplicit.has(sel.element_id)) continue;
+    const el = byId.get(sel.element_id);
+    if (!el) continue;
+    seenExplicit.add(sel.element_id);
+    explicitlySelectedElements.push(el);
+  }
   const semanticAnchors: RagContextElement[] = options.semanticAnchors.map(
     (a) => byId.get(a.element_id)!,
   );
@@ -638,18 +800,69 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     charUsed = nextChars;
   }
 
-  // 5. Image attachment budget — explicit images first, then nearest spatial.
+  // 5. Image attachment budget —
+  //    region (required) → explicit images (required) → nearest spatial.
   type ImageCand = {
     element_id: string;
+    element_type: 'image' | 'region';
     geometry: WorldRect;
     sources: ElementProvenance[];
     nearest: number | null;
     asset_src: string;
-    selection_reason: 'explicit_selection' | 'spatial_neighbor';
+    selection_reason:
+      | 'explicit_region_selection'
+      | 'explicit_selection'
+      | 'spatial_neighbor';
     explicitOrder: number;
+    region?: {
+      included_element_ids: string[];
+      contains_unstructured_visuals: boolean;
+    };
   };
 
   const imageCandMap = new Map<string, ImageCand>();
+
+  // Priority 1: explicit selected-region image.
+  let regionImageContext: CanvasRegionImageContext | null = null;
+  if (regionImage && regionImage.asset_src) {
+    const bounds = regionImage.worldBounds;
+    const id = `region:${Math.round(bounds.x * 100) / 100},${Math.round(bounds.y * 100) / 100},${Math.round(bounds.width * 100) / 100},${Math.round(bounds.height * 100) / 100}`;
+    const provenance: ExplicitRegionSelectionSource = {
+      type: 'explicit_region_selection',
+      world_bounds: { ...bounds },
+    };
+    const attachment: RagContextImageAttachment = {
+      element_id: id,
+      element_type: 'region',
+      asset_src: regionImage.asset_src,
+      geometry: { ...bounds },
+      sources: [provenance],
+      nearest_distance: null,
+      selection_reason: 'explicit_region_selection',
+      region: {
+        included_element_ids: [...regionImage.includedElementIds],
+        contains_unstructured_visuals: regionImage.containsUnstructuredVisuals,
+      },
+    };
+    imageCandMap.set(id, {
+      element_id: id,
+      element_type: 'region',
+      geometry: { ...bounds },
+      sources: [provenance],
+      nearest: null,
+      asset_src: regionImage.asset_src,
+      selection_reason: 'explicit_region_selection',
+      explicitOrder: -1,
+      region: attachment.region,
+    });
+    regionImageContext = {
+      worldBounds: { ...bounds },
+      imageAttachment: attachment,
+      provenance,
+      includedElementIds: [...regionImage.includedElementIds],
+      containsUnstructuredVisuals: regionImage.containsUnstructuredVisuals,
+    };
+  }
 
   explicitSelections.forEach((sel, index) => {
     if (sel.element_type !== 'image') return;
@@ -658,6 +871,7 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     if (!src) return;
     imageCandMap.set(sel.element_id, {
       element_id: sel.element_id,
+      element_type: 'image',
       geometry: sel.geometry,
       sources: existing?.sources ? [...existing.sources] : [{ type: 'explicit_selection' }],
       nearest: existing?.nearest_distance ?? null,
@@ -692,6 +906,7 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     }
     imageCandMap.set(cand.element_id, {
       element_id: cand.element_id,
+      element_type: 'image',
       geometry: cand.geometry,
       sources: [...cand.spatialSources],
       nearest: cand.nearest,
@@ -705,9 +920,13 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
   for (const el of byId.values()) {
     if (!isImageElement(el) || !el.image_src) continue;
     if (imageCandMap.has(el.element_id)) continue;
-    const isExplicit = el.sources.some((s) => s.type === 'explicit_selection');
+    const isExplicit = el.sources.some(
+      (s) =>
+        s.type === 'explicit_selection' || s.type === 'explicit_region_selection',
+    );
     imageCandMap.set(el.element_id, {
       element_id: el.element_id,
+      element_type: 'image',
       geometry: el.geometry,
       sources: [...el.sources],
       nearest: el.nearest_distance,
@@ -719,10 +938,16 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     });
   }
 
+  const reasonRank = (r: ImageCand['selection_reason']): number => {
+    if (r === 'explicit_region_selection') return 0;
+    if (r === 'explicit_selection') return 1;
+    return 2;
+  };
+
   const imageOrdered = Array.from(imageCandMap.values()).sort((a, b) => {
-    const aExplicit = a.selection_reason === 'explicit_selection' ? 0 : 1;
-    const bExplicit = b.selection_reason === 'explicit_selection' ? 0 : 1;
-    if (aExplicit !== bExplicit) return aExplicit - bExplicit;
+    const ra = reasonRank(a.selection_reason);
+    const rb = reasonRank(b.selection_reason);
+    if (ra !== rb) return ra - rb;
     if (a.explicitOrder !== b.explicitOrder) return a.explicitOrder - b.explicitOrder;
     const aDist = a.nearest ?? Number.POSITIVE_INFINITY;
     const bDist = b.nearest ?? Number.POSITIVE_INFINITY;
@@ -735,28 +960,31 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
   let truncatedByImageBudget = false;
 
   for (const cand of imageOrdered) {
-    const isRequired = cand.selection_reason === 'explicit_selection';
+    const isRequired =
+      cand.selection_reason === 'explicit_region_selection' ||
+      cand.selection_reason === 'explicit_selection';
     if (!isRequired && imageAttachments.length >= maxImages) {
       truncatedByImageBudget = true;
       imageBudgetExcludedIds.push(cand.element_id);
       continue;
     }
     if (isRequired && imageAttachments.length >= maxImages) {
-      // Still include required explicit images; flag budget overrun.
+      // Still include required explicit / region images; flag budget overrun.
       truncatedByImageBudget = true;
     }
     imageAttachments.push({
       element_id: cand.element_id,
-      element_type: 'image',
+      element_type: cand.element_type,
       asset_src: cand.asset_src,
       geometry: cand.geometry,
       sources: cand.sources,
       nearest_distance: cand.nearest,
       selection_reason: cand.selection_reason,
+      region: cand.region,
     });
 
     // Ensure spatial image elements appear in spatialElements / byId for UI.
-    if (!byId.has(cand.element_id)) {
+    if (cand.element_type === 'image' && !byId.has(cand.element_id)) {
       const el = makeElement({
         element_id: cand.element_id,
         element_type: 'image',
@@ -768,9 +996,22 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
       });
       spatialElements.push(el);
       byId.set(el.element_id, el);
-    } else {
+    } else if (cand.element_type === 'image') {
       const existing = byId.get(cand.element_id)!;
       if (!existing.image_src) existing.image_src = cand.asset_src;
+    }
+  }
+
+  // Keep regionImageContext.attachment in sync with budgeted list.
+  if (regionImageContext) {
+    const attached = imageAttachments.find(
+      (a) => a.selection_reason === 'explicit_region_selection',
+    );
+    if (attached) {
+      regionImageContext = {
+        ...regionImageContext,
+        imageAttachment: attached,
+      };
     }
   }
 
@@ -819,7 +1060,9 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
   const additionIds = new Set<string>();
   let depth1 = 0;
   let depth2 = 0;
-  const explicitIdSet = new Set(explicitSelections.map((s) => s.element_id));
+  const explicitIdSet = new Set(
+    [...explicitSelections, ...regionStructuredSelections].map((s) => s.element_id),
+  );
   const anchorIdSet = new Set(options.semanticAnchors.map((a) => a.element_id));
   for (const el of allElements) {
     if (explicitIdSet.has(el.element_id) || anchorIdSet.has(el.element_id)) {
@@ -838,11 +1081,17 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
   let spatialTextCount = 0;
   let spatialEquationCount = 0;
   let spatialImageCount = 0;
+  let spatialGraphCount = 0;
   for (const el of spatialElementsFinal) {
     if (el.element_type === 'image') spatialImageCount += 1;
     else if (el.element_type === 'equation') spatialEquationCount += 1;
+    else if (el.element_type === 'graph') spatialGraphCount += 1;
     else spatialTextCount += 1;
   }
+
+  const regionImageCount = imageAttachments.filter(
+    (a) => a.selection_reason === 'explicit_region_selection',
+  ).length;
 
   const stats: RagContextStats = {
     explicit_selection_count: explicitlySelectedElements.length,
@@ -852,11 +1101,13 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     spatial_text_addition_count: spatialTextCount,
     spatial_equation_addition_count: spatialEquationCount,
     spatial_image_addition_count: spatialImageCount,
+    spatial_graph_addition_count: spatialGraphCount,
     semantic_depth1_addition_count: depth1,
     semantic_depth2_addition_count: depth2,
     unique_semantic_addition_count: additionIds.size,
     image_attachment_count: imageAttachments.length,
     image_budget_excluded_count: imageBudgetExcludedIds.length,
+    region_image_attachment_count: regionImageCount,
     total_unique_elements: allElements.length,
     character_count: totalChars,
     word_count: totalWords,
@@ -875,12 +1126,14 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     semanticNeighborElements,
     allElements,
     imageAttachments,
+    regionImageContext,
     stats,
     serialized: serializeRagContext(
       options.query,
       allElements,
       explicitlySelectedElements,
       imageAttachments,
+      regionImageContext,
     ),
   };
 }

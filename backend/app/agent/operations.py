@@ -1,14 +1,17 @@
-"""Pydantic models for canvas agent operations (create_text / update_text).
+"""Pydantic models for canvas agent operations.
 
 Mirrors the frontend TypeScript schema in src/features/ai/agent/operations.ts
 for future Structured Outputs / tool calling.
+
+Note: frontend also supports create_structured_note; this module tracks
+create_text / update_text / create_graph for structured-output experiments.
 """
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field, TypeAdapter, model_validator
 
 
 class ViewportDefaultPlacement(BaseModel):
@@ -45,8 +48,59 @@ class UpdateTextOperation(BaseModel):
     text: str = Field(..., min_length=1)
 
 
+class CreateGraphExpressionSpec(BaseModel):
+    expression: str = Field(..., min_length=1)
+    visible: bool = True
+    domain_min: Optional[float] = None
+    domain_max: Optional[float] = None
+
+
+class CreateGraphPointSpec(BaseModel):
+    x: float
+    y: float
+    label: str = ""
+    visible: bool = True
+
+
+class CreateGraphViewportSpec(BaseModel):
+    x_min: float = -10
+    x_max: float = 10
+    y_min: float = -10
+    y_max: float = 10
+
+    @model_validator(mode="after")
+    def validate_ranges(self) -> "CreateGraphViewportSpec":
+        if not (self.x_min < self.x_max and self.y_min < self.y_max):
+            raise ValueError("viewport requires x_min < x_max and y_min < y_max")
+        return self
+
+
+class CreateGraphSettingsSpec(BaseModel):
+    title: Optional[str] = None
+    x_axis_label: Optional[str] = None
+    y_axis_label: Optional[str] = None
+    show_grid: bool = True
+    show_x_axis: bool = True
+    show_y_axis: bool = True
+
+
+class CreateGraphOperation(BaseModel):
+    type: Literal["create_graph"] = "create_graph"
+    expressions: list[CreateGraphExpressionSpec] = Field(default_factory=list)
+    points: list[CreateGraphPointSpec] = Field(default_factory=list)
+    viewport: CreateGraphViewportSpec = Field(default_factory=CreateGraphViewportSpec)
+    settings: CreateGraphSettingsSpec = Field(default_factory=CreateGraphSettingsSpec)
+    placement: Placement
+
+    @model_validator(mode="after")
+    def require_content(self) -> "CreateGraphOperation":
+        if not self.expressions and not self.points:
+            raise ValueError("create_graph requires at least one expression or point")
+        return self
+
+
 CanvasOperation = Annotated[
-    Union[CreateTextOperation, UpdateTextOperation],
+    Union[CreateTextOperation, UpdateTextOperation, CreateGraphOperation],
     Field(discriminator="type"),
 ]
 

@@ -26,6 +26,20 @@ import {
   snapshotEditorSelection,
 } from './explicitSelection';
 import {
+  inspectCanvasRegion,
+  toExplicitRegionSelectionSnapshot,
+  type CanvasRegionInspection,
+  type ExplicitRegionSelectionSnapshot,
+} from './regionContext';
+import { renderCanvasRegion } from './regionRenderer';
+import type { WorldRect } from './geometry';
+import {
+  REGION_CONTEXT_MAX_DIMENSION,
+  REGION_CONTEXT_MIN_DIMENSION,
+  REGION_CONTEXT_RENDER_SCALE,
+} from './config';
+import { formatGraphElementForContext } from './graphContext';
+import {
   ragRetrievalService,
   type PromptIntentClassification,
   type RetrievedCandidate,
@@ -82,6 +96,17 @@ export interface RagDebugState {
    * Distinct from selectedAnchorIds (RAG semantic-anchor checkboxes).
    */
   explicitSelectionIds: string[];
+  /**
+   * Marquee world bounds snapshotted at prompt submit.
+   * Independent of live lastMarqueeRegion after the request is built.
+   */
+  explicitRegionBounds: WorldRect | null;
+  /** Classification of the snapshotted region (empty / structured_only / visual). */
+  explicitRegionInspection: CanvasRegionInspection | null;
+  /** Rendered region PNG data URL when visual content requires an attachment. */
+  explicitRegionImageSrc: string | null;
+  /** Compact debug snapshot for retrieval JSON. */
+  explicitRegionSelectionDebug: ExplicitRegionSelectionSnapshot | null;
   /**
    * Structure ID snapshotted at prompt submit (Retrieve / Copy / Send / Preview).
    * Changing the live dropdown afterward must not alter an already-built prompt.
@@ -150,6 +175,11 @@ export interface RagDebugState {
   clearAnchors: () => void;
   /** Capture current editor selectedIds into explicitSelectionIds. */
   captureExplicitSelectionSnapshot: () => string[];
+  /**
+   * Capture lastMarqueeRegion → inspect → optionally render region image.
+   * Must be awaited before building multimodal context.
+   */
+  captureRegionSelectionSnapshot: () => Promise<ExplicitRegionSelectionSnapshot | null>;
   /** Capture live AI structure selector into selectedStructureId. */
   captureStructureSnapshot: () => string | null;
   /** Resolve the snapshotted structure (not the live dropdown). */
@@ -157,7 +187,9 @@ export interface RagDebugState {
   retrieve: () => Promise<void>;
   /** Automatic mode only — never called when Manual LLM Mode is active. */
   sendWithContext: () => Promise<void>;
-  buildCurrentLlmPrompt: (options?: { resnapshotSelection?: boolean }) => BuiltLlmPrompt | null;
+  buildCurrentLlmPrompt: (options?: {
+    resnapshotSelection?: boolean;
+  }) => Promise<BuiltLlmPrompt | null>;
   copyLlmPrompt: () => Promise<boolean>;
   openResponseModal: () => void;
   closeResponseModal: () => void;
@@ -174,6 +206,9 @@ export type DebugContextSlice = {
   candidates: RetrievedCandidate[];
   selectedAnchorIds: string[];
   explicitSelectionIds: string[];
+  explicitRegionBounds: WorldRect | null;
+  explicitRegionInspection: CanvasRegionInspection | null;
+  explicitRegionImageSrc: string | null;
   selectedStructureId: string | null;
   spatialExpansionEnabled: boolean;
   radius: number;
@@ -196,14 +231,25 @@ function buildParseContextFromState(state: DebugContextSlice) {
   const { context } = computeDebugContext(state);
   const allowedElementIds = new Set(context.allElements.map((e) => e.element_id));
   const elementTypes = new Map<string, string>();
+  const graphExpressionIds = new Map<string, Set<string>>();
+  const graphPointIds = new Map<string, Set<string>>();
   for (const el of useCanvasStore.getState().document.elements) {
     if (allowedElementIds.has(el.id)) {
       elementTypes.set(el.id, el.type);
+    }
+    if (allowedElementIds.has(el.id) && el.type === 'graph') {
+      graphExpressionIds.set(
+        el.id,
+        new Set(el.expressions.map((e) => e.id)),
+      );
+      graphPointIds.set(el.id, new Set(el.points.map((p) => p.id)));
     }
   }
   return {
     allowedElementIds,
     elementTypes,
+    graphExpressionIds,
+    graphPointIds,
     context,
     selectedStructure: resolveSnapshottedStructure(state.selectedStructureId),
   };
@@ -232,6 +278,13 @@ function resolveLiveElement(
   if (el.type === 'shape' && el.label) {
     return {
       text: el.label,
+      type: el.type,
+      geometry: { x: el.x, y: el.y, width: el.width, height: el.height },
+    };
+  }
+  if (el.type === 'graph') {
+    return {
+      text: formatGraphElementForContext(el),
       type: el.type,
       geometry: { x: el.x, y: el.y, width: el.width, height: el.height },
     };
@@ -304,13 +357,34 @@ export function computeDebugContext(
     docElements,
   );
 
-  // Enrich spatial image hits with live asset src from CanvasDocument.
+  const regionInspection = state.explicitRegionInspection;
+  const regionStructuredSelections = regionInspection?.structuredSelections ?? [];
+  const regionBounds = state.explicitRegionBounds;
+  const regionImage =
+    regionInspection?.shouldRenderImage && state.explicitRegionImageSrc
+      ? {
+          worldBounds: regionBounds ?? regionInspection.bounds,
+          asset_src: state.explicitRegionImageSrc,
+          includedElementIds: regionInspection.intersectingElementIds,
+          containsUnstructuredVisuals: regionInspection.hasVisualContent,
+        }
+      : null;
+
+  // Enrich spatial image/graph hits with live CanvasDocument state.
   const enrichedSpatialHits = spatialHits.map((hit) => {
-    if (hit.element_type !== 'image') return hit;
-    if (hit.image_src) return hit;
-    const live = docElements.find((e) => e.id === hit.element_id);
-    if (live && live.type === 'image') {
-      return { ...hit, image_src: live.src };
+    if (hit.element_type === 'image') {
+      if (hit.image_src) return hit;
+      const live = docElements.find((e) => e.id === hit.element_id);
+      if (live && live.type === 'image') {
+        return { ...hit, image_src: live.src };
+      }
+      return hit;
+    }
+    if (hit.element_type === 'graph') {
+      const live = docElements.find((e) => e.id === hit.element_id);
+      if (live && live.type === 'graph') {
+        return { ...hit, text: formatGraphElementForContext(live) };
+      }
     }
     return hit;
   });
@@ -318,6 +392,9 @@ export function computeDebugContext(
   const context = buildRagContext({
     query: state.prompt.trim(),
     explicitSelections,
+    regionStructuredSelections,
+    regionBounds,
+    regionImage,
     semanticAnchors: anchors,
     spatialHits: enrichedSpatialHits,
     semanticNeighborHits,
@@ -439,6 +516,10 @@ export function createRagDebugStore() {
       candidates: [],
       selectedAnchorIds: [],
       explicitSelectionIds: [],
+      explicitRegionBounds: null,
+      explicitRegionInspection: null,
+      explicitRegionImageSrc: null,
+      explicitRegionSelectionDebug: null,
       selectedStructureId: null,
       spatialExpansionEnabled: true,
       radius: RAG_SPATIAL_RADIUS_DEFAULT,
@@ -623,6 +704,69 @@ export function createRagDebugStore() {
         return ids;
       },
 
+      captureRegionSelectionSnapshot: async () => {
+        const canvasState = useCanvasStore.getState();
+        const bounds = canvasState.lastMarqueeRegion;
+        if (!bounds || bounds.width <= 0 || bounds.height <= 0) {
+          set({
+            explicitRegionBounds: null,
+            explicitRegionInspection: null,
+            explicitRegionImageSrc: null,
+            explicitRegionSelectionDebug: null,
+          });
+          return null;
+        }
+
+        const inspection = inspectCanvasRegion(
+          canvasState.document.elements,
+          bounds,
+        );
+
+        let imageSrc: string | null = null;
+        if (inspection.shouldRenderImage) {
+          try {
+            const rendered = await renderCanvasRegion(
+              canvasState.document,
+              bounds,
+              {
+                scale: REGION_CONTEXT_RENDER_SCALE,
+                maxDimension: REGION_CONTEXT_MAX_DIMENSION,
+                minDimension: REGION_CONTEXT_MIN_DIMENSION,
+              },
+            );
+            imageSrc = rendered.dataUrl;
+          } catch (err) {
+            const message =
+              err instanceof Error
+                ? err.message
+                : 'Failed to render selected canvas region';
+            set({
+              explicitRegionBounds: { ...bounds },
+              explicitRegionInspection: inspection,
+              explicitRegionImageSrc: null,
+              explicitRegionSelectionDebug: toExplicitRegionSelectionSnapshot(
+                inspection,
+                false,
+              ),
+              error: `Selected region requires visual context but rendering failed: ${message}`,
+            });
+            return toExplicitRegionSelectionSnapshot(inspection, false);
+          }
+        }
+
+        const debug = toExplicitRegionSelectionSnapshot(
+          inspection,
+          Boolean(imageSrc),
+        );
+        set({
+          explicitRegionBounds: { ...bounds },
+          explicitRegionInspection: inspection,
+          explicitRegionImageSrc: imageSrc,
+          explicitRegionSelectionDebug: debug,
+        });
+        return debug;
+      },
+
       captureStructureSnapshot: () => {
         const id = useStructureStore.getState().selectedStructureIdForAi;
         set({ selectedStructureId: id });
@@ -634,10 +778,11 @@ export function createRagDebugStore() {
 
       clearError: () => set({ error: null }),
 
-      buildCurrentLlmPrompt: (options) => {
+      buildCurrentLlmPrompt: async (options) => {
         if (options?.resnapshotSelection !== false) {
           get().captureExplicitSelectionSnapshot();
           get().captureStructureSnapshot();
+          await get().captureRegionSelectionSnapshot();
         }
         const state = get();
         const prompt = state.prompt.trim();
@@ -653,8 +798,10 @@ export function createRagDebugStore() {
       },
 
       copyLlmPrompt: async () => {
-        // New submit → capture current editor selection + structure.
-        const built = get().buildCurrentLlmPrompt({ resnapshotSelection: true });
+        // New submit → capture current editor selection + structure + region.
+        const built = await get().buildCurrentLlmPrompt({
+          resnapshotSelection: true,
+        });
         if (!built) {
           set({
             error: 'Enter a prompt first.',
@@ -667,11 +814,16 @@ export function createRagDebugStore() {
           return false;
         }
         const imageCount = built.imageAttachments.length;
+        const regionCount = built.imageAttachments.filter(
+          (a) => a.selection_reason === 'explicit_region_selection',
+        ).length;
         set({
           lastCopiedPrompt: built.finalLlmPrompt,
           statusMessage:
             imageCount > 0
-              ? `Prompt copied · ${imageCount} image attachment(s) required`
+              ? regionCount > 0
+                ? `Prompt copied · ${imageCount} image attachment(s) required (incl. selected region)`
+                : `Prompt copied · ${imageCount} image attachment(s) required`
               : 'Prompt copied',
           error: null,
         });
@@ -819,6 +971,7 @@ export function createRagDebugStore() {
           candidates: state.candidates,
           selectedAnchorIds: state.selectedAnchorIds,
           explicitSelectionIds: state.explicitSelectionIds,
+          explicitRegionSelection: state.explicitRegionSelectionDebug,
           spatialExpansionEnabled: state.spatialExpansionEnabled,
           radius: state.radius,
           spatialExcludedIds: state.spatialExcludedIds,
@@ -871,6 +1024,7 @@ export function createRagDebugStore() {
         // Snapshot editor selection + structure at prompt submit — stable for this request.
         const explicitSelectionIds = get().captureExplicitSelectionSnapshot();
         const selectedStructureId = get().captureStructureSnapshot();
+        await get().captureRegionSelectionSnapshot();
 
         set({ retrieving: true, error: null, statusMessage: null });
         try {
@@ -879,6 +1033,15 @@ export function createRagDebugStore() {
             board_id: boardId,
             prompt,
           });
+          const regionDebug = get().explicitRegionSelectionDebug;
+          const regionNote =
+            regionDebug?.imageAttachmentCreated
+              ? ' · region image attached'
+              : regionDebug?.kind === 'structured_only'
+                ? ' · region text-only'
+                : regionDebug?.kind === 'empty'
+                  ? ' · empty region'
+                  : '';
           set({
             candidates: result.candidates,
             selectedAnchorIds: [],
@@ -894,7 +1057,7 @@ export function createRagDebugStore() {
             },
             promptIntent: result.prompt_intent ?? null,
             retrieving: false,
-            statusMessage: `${result.candidates.length} semantic candidate(s) · ${explicitSelectionIds.length} editor selection(s)`,
+            statusMessage: `${result.candidates.length} semantic candidate(s) · ${explicitSelectionIds.length} editor selection(s)${regionNote}`,
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : 'Retrieve failed';
@@ -932,9 +1095,10 @@ export function createRagDebugStore() {
           set({ error: 'Enter a prompt.' });
           return;
         }
-        // New submit → capture current editor selection + structure.
+        // New submit → capture current editor selection + structure + region.
         get().captureExplicitSelectionSnapshot();
         get().captureStructureSnapshot();
+        await get().captureRegionSelectionSnapshot();
         const submitted = get();
         if (!hasBuildableContext(submitted)) {
           set({
@@ -957,9 +1121,29 @@ export function createRagDebugStore() {
             context.imageAttachments.length > 0 &&
             !aiService.supportsImageInput()
           ) {
+            const regionRequired = context.imageAttachments.some(
+              (a) => a.selection_reason === 'explicit_region_selection',
+            );
             const ids = context.imageAttachments.map((a) => a.element_id).join(', ');
+            const message = regionRequired
+              ? `This LLM provider does not support image input, but the selected canvas region requires visual context (${ids}). Switch to a vision-capable model — handwriting/sketches cannot be sent as text.`
+              : `This LLM provider does not support image input, but ${context.imageAttachments.length} canvas image(s) are in context (${ids}). Switch to a vision-capable model or uncheck the images in Spatial.`;
+            set({ sending: false, error: message });
+            useAiStore.setState({
+              status: 'error',
+              errorMessage: message,
+              expanded: true,
+            });
+            return;
+          }
+
+          // Region required an image but render failed / missing.
+          if (
+            submitted.explicitRegionInspection?.shouldRenderImage &&
+            !submitted.explicitRegionImageSrc
+          ) {
             const message =
-              `This LLM provider does not support image input, but ${context.imageAttachments.length} canvas image(s) are in context (${ids}). Switch to a vision-capable model or uncheck the images in Spatial.`;
+              'Selected canvas region contains visual content that must be attached as an image, but the region render is unavailable.';
             set({ sending: false, error: message });
             useAiStore.setState({
               status: 'error',

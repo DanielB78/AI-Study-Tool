@@ -104,6 +104,61 @@ export const PLANNER_DECISION_FIXTURES: Array<{
       },
     ],
   },
+  {
+    id: 'graph-x-squared',
+    user: 'Graph x squared.',
+    notes: 'Explicit plot request → create_graph with canonical x**2.',
+    expected: [
+      {
+        type: 'create_graph',
+        expressions: [
+          {
+            expression: 'x**2',
+            visible: true,
+            domain_min: null,
+            domain_max: null,
+          },
+        ],
+        points: [],
+        viewport: { x_min: -10, x_max: 10, y_min: -10, y_max: 10 },
+        settings: {
+          title: null,
+          x_axis_label: null,
+          y_axis_label: null,
+          show_grid: true,
+          show_x_axis: true,
+          show_y_axis: true,
+        },
+        placement: { mode: 'viewport_default' },
+      },
+    ],
+  },
+  {
+    id: 'plot-multi-curve-same-graph',
+    user: 'Plot x², x³, and 2x+1 on the same graph.',
+    notes: 'Multiple curves → one create_graph, not three graphs.',
+    expected: [
+      {
+        type: 'create_graph',
+        expressions: [
+          { expression: 'x**2', visible: true, domain_min: null, domain_max: null },
+          { expression: 'x**3', visible: true, domain_min: null, domain_max: null },
+          { expression: '2*x + 1', visible: true, domain_min: null, domain_max: null },
+        ],
+        points: [],
+        viewport: { x_min: -10, x_max: 10, y_min: -10, y_max: 10 },
+        settings: {
+          title: null,
+          x_axis_label: null,
+          y_axis_label: null,
+          show_grid: true,
+          show_x_axis: true,
+          show_y_axis: true,
+        },
+        placement: { mode: 'viewport_default' },
+      },
+    ],
+  },
 ];
 
 describe('planner decision fixtures', () => {
@@ -133,5 +188,40 @@ describe('planner decision fixtures', () => {
     const ops = parseCanvasAgentResponse(raw, electricityCtx).operations;
     expect(ops.every((o) => o.type === 'create_text')).toBe(true);
     expect(ops.some((o) => o.type === 'update_text')).toBe(false);
+  });
+
+  it('explanation prompts must not require create_graph', () => {
+    // USER: "Explain why x² is always non-negative." → text only
+    const raw = JSON.stringify({
+      operations: [
+        {
+          type: 'create_text',
+          text: 'x squared is always non-negative because a real number times itself cannot be negative.',
+          placement: { mode: 'viewport_default' },
+        },
+      ],
+    });
+    const ops = parseCanvasAgentResponse(raw, electricityCtx).operations;
+    expect(ops.some((o) => o.type === 'create_graph')).toBe(false);
+  });
+
+  it('add-to-existing-graph requires graph_id in context', () => {
+    expect(() =>
+      parseCanvasAgentResponse(
+        JSON.stringify({
+          operations: [
+            {
+              type: 'add_graph_expression',
+              graph_id: 'graph_1',
+              expression: { expression: 'x**2', visible: true },
+            },
+          ],
+        }),
+        {
+          allowedElementIds: new Set(['textbox_1']),
+          elementTypes: new Map([['textbox_1', 'text']]),
+        },
+      ),
+    ).toThrow(/not in the supplied canvas context/i);
   });
 });

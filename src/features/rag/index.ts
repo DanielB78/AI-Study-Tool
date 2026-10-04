@@ -37,11 +37,16 @@ export type {
   RagContextElement,
   RagContextImageAttachment,
   RagContextStats,
+  CanvasRegionImageContext,
+  RegionImageInput,
 } from './contextBuilder';
 export {
   RAG_MAX_CONTEXT_ELEMENTS,
   RAG_MAX_CONTEXT_CHARACTERS,
   RAG_MAX_CONTEXT_IMAGES,
+  REGION_CONTEXT_RENDER_SCALE,
+  REGION_CONTEXT_MAX_DIMENSION,
+  REGION_CONTEXT_MIN_DIMENSION,
 } from './config';
 export {
   resolveExplicitSelection,
@@ -49,6 +54,38 @@ export {
   extractElementContextContent,
 } from './explicitSelection';
 export type { ExplicitSelectionInput } from './explicitSelection';
+export {
+  inspectCanvasRegion,
+  isStructuredWithoutImage,
+  isVisualUnstructuredContent,
+  elementsIntersectingRegion,
+  regionAttachmentId,
+  STRUCTURED_WITHOUT_IMAGE,
+} from './regionContext';
+export type {
+  CanvasRegionInspection,
+  ExplicitRegionSelectionSnapshot,
+  RegionContextKind,
+} from './regionContext';
+export {
+  renderCanvasRegion,
+  computeRegionRenderSize,
+  REGION_CONTEXT_BACKGROUND,
+} from './regionRenderer';
+export type { RegionRenderResult, RegionRenderSize } from './regionRenderer';
+export {
+  toGraphContextItem,
+  formatGraphContextItem,
+  formatGraphElementForContext,
+  summarizeGraphForDebug,
+} from './graphContext';
+export type {
+  GraphContextItem,
+  GraphContextExpression,
+  GraphContextPoint,
+  GraphContextViewport,
+  GraphContextSettings,
+} from './graphContext';
 export {
   semanticExpansionService,
   createSemanticExpansionService,

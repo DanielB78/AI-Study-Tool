@@ -22,8 +22,27 @@ export const RAG_MAX_CONTEXT_CHARACTERS = envInt('VITE_RAG_MAX_CONTEXT_CHARACTER
 /**
  * Separate multimodal image attachment budget.
  * Images do not consume the text character budget.
+ * Priority: explicit region → explicit ImageElements → spatial images.
  */
 export const RAG_MAX_CONTEXT_IMAGES = envInt('VITE_RAG_MAX_CONTEXT_IMAGES', 4);
+
+/** World units → pixels before min/max clamps for selected-region crops. */
+export const REGION_CONTEXT_RENDER_SCALE = envInt(
+  'VITE_REGION_CONTEXT_RENDER_SCALE',
+  2,
+);
+
+/** Longest edge cap for region crops (provider / memory safety). */
+export const REGION_CONTEXT_MAX_DIMENSION = envInt(
+  'VITE_REGION_CONTEXT_MAX_DIMENSION',
+  2048,
+);
+
+/** Minimum edge for tiny handwriting crops. */
+export const REGION_CONTEXT_MIN_DIMENSION = envInt(
+  'VITE_REGION_CONTEXT_MIN_DIMENSION',
+  128,
+);
 
 /** Spatial radius (world units). Default/range are for the debug slider. */
 export const RAG_SPATIAL_RADIUS_MIN = 0;
