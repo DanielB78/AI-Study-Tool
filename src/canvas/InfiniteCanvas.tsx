@@ -24,6 +24,7 @@ import { snapPosition } from '../utils/snap';
 import { ZOOM_STEP, isShapeTool, type EquationElement, type GraphElement } from '../types/canvas';
 import { ragSync } from '../features/rag/ragSync';
 import { RagDebugOverlay } from '../features/rag/ui/RagDebugOverlay';
+import { HandwritingDebugOverlay } from '../features/rag/ui/HandwritingDebugOverlay';
 import { useGraphUiStore } from '../features/graphs/graphUiStore';
 
 function getCursor(
@@ -679,6 +680,7 @@ export function InfiniteCanvas() {
           )}
 
           <RagDebugOverlay />
+          <HandwritingDebugOverlay />
 
           <SelectionTransformer
             selectedIds={selectedIds.filter((id) => {
