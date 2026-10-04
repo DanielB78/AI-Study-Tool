@@ -1113,6 +1113,17 @@ textarea {
   color: #b91c1c;
 }
 
+.rag-debug-thumb {
+  display: block;
+  max-width: 96px;
+  max-height: 72px;
+  margin-top: 0.35rem;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 4px;
+  object-fit: contain;
+  background: #f8fafc;
+}
+
 .rag-debug-check {
   display: flex;
   align-items: center;

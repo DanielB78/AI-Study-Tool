@@ -10,6 +10,7 @@ import {
 import {
   RAG_MAX_CONTEXT_CHARACTERS,
   RAG_MAX_CONTEXT_ELEMENTS,
+  RAG_MAX_CONTEXT_IMAGES,
   RAG_SEMANTIC_EXPANSION_MAX_NEIGHBOURS_MAX,
   RAG_SEMANTIC_EXPANSION_MAX_NEIGHBOURS_MIN,
   RAG_SPATIAL_RADIUS_MAX,
@@ -139,6 +140,7 @@ export function RagDebugPanel() {
   const selectedStructureId = useRagDebugStore((s) => s.selectedStructureId);
   const spatialExpansionEnabled = useRagDebugStore((s) => s.spatialExpansionEnabled);
   const radius = useRagDebugStore((s) => s.radius);
+  const spatialExcludedIds = useRagDebugStore((s) => s.spatialExcludedIds);
   const semanticExpansionEnabled = useRagDebugStore((s) => s.semanticExpansionEnabled);
   const semanticExpansionDepth = useRagDebugStore((s) => s.semanticExpansionDepth);
   const semanticMaxNeighbours = useRagDebugStore((s) => s.semanticMaxNeighbours);
@@ -162,6 +164,9 @@ export function RagDebugPanel() {
   const setPrompt = useRagDebugStore((s) => s.setPrompt);
   const setRadius = useRagDebugStore((s) => s.setRadius);
   const setSpatialExpansionEnabled = useRagDebugStore((s) => s.setSpatialExpansionEnabled);
+  const toggleSpatialIncluded = useRagDebugStore((s) => s.toggleSpatialIncluded);
+  const selectAllSpatialHits = useRagDebugStore((s) => s.selectAllSpatialHits);
+  const clearSpatialSelection = useRagDebugStore((s) => s.clearSpatialSelection);
   const setSemanticExpansionEnabled = useRagDebugStore((s) => s.setSemanticExpansionEnabled);
   const setSemanticExpansionDepth = useRagDebugStore((s) => s.setSemanticExpansionDepth);
   const setSemanticMaxNeighbours = useRagDebugStore((s) => s.setSemanticMaxNeighbours);
@@ -195,7 +200,7 @@ export function RagDebugPanel() {
   const liveStructureId = useStructureStore((s) => s.selectedStructureIdForAi);
   const structures = useStructureStore((s) => s.structures);
 
-  const { context, semanticTrees } = useMemo(
+  const { context, spatialHits, semanticTrees } = useMemo(
     () =>
       computeDebugContext(
         {
@@ -206,6 +211,7 @@ export function RagDebugPanel() {
           selectedStructureId,
           spatialExpansionEnabled,
           radius,
+          spatialExcludedIds,
           semanticExpansionEnabled,
           semanticExpansionDepth,
           semanticMaxNeighbours,
@@ -222,6 +228,7 @@ export function RagDebugPanel() {
       selectedStructureId,
       spatialExpansionEnabled,
       radius,
+      spatialExcludedIds,
       semanticExpansionEnabled,
       semanticExpansionDepth,
       semanticMaxNeighbours,
@@ -247,10 +254,51 @@ export function RagDebugPanel() {
 
   const selectedSet = useMemo(() => new Set(selectedAnchorIds), [selectedAnchorIds]);
   const includedSet = useMemo(() => new Set(semanticIncludedIds), [semanticIncludedIds]);
+  const spatialExcludedSet = useMemo(
+    () => new Set(spatialExcludedIds),
+    [spatialExcludedIds],
+  );
   const collapsedSet = useMemo(
     () => new Set(semanticCollapsedKeys),
     [semanticCollapsedKeys],
   );
+
+  /** Deduped spatial hits for debug list (nearest distance per element). */
+  const spatialHitRows = useMemo(() => {
+    const byId = new Map<
+      string,
+      {
+        element_id: string;
+        element_type: string;
+        distance: number;
+        anchor_element_id: string;
+        image_src?: string;
+      }
+    >();
+    for (const hit of spatialHits) {
+      const prev = byId.get(hit.element_id);
+      if (!prev || hit.distance < prev.distance) {
+        byId.set(hit.element_id, {
+          element_id: hit.element_id,
+          element_type: hit.element_type,
+          distance: hit.distance,
+          anchor_element_id: hit.anchor_element_id,
+          image_src: hit.image_src,
+        });
+      }
+    }
+    // Resolve live image src for thumbnails.
+    for (const row of byId.values()) {
+      if (row.element_type === 'image' && !row.image_src) {
+        const live = elements.find((e) => e.id === row.element_id);
+        if (live && live.type === 'image') row.image_src = live.src;
+      }
+    }
+    return Array.from(byId.values()).sort(
+      (a, b) => a.distance - b.distance || a.element_id.localeCompare(b.element_id),
+    );
+  }, [spatialHits, elements]);
+
   const busy = retrieving || sending || expanding;
   const manual = llmExecutionMode === 'manual';
   const canBuildPrompt = prompt.trim().length > 0;
@@ -351,6 +399,8 @@ export function RagDebugPanel() {
             anchors {context.stats.semantic_anchor_count}
             {' · '}
             spatial {context.stats.spatial_addition_count}
+            {' · '}
+            images {context.stats.image_attachment_count}
             {' · '}
             semantic+ {context.stats.unique_semantic_addition_count}
             {' · '}
@@ -615,7 +665,8 @@ export function RagDebugPanel() {
                 </label>
                 <p className="rag-debug-meta">
                   Expand around selected prompt-semantic anchors by AABB distance.
-                  Independent of semantic knowledge expansion.
+                  Includes text, equation, and image elements (images have no
+                  embeddings — spatial only).
                 </p>
                 <div className="rag-debug-section-title">
                   Radius{' '}
@@ -651,9 +702,81 @@ export function RagDebugPanel() {
                 <p className="rag-debug-meta">
                   Spatial additions in context:{' '}
                   <strong>{context.stats.spatial_addition_count}</strong>
+                  {' · text '}
+                  <strong>{context.stats.spatial_text_addition_count}</strong>
+                  {' · eq '}
+                  <strong>{context.stats.spatial_equation_addition_count}</strong>
+                  {' · img '}
+                  <strong>{context.stats.spatial_image_addition_count}</strong>
                   {' · '}
                   anchors selected: <strong>{selectedAnchorIds.length}</strong>
                 </p>
+
+                {spatialExpansionEnabled && (
+                  <>
+                    <div className="rag-debug-shortcuts">
+                      <button
+                        type="button"
+                        className="rag-debug-btn ghost"
+                        disabled={spatialHitRows.length === 0}
+                        onClick={() => selectAllSpatialHits()}
+                      >
+                        Select all
+                      </button>
+                      <button
+                        type="button"
+                        className="rag-debug-btn ghost"
+                        disabled={spatialHitRows.length === 0}
+                        onClick={() => clearSpatialSelection()}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    {spatialHitRows.length === 0 ? (
+                      <p className="rag-debug-meta">
+                        No spatial neighbours yet. Select semantic anchors and ensure
+                        radius &gt; 0.
+                      </p>
+                    ) : (
+                      <ul className="rag-debug-list compact">
+                        {spatialHitRows.map((row) => {
+                          const checked = !spatialExcludedSet.has(row.element_id);
+                          return (
+                            <li key={row.element_id} className="rag-debug-item">
+                              <label className="rag-debug-check">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() =>
+                                    toggleSpatialIncluded(row.element_id)
+                                  }
+                                />
+                                <span className="rag-debug-badge spatial">
+                                  {row.element_type}
+                                </span>
+                                <span className="rag-debug-id">{row.element_id}</span>
+                                <span className="rag-debug-meta">
+                                  distance {row.distance.toFixed(1)}
+                                </span>
+                              </label>
+                              <p className="rag-debug-meta">
+                                Anchor: {row.anchor_element_id}
+                              </p>
+                              {row.element_type === 'image' && row.image_src && (
+                                <img
+                                  className="rag-debug-thumb"
+                                  src={row.image_src}
+                                  alt=""
+                                  title={row.element_id}
+                                />
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </>
+                )}
               </section>
             )}
 
@@ -814,6 +937,23 @@ export function RagDebugPanel() {
                   <div>
                     Spatial additions:{' '}
                     <strong>{context.stats.spatial_addition_count}</strong>
+                    {' (text '}
+                    {context.stats.spatial_text_addition_count}
+                    {' · eq '}
+                    {context.stats.spatial_equation_addition_count}
+                    {' · img '}
+                    {context.stats.spatial_image_addition_count}
+                    )
+                  </div>
+                  <div>
+                    Image attachments:{' '}
+                    <strong>{context.stats.image_attachment_count}</strong>
+                    {context.stats.image_budget_excluded_count > 0 && (
+                      <>
+                        {' · budget-excluded '}
+                        <strong>{context.stats.image_budget_excluded_count}</strong>
+                      </>
+                    )}
                   </div>
                   <div>
                     Semantic depth-1 additions:{' '}
@@ -837,14 +977,80 @@ export function RagDebugPanel() {
                   </div>
                   <div className="rag-debug-meta">
                     Budget: {RAG_MAX_CONTEXT_ELEMENTS} elements /{' '}
-                    {RAG_MAX_CONTEXT_CHARACTERS} chars
+                    {RAG_MAX_CONTEXT_CHARACTERS} chars / {RAG_MAX_CONTEXT_IMAGES}{' '}
+                    images
                     {(context.stats.truncated_by_element_budget ||
-                      context.stats.truncated_by_character_budget) &&
+                      context.stats.truncated_by_character_budget ||
+                      context.stats.truncated_by_image_budget) &&
                       ' · truncated'}
                     {context.stats.required_context_exceeds_budget &&
                       ' · required explicit/anchor context exceeds budget (kept)'}
                   </div>
                 </section>
+
+                {context.imageAttachments.length > 0 && (
+                  <section className="rag-debug-section">
+                    <div className="rag-debug-section-title">
+                      IMAGE ATTACHMENTS
+                      {manual ? ' (required for manual mode)' : ''}
+                    </div>
+                    <p className="rag-debug-meta">
+                      Actual image bytes are not copied into the clipboard prompt.
+                      Attach these images alongside the copied text when using an
+                      external chat UI.
+                    </p>
+                    <ul className="rag-debug-list compact">
+                      {context.imageAttachments.map((att) => (
+                        <li key={`img-${att.element_id}`} className="rag-debug-item">
+                          <div className="rag-debug-row tight">
+                            <span className="rag-debug-badge spatial">image</span>
+                            <span className="rag-debug-id">{att.element_id}</span>
+                          </div>
+                          <p className="rag-debug-meta">
+                            Reason: {att.selection_reason}
+                            {att.nearest_distance != null
+                              ? ` · d=${att.nearest_distance.toFixed(1)}`
+                              : ''}
+                          </p>
+                          {att.sources
+                            .filter((s) => s.type === 'spatial')
+                            .map((s) =>
+                              s.type === 'spatial' ? (
+                                <p
+                                  key={`ia-${s.anchor_element_id}-${s.distance}`}
+                                  className="rag-debug-meta"
+                                >
+                                  spatial neighbor of {s.anchor_element_id} (distance{' '}
+                                  {s.distance.toFixed(1)})
+                                </p>
+                              ) : null,
+                            )}
+                          <img
+                            className="rag-debug-thumb"
+                            src={att.asset_src}
+                            alt=""
+                            title={att.element_id}
+                          />
+                          <a
+                            className="rag-debug-meta"
+                            href={att.asset_src}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Open image
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                    {context.stats.image_budget_excluded_ids.length > 0 && (
+                      <p className="rag-debug-meta">
+                        Excluded by image budget (
+                        {RAG_MAX_CONTEXT_IMAGES}):{' '}
+                        {context.stats.image_budget_excluded_ids.join(', ')}
+                      </p>
+                    )}
+                  </section>
+                )}
 
                 <div className="rag-debug-row">
                   <button

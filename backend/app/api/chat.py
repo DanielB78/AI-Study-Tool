@@ -26,5 +26,6 @@ async def chat(
         body.prompt,
         system_instruction=body.system_instruction,
         canvas_context=body.canvas_context,
+        image_attachments=body.image_attachments,
     )
     return ChatResponse(text=text)

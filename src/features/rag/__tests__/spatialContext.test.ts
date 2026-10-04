@@ -41,6 +41,26 @@ describe('findElementsWithinRadius', () => {
     expect(ids).toContain('shape-label');
     expect(ids).not.toContain('shape-empty');
   });
+
+  it('includes nearby image elements with image_src', () => {
+    const withImage: SpatialElementLike[] = [
+      ...els,
+      {
+        id: 'image_near',
+        type: 'image',
+        x: 105,
+        y: 0,
+        width: 40,
+        height: 40,
+        src: 'data:image/png;base64,xx',
+      },
+    ];
+    const hits = findElementsWithinRadius(els[0]!, withImage, 50);
+    const img = hits.find((h) => h.element_id === 'image_near');
+    expect(img?.element_type).toBe('image');
+    expect(img?.image_src).toBe('data:image/png;base64,xx');
+    expect(img?.distance).toBe(5);
+  });
 });
 
 describe('findElementsNearAnchors', () => {

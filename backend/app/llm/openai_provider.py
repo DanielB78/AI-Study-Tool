@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any, Sequence
+
 import httpx
 from openai import (
     APIConnectionError,
@@ -11,7 +13,20 @@ from openai import (
 
 from ..config import Settings
 from ..errors import AiServiceError
+from ..models.chat import ImageAttachment
 from .base import LLMProvider
+
+
+def _guess_media_type(data_url: str, media_type: str | None) -> str | None:
+    if media_type:
+        return media_type
+    if data_url.startswith("data:"):
+        # data:image/png;base64,...
+        header = data_url.split(",", 1)[0]
+        if ";" in header:
+            return header[5:].split(";", 1)[0] or None
+        return header[5:] or None
+    return None
 
 
 class OpenAIProvider(LLMProvider):
@@ -25,12 +40,17 @@ class OpenAIProvider(LLMProvider):
             timeout=settings.llm_timeout_seconds,
         )
 
+    @property
+    def supports_image_input(self) -> bool:
+        return self._settings.llm_supports_image_input
+
     async def generate(
         self,
         prompt: str,
         *,
         system_instruction: str | None = None,
         canvas_context: str | None = None,
+        image_attachments: Sequence[ImageAttachment] | None = None,
     ) -> str:
         if not self._settings.has_openai_api_key:
             raise AiServiceError(
@@ -40,7 +60,21 @@ class OpenAIProvider(LLMProvider):
                 detail="OPENAI_API_KEY is empty",
             )
 
-        messages: list[dict[str, str]] = []
+        attachments = list(image_attachments or [])
+        if attachments and not self.supports_image_input:
+            ids = ", ".join(a.element_id for a in attachments)
+            raise AiServiceError(
+                (
+                    "This LLM provider/model does not support image input, but "
+                    f"{len(attachments)} canvas image(s) are in context ({ids}). "
+                    "Use a vision-capable model or exclude the images."
+                ),
+                code="vision_unsupported",
+                status_code=422,
+                detail="llm_supports_image_input=false",
+            )
+
+        messages: list[dict[str, Any]] = []
         system_parts: list[str] = []
         if system_instruction:
             system_parts.append(system_instruction)
@@ -48,7 +82,25 @@ class OpenAIProvider(LLMProvider):
             system_parts.append(canvas_context)
         if system_parts:
             messages.append({"role": "system", "content": "\n\n".join(system_parts)})
-        messages.append({"role": "user", "content": prompt})
+
+        if attachments:
+            user_content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+            for att in attachments:
+                # Canvas images are user/canvas data — never system instructions.
+                image_url: dict[str, Any] = {"url": att.data_url}
+                media = _guess_media_type(att.data_url, att.media_type)
+                if media:
+                    # OpenAI ignores media_type on image_url today; keep for clarity.
+                    image_url["detail"] = "auto"
+                user_content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": image_url,
+                    }
+                )
+            messages.append({"role": "user", "content": user_content})
+        else:
+            messages.append({"role": "user", "content": prompt})
 
         try:
             completion = await self._client.chat.completions.create(

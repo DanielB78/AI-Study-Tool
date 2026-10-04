@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 60.0
     # "openai" (default) or "mock" for local UI testing without a paid key.
     llm_provider: str = "openai"
+    # Whether the configured provider/model accepts multimodal image input.
+    # Set LLM_SUPPORTS_IMAGE_INPUT=false to force a visible vision_unsupported error.
+    llm_supports_image_input: bool = True
     # Comma-separated origins for local Vite / future web clients.
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 

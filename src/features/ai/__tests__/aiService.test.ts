@@ -89,4 +89,37 @@ describe('aiService', () => {
       code: 'network_error',
     });
   });
+
+  it('includes image_attachments when provided', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ text: 'ok' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = createAiService('http://example.test');
+    await service.sendPrompt('question', undefined, {
+      imageAttachments: [
+        { element_id: 'image_27', data_url: 'data:image/png;base64,aaa' },
+      ],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://example.test/api/chat',
+      expect.objectContaining({
+        body: JSON.stringify({
+          prompt: 'question',
+          image_attachments: [
+            {
+              element_id: 'image_27',
+              data_url: 'data:image/png;base64,aaa',
+              media_type: null,
+            },
+          ],
+        }),
+      }),
+    );
+  });
 });

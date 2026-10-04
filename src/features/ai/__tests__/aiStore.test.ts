@@ -18,7 +18,10 @@ import { setLlmExecutionModeOverride } from '../llm/executionMode';
 function mockService(
   impl: AiService['sendPrompt'] = async (prompt) => ({ text: `echo:${prompt}` }),
 ): AiService {
-  return { sendPrompt: vi.fn(impl) };
+  return {
+    sendPrompt: vi.fn(impl),
+    supportsImageInput: () => true,
+  };
 }
 
 function resetCanvasStore() {

@@ -8,6 +8,7 @@ import type { CanvasElement, TextElement } from '../../types/canvas';
 import {
   RAG_MAX_CONTEXT_CHARACTERS,
   RAG_MAX_CONTEXT_ELEMENTS,
+  RAG_MAX_CONTEXT_IMAGES,
   RAG_SEMANTIC_EXPANSION_DEPTH_DEFAULT,
   RAG_SEMANTIC_EXPANSION_DEPTH_MAX,
   RAG_SEMANTIC_EXPANSION_MAX_NEIGHBOURS_DEFAULT,
@@ -89,6 +90,11 @@ export interface RagDebugState {
   /** Independent of semantic expansion. */
   spatialExpansionEnabled: boolean;
   radius: number;
+  /**
+   * Spatial hits the user has unchecked in the debug UI.
+   * Default empty → all spatial hits are included.
+   */
+  spatialExcludedIds: string[];
   /** Independent of spatial expansion. Off by default — never silent. */
   semanticExpansionEnabled: boolean;
   semanticExpansionDepth: number;
@@ -124,6 +130,9 @@ export interface RagDebugState {
   setPrompt: (value: string) => void;
   setRadius: (value: number) => void;
   setSpatialExpansionEnabled: (enabled: boolean) => void;
+  toggleSpatialIncluded: (elementId: string) => void;
+  selectAllSpatialHits: () => void;
+  clearSpatialSelection: () => void;
   setSemanticExpansionEnabled: (enabled: boolean) => void;
   setSemanticExpansionDepth: (depth: number) => void;
   setSemanticMaxNeighbours: (n: number) => void;
@@ -168,6 +177,7 @@ export type DebugContextSlice = {
   selectedStructureId: string | null;
   spatialExpansionEnabled: boolean;
   radius: number;
+  spatialExcludedIds: string[];
   semanticExpansionEnabled: boolean;
   semanticExpansionDepth: number;
   semanticMaxNeighbours: number;
@@ -212,6 +222,13 @@ function resolveLiveElement(
       geometry: { x: el.x, y: el.y, width: el.width, height: el.height },
     };
   }
+  if (el.type === 'equation') {
+    return {
+      text: el.latex,
+      type: el.type,
+      geometry: { x: el.x, y: el.y, width: el.width, height: el.height },
+    };
+  }
   if (el.type === 'shape' && el.label) {
     return {
       text: el.label,
@@ -232,7 +249,10 @@ export function computeDebugContext(
   canvasElements?: CanvasElement[],
 ): {
   context: RagContext;
+  /** All spatial hits within radius (before manual exclude). */
   spatialHits: SpatialHit[];
+  /** Spatial hits after manual include/exclude filtering. */
+  spatialHitsIncluded: SpatialHit[];
   semanticNeighborHits: SemanticNeighborHit[];
   semanticTrees: SemanticTreeNode[];
 } {
@@ -254,10 +274,13 @@ export function computeDebugContext(
     text: a.text,
   }));
 
-  const spatialHits =
+  const spatialHitsRaw =
     !state.spatialExpansionEnabled || anchors.length === 0
       ? []
       : findElementsNearAnchors(anchorSpatials, canvasEls, state.radius);
+
+  const excluded = new Set(state.spatialExcludedIds);
+  const spatialHits = spatialHitsRaw.filter((h) => !excluded.has(h.element_id));
 
   const included = new Set(state.semanticIncludedIds);
   let semanticNeighborHits: SemanticNeighborHit[] = [];
@@ -281,17 +304,35 @@ export function computeDebugContext(
     docElements,
   );
 
+  // Enrich spatial image hits with live asset src from CanvasDocument.
+  const enrichedSpatialHits = spatialHits.map((hit) => {
+    if (hit.element_type !== 'image') return hit;
+    if (hit.image_src) return hit;
+    const live = docElements.find((e) => e.id === hit.element_id);
+    if (live && live.type === 'image') {
+      return { ...hit, image_src: live.src };
+    }
+    return hit;
+  });
+
   const context = buildRagContext({
     query: state.prompt.trim(),
     explicitSelections,
     semanticAnchors: anchors,
-    spatialHits,
+    spatialHits: enrichedSpatialHits,
     semanticNeighborHits,
     maxElements: RAG_MAX_CONTEXT_ELEMENTS,
     maxCharacters: RAG_MAX_CONTEXT_CHARACTERS,
+    maxImages: RAG_MAX_CONTEXT_IMAGES,
   });
 
-  return { context, spatialHits, semanticNeighborHits, semanticTrees };
+  return {
+    context,
+    spatialHits: spatialHitsRaw,
+    spatialHitsIncluded: enrichedSpatialHits,
+    semanticNeighborHits,
+    semanticTrees,
+  };
 }
 
 function hasBuildableContext(state: {
@@ -401,6 +442,7 @@ export function createRagDebugStore() {
       selectedStructureId: null,
       spatialExpansionEnabled: true,
       radius: RAG_SPATIAL_RADIUS_DEFAULT,
+      spatialExcludedIds: [],
       semanticExpansionEnabled: false,
       semanticExpansionDepth: RAG_SEMANTIC_EXPANSION_DEPTH_DEFAULT,
       semanticMaxNeighbours: RAG_SEMANTIC_EXPANSION_MAX_NEIGHBOURS_DEFAULT,
@@ -448,6 +490,25 @@ export function createRagDebugStore() {
 
       setSpatialExpansionEnabled: (enabled) =>
         set({ spatialExpansionEnabled: enabled }),
+
+      toggleSpatialIncluded: (elementId) => {
+        set((s) => {
+          const excluded = s.spatialExcludedIds.includes(elementId);
+          return {
+            spatialExcludedIds: excluded
+              ? s.spatialExcludedIds.filter((id) => id !== elementId)
+              : [...s.spatialExcludedIds, elementId],
+          };
+        });
+      },
+
+      selectAllSpatialHits: () => set({ spatialExcludedIds: [] }),
+
+      clearSpatialSelection: () => {
+        const { spatialHits } = computeDebugContext(get());
+        const ids = [...new Set(spatialHits.map((h) => h.element_id))];
+        set({ spatialExcludedIds: ids });
+      },
 
       setSemanticExpansionEnabled: (enabled) => {
         set({ semanticExpansionEnabled: enabled, error: null });
@@ -605,9 +666,13 @@ export function createRagDebugStore() {
           set({ error: 'Could not copy to clipboard.' });
           return false;
         }
+        const imageCount = built.imageAttachments.length;
         set({
           lastCopiedPrompt: built.finalLlmPrompt,
-          statusMessage: 'Prompt copied',
+          statusMessage:
+            imageCount > 0
+              ? `Prompt copied · ${imageCount} image attachment(s) required`
+              : 'Prompt copied',
           error: null,
         });
         return true;
@@ -756,6 +821,7 @@ export function createRagDebugStore() {
           explicitSelectionIds: state.explicitSelectionIds,
           spatialExpansionEnabled: state.spatialExpansionEnabled,
           radius: state.radius,
+          spatialExcludedIds: state.spatialExcludedIds,
           semanticExpansionEnabled: state.semanticExpansionEnabled,
           semanticExpansionDepth: state.semanticExpansionDepth,
           semanticMaxNeighbours: state.semanticMaxNeighbours,
@@ -765,8 +831,17 @@ export function createRagDebugStore() {
           spatialHits,
           semanticNeighborHits,
           contextStats: context.stats,
+          imageAttachments: context.imageAttachments.map((a) => ({
+            element_id: a.element_id,
+            selection_reason: a.selection_reason,
+            nearest_distance: a.nearest_distance,
+            sources: a.sources,
+            // Do not dump binary data into debug JSON.
+            asset_src_chars: a.asset_src.length,
+          })),
           includedElements: context.allElements.map((e) => ({
             element_id: e.element_id,
+            element_type: e.element_type,
             inclusion: e.inclusion,
             similarity: e.similarity,
             nearest_distance: e.nearest_distance,
@@ -774,6 +849,7 @@ export function createRagDebugStore() {
             sources: e.sources,
           })),
           finalLlmPromptLength: built?.finalLlmPrompt.length ?? 0,
+          imageAttachmentCount: built?.imageAttachments.length ?? 0,
         };
         const ok = await writeClipboard(JSON.stringify(payload, null, 2));
         if (!ok) {
@@ -877,6 +953,22 @@ export function createRagDebugStore() {
         set({ sending: true, error: null, statusMessage: null, lastBuiltPrompt: built });
 
         try {
+          if (
+            context.imageAttachments.length > 0 &&
+            !aiService.supportsImageInput()
+          ) {
+            const ids = context.imageAttachments.map((a) => a.element_id).join(', ');
+            const message =
+              `This LLM provider does not support image input, but ${context.imageAttachments.length} canvas image(s) are in context (${ids}). Switch to a vision-capable model or uncheck the images in Spatial.`;
+            set({ sending: false, error: message });
+            useAiStore.setState({
+              status: 'error',
+              errorMessage: message,
+              expanded: true,
+            });
+            return;
+          }
+
           useAiStore.setState({
             status: 'loading',
             expanded: true,
@@ -890,6 +982,10 @@ export function createRagDebugStore() {
             canvasContext: [context.serialized, built.noteStructureSection]
               .filter(Boolean)
               .join('\n\n'),
+            imageAttachments: context.imageAttachments.map((a) => ({
+              element_id: a.element_id,
+              data_url: a.asset_src,
+            })),
           });
 
           const allowedElementIds = new Set(

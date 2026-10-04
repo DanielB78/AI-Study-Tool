@@ -13,6 +13,8 @@ export interface ExplicitSelectionInput {
   geometry: WorldRect;
   /** True when the element has meaningful AI-readable content. */
   has_readable_content: boolean;
+  /** ImageElement.src when type === 'image' — asset ref only, not a caption. */
+  image_src?: string | null;
 }
 
 /**
@@ -32,6 +34,10 @@ export function extractElementContextContent(el: CanvasElement): {
       text: label,
       has_readable_content: label.length > 0,
     };
+  }
+  if (el.type === 'equation') {
+    const latex = el.latex?.trim() ?? '';
+    return { text: latex, has_readable_content: latex.length > 0 };
   }
   // drawing / image / connector — preserve identity + geometry only
   return { text: '', has_readable_content: false };
@@ -62,6 +68,7 @@ export function resolveExplicitSelection(
         width: el.width,
         height: el.height,
       },
+      image_src: el.type === 'image' ? el.src : null,
     });
   }
   return out;
