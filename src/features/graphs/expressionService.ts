@@ -1,9 +1,22 @@
 /**
  * GraphExpressionService — parse/evaluate y=f(x) using mathjs.
- * Source text is canonical; compiled evaluators are transient cache.
+ *
+ * Pipeline:
+ *   canonical source (GraphMathSyntax)
+ *     → GraphExpressionCodec (validate / normalize / translate)
+ *     → mathjs-compatible parser syntax
+ *     → mathjs AST (transient)
+ *     → numerical evaluation
+ *
+ * Code-style mathematical syntax is a DSL, not executable code.
+ * Never pass expressions to eval / Function / interpreters / shells.
  */
 
 import { create, all, type MathNode } from 'mathjs';
+import {
+  encodeGraphExpression,
+  type GraphCodecMode,
+} from './expressionCodec';
 
 const math = create(all, {
   // Keep ordinary JS numbers for sampling performance.
@@ -12,19 +25,24 @@ const math = create(all, {
 export type GraphParseResult =
   | {
       ok: true;
+      /** Canonical GraphMathSyntax (persisted form). */
       normalizedSource: string;
+      /** Transient mathjs-compatible syntax (not persisted). */
+      parserSyntax: string;
       node: MathNode;
       evaluate: (x: number) => number;
     }
   | {
       ok: false;
       normalizedSource: string;
+      parserSyntax: string;
       error: string;
     };
 
+/** Built-in symbols allowed in the mathjs AST after codec translation. */
 const ALLOWED_SYMBOLS = new Set(['x', 'pi', 'e', 'PI', 'E']);
 
-/** Built-in function names that may appear as SymbolNodes in mathjs ASTs. */
+/** Function names that may appear as SymbolNodes in mathjs ASTs. */
 const KNOWN_FUNCTIONS = new Set([
   'sin',
   'cos',
@@ -32,63 +50,26 @@ const KNOWN_FUNCTIONS = new Set([
   'asin',
   'acos',
   'atan',
-  'atan2',
-  'sinh',
-  'cosh',
-  'tanh',
   'sqrt',
-  'cbrt',
   'abs',
   'exp',
   'log',
   'log10',
-  'log2',
   'ln',
-  'floor',
-  'ceil',
-  'round',
-  'sign',
-  'min',
-  'max',
-  'mod',
-  'pow',
 ]);
 
 /**
- * Small normalization layer (not a full custom parser):
- * - strip optional "y =" / "f(x) ="
- * - insert * for common implicit multiplication: 2x, 2(x+1), 3sin(x), )(
+ * Normalize raw input to canonical GraphMathSyntax when possible.
+ * Human mode accepts light compatibility forms (^, 2x, y=) and rewrites them.
+ * Strict mode enforces the AI / persistence contract.
  */
-export function normalizeExpressionSource(raw: string): string {
-  let s = raw.trim();
-  if (!s) return '';
-
-  // Drop leading y= / f(x)= / Y =
-  s = s.replace(/^(?:y|Y|f\s*\(\s*x\s*\))\s*=\s*/u, '');
-
-  // Replace Unicode operators with ASCII equivalents mathjs understands.
-  s = s
-    .replace(/×/g, '*')
-    .replace(/÷/g, '/')
-    .replace(/−/g, '-')
-    .replace(/π/g, 'pi');
-
-  // Implicit multiplication patterns (kept intentionally small).
-  // digit followed by letter or '(' : 2x, 2(x+1), 3sin
-  s = s.replace(/(\d)\s*([a-zA-Z(])/g, '$1*$2');
-  // closing paren/bracket followed by digit/letter/'(' : )(  )x  )2
-  s = s.replace(/([)\]}])\s*([a-zA-Z(\d])/g, '$1*$2');
-  // single-letter variable followed by '(' : x( → x*(
-  // multi-letter tokens like sin( are not matched by this single-letter pattern.
-  s = s.replace(/\b([a-zA-Z])\s*\(/g, (match, letter: string) => {
-    if (KNOWN_FUNCTIONS.has(letter)) return match;
-    return `${letter}*(`;
-  });
-
-  // Map ln → log (natural) for friendlier calculator notation.
-  s = s.replace(/\bln\s*\(/g, 'log(');
-
-  return s.trim();
+export function normalizeExpressionSource(
+  raw: string,
+  mode: GraphCodecMode = 'human',
+): string {
+  const encoded = encodeGraphExpression(raw, mode);
+  if (encoded.ok) return encoded.canonical;
+  return raw.trim();
 }
 
 function collectSymbols(node: MathNode): string[] {
@@ -101,29 +82,76 @@ function collectSymbols(node: MathNode): string[] {
   return [...found];
 }
 
+function encodeForParse(
+  sourceText: string,
+  mode: GraphCodecMode,
+):
+  | { ok: true; canonical: string; parserSyntax: string }
+  | { ok: false; error: string; normalizedSource: string } {
+  // Prefer the requested mode; for human reads also try strict first so
+  // already-canonical sources skip compatibility rewriting.
+  if (mode === 'human') {
+    const strict = encodeGraphExpression(sourceText, 'strict');
+    if (strict.ok) {
+      return {
+        ok: true,
+        canonical: strict.canonical,
+        parserSyntax: strict.parserSyntax,
+      };
+    }
+  }
+
+  const encoded = encodeGraphExpression(sourceText, mode);
+  if (!encoded.ok) {
+    return {
+      ok: false,
+      error: encoded.error,
+      normalizedSource: sourceText.trim(),
+    };
+  }
+  return {
+    ok: true,
+    canonical: encoded.canonical,
+    parserSyntax: encoded.parserSyntax,
+  };
+}
+
 /**
  * Parse and compile an expression for evaluation as f(x).
  * Does not throw — invalid input returns ok:false.
+ *
+ * Default mode is `human` so the graph editor and migrated legacy sources work.
+ * AI graph operations should call with mode `'strict'`.
  */
-export function parseGraphExpression(sourceText: string): GraphParseResult {
-  const normalizedSource = normalizeExpressionSource(sourceText);
-  if (!normalizedSource) {
-    return { ok: false, normalizedSource: '', error: 'Empty expression' };
+export function parseGraphExpression(
+  sourceText: string,
+  mode: GraphCodecMode = 'human',
+): GraphParseResult {
+  const encoded = encodeForParse(sourceText, mode);
+  if (!encoded.ok) {
+    return {
+      ok: false,
+      normalizedSource: encoded.normalizedSource,
+      parserSyntax: '',
+      error: encoded.error,
+    };
   }
 
+  const { canonical, parserSyntax } = encoded;
+
   try {
-    const node = math.parse(normalizedSource);
+    // mathjs.parse is a mathematical parser — not code execution.
+    const node = math.parse(parserSyntax);
     const symbols = collectSymbols(node);
     const free = symbols.filter(
-      (name) =>
-        !ALLOWED_SYMBOLS.has(name) &&
-        !KNOWN_FUNCTIONS.has(name),
+      (name) => !ALLOWED_SYMBOLS.has(name) && !KNOWN_FUNCTIONS.has(name),
     );
     if (free.length > 0) {
       return {
         ok: false,
-        normalizedSource,
-        error: `Unknown variable(s): ${free.join(', ')}. Use x only.`,
+        normalizedSource: canonical,
+        parserSyntax,
+        error: `Unsupported variable: ${free.join(', ')}. Use x only.`,
       };
     }
 
@@ -153,33 +181,66 @@ export function parseGraphExpression(sourceText: string): GraphParseResult {
     // Smoke-test at a safe point (avoid 0 for log/sqrt domain).
     evaluate(1);
 
-    return { ok: true, normalizedSource, node, evaluate };
+    return {
+      ok: true,
+      normalizedSource: canonical,
+      parserSyntax,
+      node,
+      evaluate,
+    };
   } catch (err) {
     const message =
       err instanceof Error ? err.message : 'Invalid expression';
-    return { ok: false, normalizedSource, error: message };
+    // Never surface raw stack traces — keep a short message.
+    return {
+      ok: false,
+      normalizedSource: canonical,
+      parserSyntax,
+      error: message.split('\n')[0] ?? 'Invalid expression',
+    };
   }
 }
 
-/** Validate without keeping the compiled node (for UI). */
-export function validateGraphExpression(sourceText: string): {
+/** Validate without keeping the compiled node (for UI / human editor). */
+export function validateGraphExpression(
+  sourceText: string,
+  mode: GraphCodecMode = 'human',
+): {
   ok: boolean;
   error: string | null;
   normalizedSource: string;
+  parserSyntax: string;
 } {
-  const result = parseGraphExpression(sourceText);
+  const result = parseGraphExpression(sourceText, mode);
   if (result.ok) {
-    return { ok: true, error: null, normalizedSource: result.normalizedSource };
+    return {
+      ok: true,
+      error: null,
+      normalizedSource: result.normalizedSource,
+      parserSyntax: result.parserSyntax,
+    };
   }
   return {
     ok: false,
     error: result.error,
     normalizedSource: result.normalizedSource,
+    parserSyntax: result.parserSyntax,
   };
+}
+
+/** Strict validation for AI-supplied graph expressions. */
+export function validateStrictGraphExpression(sourceText: string): {
+  ok: boolean;
+  error: string | null;
+  normalizedSource: string;
+  parserSyntax: string;
+} {
+  return validateGraphExpression(sourceText, 'strict');
 }
 
 export const GraphExpressionService = {
   normalize: normalizeExpressionSource,
   parse: parseGraphExpression,
   validate: validateGraphExpression,
+  validateStrict: validateStrictGraphExpression,
 };

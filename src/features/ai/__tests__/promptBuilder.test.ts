@@ -47,6 +47,13 @@ describe('buildLlmPrompt', () => {
     expect(built.systemInstructions).toBe(CANVAS_EDITOR_SYSTEM_PROMPT.trim());
   });
 
+  it('documents GraphMathSyntax and forbids LaTeX for graph expressions', () => {
+    expect(CANVAS_EDITOR_SYSTEM_PROMPT).toContain('GRAPH EXPRESSION FORMAT');
+    expect(CANVAS_EDITOR_SYSTEM_PROMPT).toContain('GRAPH EXPRESSIONS ARE NOT LATEX');
+    expect(CANVAS_EDITOR_SYSTEM_PROMPT).toContain('x**2');
+    expect(CANVAS_EDITOR_SYSTEM_PROMPT).toContain('Use explicit `*` for multiplication');
+  });
+
   it('includes OUTPUT CONTRACT for structured operations', () => {
     expect(built.finalLlmPrompt).toContain('OUTPUT CONTRACT');
     expect(built.finalLlmPrompt).toContain(CANVAS_AGENT_OUTPUT_CONTRACT.slice(0, 40));

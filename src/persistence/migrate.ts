@@ -18,6 +18,18 @@ import {
   DEFAULT_GRAPH_VIEWPORT,
   nextExpressionColor,
 } from '../features/graphs/types';
+import { migrateToCanonicalSource } from '../features/graphs/expressionCodec';
+
+/**
+ * Convert legacy parser-native sources (x^2, 2x, …) to canonical GraphMathSyntax.
+ * On failure, keep the original string — never silently corrupt graphs.
+ */
+function migrateGraphSourceText(raw: string): string {
+  if (!raw.trim()) return '';
+  const result = migrateToCanonicalSource(raw);
+  if (result.ok) return result.canonical;
+  return raw;
+}
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -170,7 +182,7 @@ function migrateGraph(raw: Record<string, unknown>, z: number): GraphElement {
       const styleRaw = isObject(expr.style) ? expr.style : {};
       return {
         id: str(expr.id, `expr-${index}`),
-        sourceText: str(expr.sourceText, ''),
+        sourceText: migrateGraphSourceText(str(expr.sourceText, '')),
         visible: bool(expr.visible, true),
         domainMin:
           typeof expr.domainMin === 'number' && Number.isFinite(expr.domainMin)

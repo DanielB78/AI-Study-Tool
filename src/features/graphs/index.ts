@@ -14,7 +14,27 @@ export {
   nextExpressionColor,
   isValidViewport,
 } from './types';
-export { GraphExpressionService, parseGraphExpression, validateGraphExpression, normalizeExpressionSource } from './expressionService';
+export {
+  GraphExpressionService,
+  parseGraphExpression,
+  validateGraphExpression,
+  validateStrictGraphExpression,
+  normalizeExpressionSource,
+} from './expressionService';
+export {
+  GraphExpressionCodec,
+  encodeGraphExpression,
+  toParserSyntax,
+  migrateToCanonicalSource,
+  isStrictCanonical,
+  validateAiGraphExpressions,
+} from './expressionCodec';
+export {
+  GRAPH_MATH_FUNCTIONS,
+  GRAPH_MATH_CONSTANTS,
+  GRAPH_MATH_VARIABLE,
+  GRAPH_MATH_SYNTAX_SUMMARY,
+} from './mathSyntax';
 export { sampleExpression, sampleAllExpressions, fitViewportToSamples } from './sampling';
 export { createGraphElement, createEmptyGraphExpression, createGraphPoint } from './createGraphElement';
 export { GraphElementWidget } from './GraphElementWidget';

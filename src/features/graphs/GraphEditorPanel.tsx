@@ -50,12 +50,20 @@ function ExpressionRow({
 
   useEffect(() => {
     if (debounced === expression.sourceText) return;
-    onChange({ ...expression, sourceText: debounced });
+    // Persist canonical GraphMathSyntax when valid; otherwise keep draft so the
+    // user can keep editing without losing invalid in-progress input.
+    const validated = validateGraphExpression(debounced, 'human');
+    const nextSource =
+      validated.ok && validated.normalizedSource
+        ? validated.normalizedSource
+        : debounced;
+    if (nextSource === expression.sourceText) return;
+    onChange({ ...expression, sourceText: nextSource });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional debounce sync
   }, [debounced]);
 
   const validation = useMemo(
-    () => validateGraphExpression(draft),
+    () => validateGraphExpression(draft, 'human'),
     [draft],
   );
 
@@ -83,7 +91,7 @@ function ExpressionRow({
       <input
         className={`graph-input mono${validation.ok || !draft.trim() ? '' : ' is-invalid'}`}
         value={draft}
-        placeholder="e.g. x^2 or sin(x)"
+        placeholder="e.g. x**2 or sin(x)"
         onChange={(e) => setDraft(e.target.value)}
         spellCheck={false}
       />

@@ -17,7 +17,10 @@ export interface GraphExpressionStyle {
 
 export interface GraphExpression {
   id: string;
-  /** Canonical user source text (e.g. "sin(x) + x^2"). */
+  /**
+   * Canonical GraphMathSyntax source (persisted / AI), e.g. "sin(x) + x**2".
+   * Not LaTeX. Not mathjs-native `^`. Parser-specific forms are transient.
+   */
   sourceText: string;
   visible: boolean;
   domainMin: number | null;

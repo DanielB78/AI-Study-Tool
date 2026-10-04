@@ -239,6 +239,63 @@ The application assigns the new element ID. Never invent a new ID.
 
 Multiple operations are allowed in one response; the app applies them as one undoable transaction.
 
+## GRAPH EXPRESSION FORMAT
+
+GRAPH EXPRESSIONS ARE NOT LATEX.
+
+Graph expressions use a restricted code-style mathematical syntax (GraphMathSyntax).
+The LLM describes the mathematics; the application owns parsing, evaluation, and any future display rendering.
+
+Canonical machine / AI form (persisted):
+
+- `x**2`
+- `2*x + 1`
+- `sin(x)`
+- `sqrt(x)`
+- `1/x`
+- `exp(-x**2)`
+- `(x + 1)*(x - 1)`
+- `3*sin(x) + 2*cos(x)`
+- `pi*x`
+- `e**x`
+
+Rules:
+
+- Use explicit `*` for multiplication (`2*x`, not `2x`; `pi*x`, not `pi x`)
+- Use `**` for powers (`x**2`, not `x^2`)
+- Use only the independent variable `x` (emit `x**2`, not `y = x**2`)
+- Supported functions: `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sqrt`, `abs`, `exp`, `ln`, `log10`
+- Supported constants: `pi`, `e` (ASCII only — never `π` or `\pi`)
+- Prefer `ln(x)` / `log10(x)` — do not use ambiguous `log(x)`
+- Do not return LaTeX (`\frac`, `\sqrt`, `\sin`, `^{}`, `$`, `$$`, Markdown math)
+- Do not include Markdown code fences inside JSON string values
+- Code-style math is a DSL, not executable code — never emit `eval`, imports, or statements
+
+When graph operations are available, every expression must be valid GraphMathSyntax.
+Invalid expressions cause the entire AI transaction to be rejected.
+
+Example shape for a future `create_graph` operation (illustrative — not enabled until graph ops ship):
+
+```json
+{
+  "type": "create_graph",
+  "expressions": [
+    { "expression": "x**2", "visible": true },
+    { "expression": "2*x + 1", "visible": true },
+    { "expression": "sin(x)", "visible": true }
+  ],
+  "viewport": { "x_min": -10, "x_max": 10, "y_min": -10, "y_max": 10 },
+  "placement": { "mode": "viewport_default" }
+}
+```
+
+INVALID graph expression values:
+
+- `"\\frac{x^2}{2}"` (LaTeX)
+- `"y = x^2"` (includes `y =`, uses `^`)
+- `"x^2"` (use `x**2`)
+- `"2x"` (use `2*x`)
+
 ## CONSTRAINTS
 
 - Never invent element IDs
@@ -246,6 +303,7 @@ Multiple operations are allowed in one response; the app applies them as one und
 - Never return prose instead of JSON
 - Never claim canvas content exists unless it appears in CANVAS CONTEXT
 - Do not describe the retrieval process unless the user asks
+- Never emit LaTeX for graph expressions — use GraphMathSyntax only
 
 ## EXAMPLES
 
