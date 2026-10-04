@@ -70,10 +70,57 @@ export type CreateStructuredNoteOperation = {
   placement: Placement;
 };
 
+/** One curve on a newly created GraphElement (canonical GraphMathSyntax). */
+export type CreateGraphExpressionSpec = {
+  /** Canonical code-style math DSL, e.g. "x**2" — NOT LaTeX, NOT "y = …". */
+  expression: string;
+  visible: boolean;
+  domain_min: number | null;
+  domain_max: number | null;
+};
+
+/** Explicit labeled point on a newly created GraphElement. */
+export type CreateGraphPointSpec = {
+  x: number;
+  y: number;
+  label: string;
+  visible: boolean;
+};
+
+export type CreateGraphViewportSpec = {
+  x_min: number;
+  x_max: number;
+  y_min: number;
+  y_max: number;
+};
+
+export type CreateGraphSettingsSpec = {
+  title: string | null;
+  x_axis_label: string | null;
+  y_axis_label: string | null;
+  show_grid: boolean;
+  show_x_axis: boolean;
+  show_y_axis: boolean;
+};
+
+/**
+ * Create a new interactive GraphElement.
+ * Does NOT edit existing graphs — create only.
+ */
+export type CreateGraphOperation = {
+  type: 'create_graph';
+  expressions: CreateGraphExpressionSpec[];
+  points: CreateGraphPointSpec[];
+  viewport: CreateGraphViewportSpec;
+  settings: CreateGraphSettingsSpec;
+  placement: Placement;
+};
+
 export type CanvasOperation =
   | CreateTextOperation
   | UpdateTextOperation
-  | CreateStructuredNoteOperation;
+  | CreateStructuredNoteOperation
+  | CreateGraphOperation;
 
 export type CanvasAgentResponse = {
   operations: CanvasOperation[];
@@ -158,11 +205,82 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               placement: { $ref: '#/$defs/placement' },
             },
           },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: [
+              'type',
+              'expressions',
+              'points',
+              'viewport',
+              'settings',
+              'placement',
+            ],
+            properties: {
+              type: { const: 'create_graph' },
+              expressions: {
+                type: 'array',
+                items: { $ref: '#/$defs/graphExpression' },
+              },
+              points: {
+                type: 'array',
+                items: { $ref: '#/$defs/graphPoint' },
+              },
+              viewport: { $ref: '#/$defs/graphViewport' },
+              settings: { $ref: '#/$defs/graphSettings' },
+              placement: { $ref: '#/$defs/placement' },
+            },
+          },
         ],
       },
     },
   },
   $defs: {
+    graphExpression: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['expression'],
+      properties: {
+        expression: { type: 'string', minLength: 1 },
+        visible: { type: 'boolean' },
+        domain_min: { type: ['number', 'null'] },
+        domain_max: { type: ['number', 'null'] },
+      },
+    },
+    graphPoint: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['x', 'y'],
+      properties: {
+        x: { type: 'number' },
+        y: { type: 'number' },
+        label: { type: 'string' },
+        visible: { type: 'boolean' },
+      },
+    },
+    graphViewport: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['x_min', 'x_max', 'y_min', 'y_max'],
+      properties: {
+        x_min: { type: 'number' },
+        x_max: { type: 'number' },
+        y_min: { type: 'number' },
+        y_max: { type: 'number' },
+      },
+    },
+    graphSettings: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        title: { type: ['string', 'null'] },
+        x_axis_label: { type: ['string', 'null'] },
+        y_axis_label: { type: ['string', 'null'] },
+        show_grid: { type: 'boolean' },
+        show_x_axis: { type: 'boolean' },
+        show_y_axis: { type: 'boolean' },
+      },
+    },
     hierarchyNode: {
       type: 'object',
       additionalProperties: false,
@@ -250,6 +368,38 @@ create_structured_note (ONLY when a note structure is selected):
   "placement": { "mode": "viewport_default" } | ...
 }
 
+create_graph (NEW interactive GraphElement only — never edit existing graphs):
+{
+  "type": "create_graph",
+  "expressions": [
+    {
+      "expression": "x**2",
+      "visible": true,
+      "domain_min": null,
+      "domain_max": null
+    }
+  ],
+  "points": [],
+  "viewport": { "x_min": -10, "x_max": 10, "y_min": -10, "y_max": 10 },
+  "settings": {
+    "title": null,
+    "x_axis_label": null,
+    "y_axis_label": null,
+    "show_grid": true,
+    "show_x_axis": true,
+    "show_y_axis": true
+  },
+  "placement": { "mode": "viewport_default" } | ...
+}
+
+GRAPH EXPRESSION SYNTAX (canonical code-style DSL — NOT LaTeX, NOT executable code):
+- Use: x**2, 2*x + 1, sin(x), sqrt(x), 1/x, exp(-x**2), (x + 1)*(x - 1), pi*x, e**x
+- Explicit * required (2*x, not 2x). Powers use ** (not ^).
+- Independent variable is x only. Do NOT include "y =".
+- Supported functions: sin, cos, tan, asin, acos, atan, sqrt, abs, exp, ln, log10
+- Supported constants: pi, e
+- Do NOT emit LaTeX (\\frac, \\sin, ^{}, $, $$) or programming code.
+
 NODE_SECTION fields:
 - Return hierarchy/content only under "root" (no x/y, no node IDs, no connectors).
 - Respect MAX DEPTH and MAX TOTAL NODES from the selected structure.
@@ -262,6 +412,11 @@ Rules:
 - Prefer viewport_default when the user gives no location.
 - When a structure is selected and the user asks for new structured content, use create_structured_note — do NOT recreate the layout with create_text/create_equation/create_connector.
 - Omit or null optional structure fields when there is no meaningful content.
+- Use create_graph only when the user asks to graph/plot/draw a function visually.
+- Put multiple curves in ONE create_graph unless the user asks for separate graphs.
+- Defaults: viewport ±10, show_grid/axes true, empty title/labels — omit unusual values.
+- Do NOT emit update_graph / add_graph_expression / remove_graph_expression / delete graph.
+- Do NOT edit existing GraphElements even if they appear in context or selection.
 - Do not emit delete/move/resize/style/shape/connector operations.
 - Do not invent structure geometry; the application owns layout and tree connectors.
 `.trim();
