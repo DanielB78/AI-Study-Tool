@@ -45,6 +45,12 @@ export interface TransientUI {
   editingShapeLabelId: string | null;
   isSpacePanning: boolean;
   marquee: { x: number; y: number; width: number; height: number } | null;
+  /**
+   * Last completed marquee region in world coordinates.
+   * Survives after the transient `marquee` rect is cleared on pointer-up.
+   * Cleared when the user click-selects without a marquee or clears selection.
+   */
+  lastMarqueeRegion: { x: number; y: number; width: number; height: number } | null;
   draftPoints: number[] | null;
   draftShape: {
     kind: DraftShapeKind;
@@ -75,6 +81,7 @@ export interface CanvasStore extends TransientUI, HistorySlice {
   setCamera: (camera: Camera | ((c: Camera) => Camera)) => void;
   setSpacePanning: (value: boolean) => void;
   setMarquee: (marquee: TransientUI['marquee']) => void;
+  setLastMarqueeRegion: (region: TransientUI['lastMarqueeRegion']) => void;
   setDraftPoints: (points: number[] | null) => void;
   setDraftShape: (draft: TransientUI['draftShape']) => void;
   setSnapGuides: (guides: TransientUI['snapGuides']) => void;
@@ -170,6 +177,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   editingShapeLabelId: null,
   isSpacePanning: false,
   marquee: null,
+  lastMarqueeRegion: null,
   draftPoints: null,
   draftShape: null,
   clipboard: [],
@@ -222,6 +230,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
 
   setSpacePanning: (value) => set({ isSpacePanning: value }),
   setMarquee: (marquee) => set({ marquee }),
+  setLastMarqueeRegion: (region) => set({ lastMarqueeRegion: region }),
   setDraftPoints: (points) => set({ draftPoints: points }),
   setDraftShape: (draft) => set({ draftShape: draft }),
   setSnapGuides: (guides) => set({ snapGuides: guides }),
@@ -257,7 +266,12 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   },
 
   clearSelection: () =>
-    set({ selectedIds: [], editingTextId: null, editingShapeLabelId: null }),
+    set({
+      selectedIds: [],
+      editingTextId: null,
+      editingShapeLabelId: null,
+      lastMarqueeRegion: null,
+    }),
 
   pushHistory: () => {
     const { document, past, historySuspended } = get();

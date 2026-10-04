@@ -20,6 +20,9 @@ export function RagDebugOverlay() {
   const candidates = useRagDebugStore((s) => s.candidates);
   const selectedAnchorIds = useRagDebugStore((s) => s.selectedAnchorIds);
   const explicitSelectionIds = useRagDebugStore((s) => s.explicitSelectionIds);
+  const explicitRegionBounds = useRagDebugStore((s) => s.explicitRegionBounds);
+  const explicitRegionInspection = useRagDebugStore((s) => s.explicitRegionInspection);
+  const explicitRegionImageSrc = useRagDebugStore((s) => s.explicitRegionImageSrc);
   const spatialExpansionEnabled = useRagDebugStore((s) => s.spatialExpansionEnabled);
   const radius = useRagDebugStore((s) => s.radius);
   const semanticExpansionEnabled = useRagDebugStore((s) => s.semanticExpansionEnabled);
@@ -56,6 +59,9 @@ export function RagDebugOverlay() {
         candidates,
         selectedAnchorIds,
         explicitSelectionIds,
+        explicitRegionBounds,
+        explicitRegionInspection,
+        explicitRegionImageSrc,
         selectedStructureId: useRagDebugStore.getState().selectedStructureId,
         spatialExpansionEnabled,
         radius,
@@ -74,6 +80,9 @@ export function RagDebugOverlay() {
     candidates,
     selectedAnchorIds,
     explicitSelectionIds,
+    explicitRegionBounds,
+    explicitRegionInspection,
+    explicitRegionImageSrc,
     spatialExpansionEnabled,
     radius,
     spatialExcludedIds,

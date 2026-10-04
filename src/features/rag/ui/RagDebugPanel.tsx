@@ -137,6 +137,9 @@ export function RagDebugPanel() {
   const candidates = useRagDebugStore((s) => s.candidates);
   const selectedAnchorIds = useRagDebugStore((s) => s.selectedAnchorIds);
   const explicitSelectionIds = useRagDebugStore((s) => s.explicitSelectionIds);
+  const explicitRegionBounds = useRagDebugStore((s) => s.explicitRegionBounds);
+  const explicitRegionInspection = useRagDebugStore((s) => s.explicitRegionInspection);
+  const explicitRegionImageSrc = useRagDebugStore((s) => s.explicitRegionImageSrc);
   const selectedStructureId = useRagDebugStore((s) => s.selectedStructureId);
   const spatialExpansionEnabled = useRagDebugStore((s) => s.spatialExpansionEnabled);
   const radius = useRagDebugStore((s) => s.radius);
@@ -208,6 +211,9 @@ export function RagDebugPanel() {
           candidates,
           selectedAnchorIds,
           explicitSelectionIds,
+          explicitRegionBounds,
+          explicitRegionInspection,
+          explicitRegionImageSrc,
           selectedStructureId,
           spatialExpansionEnabled,
           radius,
@@ -225,6 +231,9 @@ export function RagDebugPanel() {
       candidates,
       selectedAnchorIds,
       explicitSelectionIds,
+      explicitRegionBounds,
+      explicitRegionInspection,
+      explicitRegionImageSrc,
       selectedStructureId,
       spatialExpansionEnabled,
       radius,
@@ -273,6 +282,7 @@ export function RagDebugPanel() {
         distance: number;
         anchor_element_id: string;
         image_src?: string;
+        text?: string;
       }
     >();
     for (const hit of spatialHits) {
@@ -284,14 +294,21 @@ export function RagDebugPanel() {
           distance: hit.distance,
           anchor_element_id: hit.anchor_element_id,
           image_src: hit.image_src,
+          text: hit.text,
         });
       }
     }
-    // Resolve live image src for thumbnails.
+    // Resolve live image src / graph text for thumbnails.
     for (const row of byId.values()) {
       if (row.element_type === 'image' && !row.image_src) {
         const live = elements.find((e) => e.id === row.element_id);
         if (live && live.type === 'image') row.image_src = live.src;
+      }
+      if (row.element_type === 'graph' && !row.text) {
+        const live = elements.find((e) => e.id === row.element_id);
+        if (live && live.type === 'graph') {
+          row.text = live.expressions.map((e) => e.sourceText || e.id).join(', ');
+        }
       }
     }
     return Array.from(byId.values()).sort(
@@ -958,6 +975,12 @@ export function RagDebugPanel() {
                   <div>
                     Image attachments:{' '}
                     <strong>{context.stats.image_attachment_count}</strong>
+                    {context.stats.region_image_attachment_count > 0 && (
+                      <>
+                        {' · region '}
+                        <strong>{context.stats.region_image_attachment_count}</strong>
+                      </>
+                    )}
                     {context.stats.image_budget_excluded_count > 0 && (
                       <>
                         {' · budget-excluded '}
@@ -998,6 +1021,63 @@ export function RagDebugPanel() {
                   </div>
                 </section>
 
+                {(explicitRegionInspection || explicitRegionBounds) && (
+                  <section className="rag-debug-section">
+                    <div className="rag-debug-section-title">SELECTED REGION</div>
+                    {explicitRegionInspection?.kind === 'empty' ? (
+                      <>
+                        <p className="rag-debug-meta">
+                          Selected region contains no meaningful canvas content.
+                        </p>
+                        <p className="rag-debug-meta">Image attachment: No</p>
+                      </>
+                    ) : (
+                      <>
+                        {explicitRegionBounds && (
+                          <p className="rag-debug-meta">
+                            Bounds: x={explicitRegionBounds.x.toFixed(1)}, y=
+                            {explicitRegionBounds.y.toFixed(1)}, width=
+                            {explicitRegionBounds.width.toFixed(1)}, height=
+                            {explicitRegionBounds.height.toFixed(1)}
+                          </p>
+                        )}
+                        <p className="rag-debug-meta">
+                          Structured elements:{' '}
+                          {explicitRegionInspection?.structuredElementIds.length
+                            ? explicitRegionInspection.structuredElementIds.join(', ')
+                            : '(none)'}
+                        </p>
+                        <p className="rag-debug-meta">
+                          Visual content detected:{' '}
+                          {explicitRegionInspection?.hasVisualContent ? 'Yes' : 'No'}
+                        </p>
+                        {explicitRegionInspection?.kind === 'structured_only' ? (
+                          <p className="rag-debug-meta">
+                            Image attachment: No — structured text only
+                          </p>
+                        ) : explicitRegionInspection?.shouldRenderImage ? (
+                          <>
+                            <p className="rag-debug-meta">
+                              Image attachment:{' '}
+                              {explicitRegionImageSrc ? 'Yes' : 'Required (pending/failed)'}
+                            </p>
+                            {explicitRegionImageSrc && (
+                              <img
+                                className="rag-debug-thumb"
+                                src={explicitRegionImageSrc}
+                                alt="Selected canvas region"
+                                title="Selected canvas region"
+                              />
+                            )}
+                          </>
+                        ) : (
+                          <p className="rag-debug-meta">Image attachment: No</p>
+                        )}
+                      </>
+                    )}
+                  </section>
+                )}
+
                 {context.imageAttachments.length > 0 && (
                   <section className="rag-debug-section">
                     <div className="rag-debug-section-title">
@@ -1013,7 +1093,9 @@ export function RagDebugPanel() {
                       {context.imageAttachments.map((att) => (
                         <li key={`img-${att.element_id}`} className="rag-debug-item">
                           <div className="rag-debug-row tight">
-                            <span className="rag-debug-badge spatial">image</span>
+                            <span className="rag-debug-badge spatial">
+                              {att.element_type === 'region' ? 'region' : 'image'}
+                            </span>
                             <span className="rag-debug-id">{att.element_id}</span>
                           </div>
                           <p className="rag-debug-meta">
@@ -1022,6 +1104,14 @@ export function RagDebugPanel() {
                               ? ` · d=${att.nearest_distance.toFixed(1)}`
                               : ''}
                           </p>
+                          {att.selection_reason === 'explicit_region_selection' && (
+                            <p className="rag-debug-meta">
+                              Status: Attachment required
+                              {att.region?.included_element_ids?.length
+                                ? ` · includes ${att.region.included_element_ids.join(', ')}`
+                                : ''}
+                            </p>
+                          )}
                           {att.sources
                             .filter((s) => s.type === 'spatial')
                             .map((s) =>

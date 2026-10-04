@@ -96,6 +96,7 @@ export function InfiniteCanvas() {
   const setEditingTextId = useCanvasStore((s) => s.setEditingTextId);
   const setEditingShapeLabelId = useCanvasStore((s) => s.setEditingShapeLabelId);
   const setMarquee = useCanvasStore((s) => s.setMarquee);
+  const setLastMarqueeRegion = useCanvasStore((s) => s.setLastMarqueeRegion);
   const setDraftPoints = useCanvasStore((s) => s.setDraftPoints);
   const setDraftShape = useCanvasStore((s) => s.setDraftShape);
   const setSnapGuides = useCanvasStore((s) => s.setSnapGuides);
@@ -381,6 +382,13 @@ export function InfiniteCanvas() {
       marqueeState.current = null;
       setMarquee(null);
       if (box && (box.width > 2 || box.height > 2)) {
+        // Persist world-coordinate region for LLM visual context (marquee itself is cleared).
+        setLastMarqueeRegion({
+          x: box.x,
+          y: box.y,
+          width: box.width,
+          height: box.height,
+        });
         const hits = useCanvasStore
           .getState()
           .document.elements.filter((el) =>
@@ -398,6 +406,8 @@ export function InfiniteCanvas() {
         } else {
           select(hits);
         }
+      } else {
+        setLastMarqueeRegion(null);
       }
     }
   };
@@ -409,9 +419,11 @@ export function InfiniteCanvas() {
       if (!additive && current.includes(id) && current.length > 1) {
         return;
       }
+      // Click selection is element-based — clear any prior marquee region snapshot.
+      setLastMarqueeRegion(null);
       select([id], additive);
     },
-    [canInteractWithObjects, select],
+    [canInteractWithObjects, select, setLastMarqueeRegion],
   );
 
   const onDragStartElement = useCallback(
