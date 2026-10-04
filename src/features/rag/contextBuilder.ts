@@ -99,6 +99,7 @@ export interface RagContextStats {
   spatial_text_addition_count: number;
   spatial_equation_addition_count: number;
   spatial_image_addition_count: number;
+  spatial_graph_addition_count: number;
   semantic_depth1_addition_count: number;
   semantic_depth2_addition_count: number;
   unique_semantic_addition_count: number;
@@ -210,6 +211,10 @@ function isImageElement(el: { element_type: string }): boolean {
   return el.element_type === 'image';
 }
 
+function isGraphElement(el: { element_type: string }): boolean {
+  return el.element_type === 'graph';
+}
+
 function formatElementBlock(el: RagContextElement): string {
   const lines: string[] = [];
   lines.push('ELEMENT');
@@ -245,6 +250,9 @@ function formatElementBlock(el: RagContextElement): string {
     lines.push('ATTACHED CANVAS IMAGE:');
     lines.push(el.element_id);
     lines.push('(image bytes are supplied as a multimodal attachment — not described here)');
+  } else if (isGraphElement(el)) {
+    // Structured GraphContext body (already includes GRAPH ELEMENT header).
+    lines.push(el.text || '(empty graph)');
   } else {
     lines.push('TEXT:');
     lines.push(el.text || '(empty)');
@@ -838,9 +846,11 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
   let spatialTextCount = 0;
   let spatialEquationCount = 0;
   let spatialImageCount = 0;
+  let spatialGraphCount = 0;
   for (const el of spatialElementsFinal) {
     if (el.element_type === 'image') spatialImageCount += 1;
     else if (el.element_type === 'equation') spatialEquationCount += 1;
+    else if (el.element_type === 'graph') spatialGraphCount += 1;
     else spatialTextCount += 1;
   }
 
@@ -852,6 +862,7 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     spatial_text_addition_count: spatialTextCount,
     spatial_equation_addition_count: spatialEquationCount,
     spatial_image_addition_count: spatialImageCount,
+    spatial_graph_addition_count: spatialGraphCount,
     semantic_depth1_addition_count: depth1,
     semantic_depth2_addition_count: depth2,
     unique_semantic_addition_count: additionIds.size,

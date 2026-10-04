@@ -206,21 +206,109 @@ describe('parseCanvasAgentResponse — create_graph', () => {
     ).toThrow(/at least one expression or point/i);
   });
 
-  it('rejects graph-edit operations (not supported yet)', () => {
+  it('rejects invented graph targets for edit ops', () => {
     expect(() =>
       parseCanvasAgentResponse(
         JSON.stringify({
           operations: [
             {
               type: 'add_graph_expression',
-              target_element_id: 'graph_1',
-              expression: 'x**2',
+              graph_id: 'missing',
+              expression: { expression: 'x**3', visible: true },
             },
           ],
         }),
         ctx,
       ),
-    ).toThrow(/not supported yet/i);
+    ).toThrow(/not in the supplied canvas context/i);
+  });
+
+  it('parses add/update/remove/visibility/viewport/settings/point ops', () => {
+    const graphCtx = {
+      ...ctx,
+      graphExpressionIds: new Map([['graph_1', new Set(['expr_1', 'expr_2'])]]),
+      graphPointIds: new Map([['graph_1', new Set(['point_1'])]]),
+    };
+    const raw = JSON.stringify({
+      operations: [
+        {
+          type: 'add_graph_expression',
+          graph_id: 'graph_1',
+          expression: { expression: 'x**3', visible: true },
+        },
+        {
+          type: 'update_graph_expression',
+          graph_id: 'graph_1',
+          expression_id: 'expr_1',
+          expression: 'x**2 + 2*x + 1',
+        },
+        {
+          type: 'set_graph_expression_visibility',
+          graph_id: 'graph_1',
+          expression_id: 'expr_1',
+          visible: false,
+        },
+        {
+          type: 'remove_graph_expression',
+          graph_id: 'graph_1',
+          expression_id: 'expr_2',
+        },
+        {
+          type: 'update_graph_viewport',
+          graph_id: 'graph_1',
+          x_min: -5,
+          x_max: 5,
+        },
+        {
+          type: 'update_graph_settings',
+          graph_id: 'graph_1',
+          title: 'Projectile Motion',
+          show_grid: false,
+        },
+        {
+          type: 'add_graph_point',
+          graph_id: 'graph_1',
+          x: 2,
+          y: 4,
+          label: 'A',
+        },
+        {
+          type: 'remove_graph_point',
+          graph_id: 'graph_1',
+          point_id: 'point_1',
+        },
+      ],
+    });
+    const res = parseCanvasAgentResponse(raw, graphCtx);
+    expect(res.operations).toHaveLength(8);
+    const plan = describeOperationPlan(res.operations);
+    expect(plan[0]).toContain('EDIT GRAPH');
+    expect(plan[0]).toContain('ADD CURVE');
+    expect(plan[1]).toContain('UPDATE CURVE');
+    expect(plan[2]).toContain('HIDE CURVE');
+    expect(plan[3]).toContain('REMOVE CURVE');
+    expect(plan[4]).toContain('CHANGE VIEWPORT');
+    expect(plan[5]).toContain('UPDATE SETTINGS');
+  });
+
+  it('rejects unknown expression_id on graph', () => {
+    expect(() =>
+      parseCanvasAgentResponse(
+        JSON.stringify({
+          operations: [
+            {
+              type: 'remove_graph_expression',
+              graph_id: 'graph_1',
+              expression_id: 'nope',
+            },
+          ],
+        }),
+        {
+          ...ctx,
+          graphExpressionIds: new Map([['graph_1', new Set(['expr_1'])]]),
+        },
+      ),
+    ).toThrow(/not on graph/i);
   });
 
   it('rejects relative placement with inventing anchor', () => {

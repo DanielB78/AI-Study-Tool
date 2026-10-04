@@ -1,10 +1,12 @@
 /**
- * Resolve editor-selected canvas elements into AI context inputs.
- * Selection alone is sufficient — no embeddings / retrieval required.
+ * Extract AI-readable content for a canvas element.
+ * Does not invent descriptions for drawings/images/connectors.
+ * Graphs: structured configuration only (no screenshots / samples / embeddings).
  */
 
 import type { CanvasElement } from '../../types/canvas';
 import type { WorldRect } from './geometry';
+import { formatGraphElementForContext } from './graphContext';
 
 export interface ExplicitSelectionInput {
   element_id: string;
@@ -38,6 +40,10 @@ export function extractElementContextContent(el: CanvasElement): {
   if (el.type === 'equation') {
     const latex = el.latex?.trim() ?? '';
     return { text: latex, has_readable_content: latex.length > 0 };
+  }
+  if (el.type === 'graph') {
+    const text = formatGraphElementForContext(el);
+    return { text, has_readable_content: true };
   }
   // drawing / image / connector — preserve identity + geometry only
   return { text: '', has_readable_content: false };

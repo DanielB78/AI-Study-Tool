@@ -25,6 +25,7 @@ import {
   resolveExplicitSelection,
   snapshotEditorSelection,
 } from './explicitSelection';
+import { formatGraphElementForContext } from './graphContext';
 import {
   ragRetrievalService,
   type PromptIntentClassification,
@@ -196,14 +197,25 @@ function buildParseContextFromState(state: DebugContextSlice) {
   const { context } = computeDebugContext(state);
   const allowedElementIds = new Set(context.allElements.map((e) => e.element_id));
   const elementTypes = new Map<string, string>();
+  const graphExpressionIds = new Map<string, Set<string>>();
+  const graphPointIds = new Map<string, Set<string>>();
   for (const el of useCanvasStore.getState().document.elements) {
     if (allowedElementIds.has(el.id)) {
       elementTypes.set(el.id, el.type);
+    }
+    if (allowedElementIds.has(el.id) && el.type === 'graph') {
+      graphExpressionIds.set(
+        el.id,
+        new Set(el.expressions.map((e) => e.id)),
+      );
+      graphPointIds.set(el.id, new Set(el.points.map((p) => p.id)));
     }
   }
   return {
     allowedElementIds,
     elementTypes,
+    graphExpressionIds,
+    graphPointIds,
     context,
     selectedStructure: resolveSnapshottedStructure(state.selectedStructureId),
   };
@@ -232,6 +244,13 @@ function resolveLiveElement(
   if (el.type === 'shape' && el.label) {
     return {
       text: el.label,
+      type: el.type,
+      geometry: { x: el.x, y: el.y, width: el.width, height: el.height },
+    };
+  }
+  if (el.type === 'graph') {
+    return {
+      text: formatGraphElementForContext(el),
       type: el.type,
       geometry: { x: el.x, y: el.y, width: el.width, height: el.height },
     };
@@ -304,13 +323,21 @@ export function computeDebugContext(
     docElements,
   );
 
-  // Enrich spatial image hits with live asset src from CanvasDocument.
+  // Enrich spatial image/graph hits with live CanvasDocument state.
   const enrichedSpatialHits = spatialHits.map((hit) => {
-    if (hit.element_type !== 'image') return hit;
-    if (hit.image_src) return hit;
-    const live = docElements.find((e) => e.id === hit.element_id);
-    if (live && live.type === 'image') {
-      return { ...hit, image_src: live.src };
+    if (hit.element_type === 'image') {
+      if (hit.image_src) return hit;
+      const live = docElements.find((e) => e.id === hit.element_id);
+      if (live && live.type === 'image') {
+        return { ...hit, image_src: live.src };
+      }
+      return hit;
+    }
+    if (hit.element_type === 'graph') {
+      const live = docElements.find((e) => e.id === hit.element_id);
+      if (live && live.type === 'graph') {
+        return { ...hit, text: formatGraphElementForContext(live) };
+      }
     }
     return hit;
   });
