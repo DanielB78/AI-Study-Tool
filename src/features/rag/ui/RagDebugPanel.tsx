@@ -228,7 +228,7 @@ export function RagDebugPanel() {
   const hwRecognitionRecords = useSyncExternalStore(
     (cb) => handwritingRecognitionController.subscribe(cb),
     () => handwritingRecognitionController.getRecords(),
-    () => [] as HandwritingRecognitionRecord[],
+    () => handwritingRecognitionController.getRecords(),
   );
 
   // Keep handwriting stats fresh while that debug page is open.

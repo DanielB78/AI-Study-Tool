@@ -122,6 +122,8 @@ type Listener = () => void;
 /**
  * Debounced recognizer/indexer. Derived state only — never mutates CanvasDocument.
  */
+const EMPTY_RECOGNITION_RECORDS: HandwritingRecognitionRecord[] = [];
+
 export class HandwritingRecognitionController {
   private records = new Map<string, HandwritingRecognitionRecord>();
   private knownRagIds = new Set<string>();
@@ -134,6 +136,8 @@ export class HandwritingRecognitionController {
   private deleteFn: typeof deleteHandwritingRegionIndex;
   private renderFn: typeof renderHandwritingStrokes;
   private lastBoardDrawingKey = '';
+  /** Stable snapshot for useSyncExternalStore — only replaced when records change. */
+  private snapshot: HandwritingRecognitionRecord[] = EMPTY_RECOGNITION_RECORDS;
 
   constructor(options?: HandwritingSyncOptions) {
     this.debounceMs = options?.debounceMs ?? 900;
@@ -149,11 +153,19 @@ export class HandwritingRecognitionController {
   }
 
   private emit(): void {
+    this.snapshot =
+      this.records.size === 0
+        ? EMPTY_RECOGNITION_RECORDS
+        : Array.from(this.records.values());
     for (const l of this.listeners) l();
   }
 
+  /**
+   * Cached list for React useSyncExternalStore.
+   * Must return the same reference until records actually change.
+   */
   getRecords(): HandwritingRecognitionRecord[] {
-    return Array.from(this.records.values());
+    return this.snapshot;
   }
 
   getRecord(ragElementId: string): HandwritingRecognitionRecord | undefined {
