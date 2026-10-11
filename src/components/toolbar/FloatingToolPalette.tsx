@@ -19,7 +19,8 @@ import { ToolButton } from './ToolButton';
 import { ShapesPopover } from './ShapesPopover';
 
 const HIDE_DELAY_MS = 280;
-const EDGE_ZONE_PX = 18;
+/** Wider hit target so the dock is easy to re-open from the left edge. */
+const EDGE_ZONE_PX = 28;
 
 interface FloatingToolPaletteProps {
   fileInputRef: RefObject<HTMLInputElement | null>;
