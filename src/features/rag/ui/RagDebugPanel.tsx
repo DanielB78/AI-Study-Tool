@@ -24,7 +24,6 @@ import {
   handwritingRecognitionController,
   resolveHandwritingRecognition,
   stableHandwritingRegionId,
-  type HandwritingRecognitionRecord,
 } from '../handwritingSync';
 import type { SemanticTreeNode } from '../semanticExpansion';
 
@@ -166,6 +165,7 @@ export function RagDebugPanel() {
   const pastedResponse = useRagDebugStore((s) => s.pastedResponse);
   const pendingPlan = useRagDebugStore((s) => s.pendingPlan);
   const pendingOperations = useRagDebugStore((s) => s.pendingOperations);
+  const layoutDebug = useRagDebugStore((s) => s.layoutDebug);
   const parseError = useRagDebugStore((s) => s.parseError);
   const llmExecutionMode = useRagDebugStore((s) => s.llmExecutionMode);
   const lastQueryChunks = useRagDebugStore((s) => s.lastQueryChunks);
@@ -1825,6 +1825,37 @@ export function RagDebugPanel() {
               <section className="rag-debug-section">
                 <div className="rag-debug-section-title">AI plan</div>
                 <pre className="rag-debug-plan">{pendingPlan.join('\n\n')}</pre>
+                {layoutDebug && (
+                  <>
+                    <div className="rag-debug-section-title">Grid placement debug</div>
+                    <pre className="rag-debug-plan">
+                      {[
+                        `Columns: ${layoutDebug.columns}  Rows: ${layoutDebug.rows}`,
+                        `Column widths: ${layoutDebug.columnWidths.map((w) => w.toFixed(0)).join(', ')}`,
+                        `Row heights: ${layoutDebug.rowHeights.map((h) => h.toFixed(0)).join(', ')}`,
+                        `Local bounds: ${layoutDebug.localBounds.width.toFixed(0)}×${layoutDebug.localBounds.height.toFixed(0)}`,
+                        `Preferred origin: (${layoutDebug.preferredOrigin.x.toFixed(0)}, ${layoutDebug.preferredOrigin.y.toFixed(0)})`,
+                        `Final origin: ${
+                          layoutDebug.finalOrigin
+                            ? `(${layoutDebug.finalOrigin.x.toFixed(0)}, ${layoutDebug.finalOrigin.y.toFixed(0)})`
+                            : '(none)'
+                        }`,
+                        `Candidates tested: ${layoutDebug.candidatesTested}`,
+                        `Collided at preferred: ${layoutDebug.collidedAtPreferred}`,
+                        `Collision-free: ${layoutDebug.collisionFree}`,
+                        `Obstacles: ${layoutDebug.obstacleCount}`,
+                        ...layoutDebug.items.map(
+                          (it) =>
+                            `  ${it.ref}: r${it.row}c${it.column} span${it.columnSpan} → ${it.width.toFixed(0)}×${it.height.toFixed(0)} @ (${it.localX.toFixed(0)}, ${it.localY.toFixed(0)})`,
+                        ),
+                        ...(layoutDebug.diagnostics.length
+                          ? ['Diagnostics:', ...layoutDebug.diagnostics.map((d) => `  ${d}`)]
+                          : []),
+                        ...(layoutDebug.error ? [`Error: ${layoutDebug.error}`] : []),
+                      ].join('\n')}
+                    </pre>
+                  </>
+                )}
                 {pendingOperations && (
                   <>
                     <div className="rag-debug-section-title">Raw JSON</div>

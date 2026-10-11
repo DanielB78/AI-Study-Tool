@@ -6,7 +6,7 @@ import { useCanvasStore } from '../../../store/canvasStore';
 import { useStructureStore } from '../../structures/structureStore';
 import type { AgentExecutorTarget } from './executor';
 import { executeCanvasOperations } from './executor';
-import type { CanvasOperation } from './operations';
+import type { CanvasAgentResponse, CanvasOperation } from './operations';
 import { getDefaultViewportSize } from '../canvas/placement';
 
 export function createLiveAgentExecutorTarget(): AgentExecutorTarget {
@@ -27,6 +27,8 @@ export function createLiveAgentExecutorTarget(): AgentExecutorTarget {
   };
 }
 
-export function executeAgentOperationsLive(operations: readonly CanvasOperation[]) {
-  return executeCanvasOperations(operations, createLiveAgentExecutorTarget());
+export function executeAgentOperationsLive(
+  plan: readonly CanvasOperation[] | CanvasAgentResponse,
+) {
+  return executeCanvasOperations(plan, createLiveAgentExecutorTarget());
 }

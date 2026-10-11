@@ -82,13 +82,15 @@ describe('parseCanvasAgentResponse', () => {
     expect(() => parseCanvasAgentResponse('not json', ctx)).toThrow(/valid JSON/i);
   });
 
-  it('rejects missing required property', () => {
-    expect(() =>
-      parseCanvasAgentResponse(
-        JSON.stringify({ operations: [{ type: 'create_text', text: 'hi' }] }),
-        ctx,
-      ),
-    ).toThrow(/placement/i);
+  it('defaults omitted placement to viewport_default', () => {
+    const res = parseCanvasAgentResponse(
+      JSON.stringify({ operations: [{ type: 'create_text', text: 'hi' }] }),
+      ctx,
+    );
+    expect(res.operations[0]).toMatchObject({
+      type: 'create_text',
+      placement: { mode: 'viewport_default' },
+    });
   });
 
   it('rejects invented target ID', () => {

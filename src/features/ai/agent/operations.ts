@@ -23,10 +23,43 @@ export type AbsolutePlacement = {
 
 export type Placement = ViewportDefaultPlacement | RelativePlacement | AbsolutePlacement;
 
+/** Temporary plan reference for grid layout items (not a CanvasElement id). */
+export type OperationRef = string;
+
+export type GridLayoutItemSpec = {
+  ref: OperationRef;
+  row: number;
+  column: number;
+  /** Defaults to 1. Must not exceed grid width. */
+  column_span?: number;
+};
+
+/**
+ * Multi-element grid layout. The LLM assigns cells; the app computes geometry.
+ * `placement` positions the whole group (not individual items).
+ */
+export type GridLayoutSpec = {
+  type: 'grid';
+  /** 1–4 columns */
+  columns: number;
+  placement: Placement;
+  items: GridLayoutItemSpec[];
+};
+
 export type CreateTextOperation = {
   type: 'create_text';
   text: string;
+  /** Omitted when assigned via layout.items — parser defaults to viewport_default. */
   placement: Placement;
+  /** Temporary ref for layout.items */
+  ref?: OperationRef;
+};
+
+export type CreateEquationOperation = {
+  type: 'create_equation';
+  latex: string;
+  placement: Placement;
+  ref?: OperationRef;
 };
 
 export type UpdateTextOperation = {
@@ -68,6 +101,7 @@ export type CreateStructuredNoteOperation = {
   /** field_id → payload; optional fields may be omitted or null */
   fields: Record<string, StructuredFieldPayload>;
   placement: Placement;
+  ref?: OperationRef;
 };
 
 /** One curve on a newly created GraphElement (canonical GraphMathSyntax). */
@@ -113,6 +147,7 @@ export type CreateGraphOperation = {
   viewport: CreateGraphViewportSpec;
   settings: CreateGraphSettingsSpec;
   placement: Placement;
+  ref?: OperationRef;
 };
 
 export type AddGraphExpressionOperation = {
@@ -194,6 +229,7 @@ export type RemoveGraphPointOperation = {
 
 export type CanvasOperation =
   | CreateTextOperation
+  | CreateEquationOperation
   | UpdateTextOperation
   | CreateStructuredNoteOperation
   | CreateGraphOperation
@@ -209,6 +245,8 @@ export type CanvasOperation =
 
 export type CanvasAgentResponse = {
   operations: CanvasOperation[];
+  /** Required when creating multiple related objects with viewport_default. */
+  layout?: GridLayoutSpec;
 };
 
 export const PLACEMENT_RELATIONS: readonly PlacementRelation[] = [
@@ -227,6 +265,7 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
   additionalProperties: false,
   required: ['operations'],
   properties: {
+    layout: { $ref: '#/$defs/gridLayout' },
     operations: {
       type: 'array',
       minItems: 1,
@@ -235,10 +274,22 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
           {
             type: 'object',
             additionalProperties: false,
-            required: ['type', 'text', 'placement'],
+            required: ['type', 'text'],
             properties: {
               type: { const: 'create_text' },
               text: { type: 'string', minLength: 1 },
+              ref: { type: 'string', minLength: 1 },
+              placement: { $ref: '#/$defs/placement' },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'latex'],
+            properties: {
+              type: { const: 'create_equation' },
+              latex: { type: 'string', minLength: 1 },
+              ref: { type: 'string', minLength: 1 },
               placement: { $ref: '#/$defs/placement' },
             },
           },
@@ -255,10 +306,11 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
           {
             type: 'object',
             additionalProperties: false,
-            required: ['type', 'structure_id', 'fields', 'placement'],
+            required: ['type', 'structure_id', 'fields'],
             properties: {
               type: { const: 'create_structured_note' },
               structure_id: { type: 'string', minLength: 1 },
+              ref: { type: 'string', minLength: 1 },
               fields: {
                 type: 'object',
                 additionalProperties: {
@@ -299,7 +351,6 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               'points',
               'viewport',
               'settings',
-              'placement',
             ],
             properties: {
               type: { const: 'create_graph' },
@@ -313,6 +364,7 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               },
               viewport: { $ref: '#/$defs/graphViewport' },
               settings: { $ref: '#/$defs/graphSettings' },
+              ref: { type: 'string', minLength: 1 },
               placement: { $ref: '#/$defs/placement' },
             },
           },
@@ -520,6 +572,31 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
         },
       ],
     },
+    gridLayout: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['type', 'columns', 'placement', 'items'],
+      properties: {
+        type: { const: 'grid' },
+        columns: { type: 'integer', minimum: 1, maximum: 4 },
+        placement: { $ref: '#/$defs/placement' },
+        items: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['ref', 'row', 'column'],
+            properties: {
+              ref: { type: 'string', minLength: 1 },
+              row: { type: 'integer', minimum: 0 },
+              column: { type: 'integer', minimum: 0 },
+              column_span: { type: 'integer', minimum: 1, maximum: 4 },
+            },
+          },
+        },
+      },
+    },
   },
 } as const;
 
@@ -529,17 +606,27 @@ Return ONLY valid JSON (no Markdown, no code fences, no prose).
 
 Shape:
 {
-  "operations": [ /* one or more */ ]
+  "operations": [ /* one or more */ ],
+  "layout": { /* REQUIRED when creating 2+ related objects — see GRID LAYOUT */ }
 }
 
 create_text:
 {
   "type": "create_text",
+  "ref": "<temp id for layout — required when using layout>",
   "text": "<non-empty string>",
-  "placement":
+  "placement":  /* omit when item is in layout.items */
     { "mode": "viewport_default" }
     | { "mode": "relative_to_element", "anchor_element_id": "<id from context>", "relation": "left_of"|"right_of"|"above"|"below"|"near" }
     | { "mode": "absolute", "x": <number>, "y": <number> }
+}
+
+create_equation:
+{
+  "type": "create_equation",
+  "ref": "<temp id for layout>",
+  "latex": "<LaTeX body without surrounding $$>",
+  "placement": /* omit when in layout.items */
 }
 
 update_text:
@@ -552,6 +639,7 @@ update_text:
 create_structured_note (ONLY when a note structure is selected):
 {
   "type": "create_structured_note",
+  "ref": "<temp id for layout>",
   "structure_id": "<exact selected structure id>",
   "fields": {
     "<field_id>": { "content": "<text for TEXT fields>" }
@@ -559,12 +647,13 @@ create_structured_note (ONLY when a note structure is selected):
       | { "root": { "content": "...", "children": [ /* recursive */ ] } }
       | null
   },
-  "placement": { "mode": "viewport_default" } | ...
+  "placement": /* omit when in layout.items */
 }
 
 create_graph (new interactive GraphElement):
 {
   "type": "create_graph",
+  "ref": "<temp id for layout>",
   "expressions": [
     { "expression": "x**2", "visible": true, "domain_min": null, "domain_max": null }
   ],
@@ -574,8 +663,28 @@ create_graph (new interactive GraphElement):
     "title": null, "x_axis_label": null, "y_axis_label": null,
     "show_grid": true, "show_x_axis": true, "show_y_axis": true
   },
-  "placement": { "mode": "viewport_default" } | ...
+  "placement": /* omit when in layout.items */
 }
+
+GRID LAYOUT (mandatory for 2+ related creates that would otherwise all use viewport_default):
+{
+  "layout": {
+    "type": "grid",
+    "columns": 1|2|3|4,
+    "placement": { "mode": "viewport_default" } | relative | absolute,
+    "items": [
+      { "ref": "<matches operation.ref>", "row": 0, "column": 0, "column_span": 2 }
+    ]
+  }
+}
+Rules for layout:
+- Assign every created item (create_text / create_equation / create_graph / create_structured_note) to exactly one cell via ref.
+- Zero-based row/column. column_span defaults to 1; must not exceed columns.
+- No two items may occupy the same cell. No nested grids. No row spanning. No per-item x/y.
+- The application measures sizes, computes positions, avoids overlaps, and places the WHOLE grid.
+- Do NOT put viewport_default on every child to bypass the grid.
+- Single independent create may omit layout and use placement as before.
+- Explicit relative_to_element / absolute on a single create remains valid without a grid.
 
 GRAPH EDITING (only for GraphElements supplied in context — explicit selection or spatial neighbour; graphs are NOT semantically retrieved):
 - add_graph_expression: { "type":"add_graph_expression", "graph_id":"<id>", "expression":{ "expression":"x**3", "visible":true, "domain_min":null, "domain_max":null } }
@@ -607,11 +716,13 @@ NODE_SECTION fields:
 
 Rules:
 - Never invent element IDs, node IDs, connector IDs, structure IDs, graph expression IDs, or point IDs.
-- Prefer relative_to_element over absolute for "next to / below / above / left / right".
-- Prefer viewport_default when the user gives no location.
+- Prefer relative_to_element over absolute for "next to / below / above / left / right" of ONE object.
+- Prefer a grid layout (layout.placement viewport_default) when creating multiple related objects with no location.
+- Never invent world coordinates to avoid overlaps — the application guarantees geometric validity.
 - When a structure is selected and the user asks for new structured content, use create_structured_note — do NOT recreate the layout with create_text/create_equation/create_connector.
 - Omit or null optional structure fields when there is no meaningful content.
 - Use create_graph when the user asks to create a new graph/plot.
+- Use create_equation for standalone LaTeX (not for graphing).
 - Edit existing graphs only when that graph_id appears in supplied context (selection or spatial).
 - Put multiple new curves in ONE create_graph unless the user asks for separate graphs.
 - Defaults for create_graph: viewport ±10, show_grid/axes true, empty title/labels.

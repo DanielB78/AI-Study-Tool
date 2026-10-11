@@ -28,10 +28,19 @@ export interface ParsedAgentPlan {
   plan: string[];
 }
 
-function planOptionsFromContext(ctx: ParseContext): DescribePlanOptions | undefined {
+function planOptionsFromContext(
+  ctx: ParseContext,
+  response?: { layout?: CanvasAgentResponse['layout'] },
+): DescribePlanOptions | undefined {
   const structure = ctx.selectedStructure;
-  if (!structure) return undefined;
+  const base: DescribePlanOptions = {
+    layout: response?.layout,
+  };
+  if (!structure) {
+    return response?.layout ? base : undefined;
+  }
   return {
+    ...base,
     structureNames: new Map([[structure.id, structure.name]]),
     structureFieldLabels: new Map([
       [structure.id, new Map(structure.fields.map((f) => [f.id, f.label]))],
@@ -49,17 +58,21 @@ export function parseAgentResponsePlan(
   const response = parseCanvasAgentResponse(raw, ctx);
   return {
     response,
-    plan: describeOperationPlan(response.operations, planOptionsFromContext(ctx)),
+    plan: describeOperationPlan(
+      response.operations,
+      planOptionsFromContext(ctx, response),
+    ),
   };
 }
 
 /**
  * Validate then execute operations atomically via the editor store.
+ * Accepts a full response (preferred — includes layout) or a bare ops list.
  */
 export function applyAgentOperations(
-  operations: readonly CanvasOperation[],
+  plan: CanvasAgentResponse | readonly CanvasOperation[],
 ): ExecuteAgentOpsResult {
-  return executeAgentOperationsLive(operations);
+  return executeAgentOperationsLive(plan);
 }
 
 /**
@@ -70,8 +83,11 @@ export function handleAgentResponse(
   ctx: ParseContext,
 ): HandleAgentResponseResult {
   const response = parseCanvasAgentResponse(raw, ctx);
-  const plan = describeOperationPlan(response.operations, planOptionsFromContext(ctx));
-  const execution = applyAgentOperations(response.operations);
+  const plan = describeOperationPlan(
+    response.operations,
+    planOptionsFromContext(ctx, response),
+  );
+  const execution = applyAgentOperations(response);
   return { kind: 'operations', response, plan, execution };
 }
 

@@ -9,6 +9,7 @@ import {
   type AbsolutePlacement,
   type CanvasAgentResponse,
   type CanvasOperation,
+  type CreateEquationOperation,
   type CreateGraphExpressionSpec,
   type CreateGraphOperation,
   type CreateGraphPointSpec,
@@ -16,6 +17,7 @@ import {
   type CreateGraphViewportSpec,
   type CreateStructuredNoteOperation,
   type CreateTextOperation,
+  type GridLayoutSpec,
   type Placement,
   type PlacementRelation,
   type RelativePlacement,
@@ -23,6 +25,8 @@ import {
   type StructuredHierarchyNode,
   type UpdateTextOperation,
 } from './operations';
+import { CanvasAgentParseError, type ParseErrorCode } from './parseErrors';
+import { parseGridLayout, validateLayoutAgainstOperations } from './layoutValidate';
 import {
   countHierarchyNodes,
   formatHierarchyTreePreview,
@@ -31,7 +35,7 @@ import {
 } from '../../structures/hierarchy';
 import type { NoteStructure } from '../../structures/types';
 import { isNodeSection, isStructureField } from '../../structures/types';
-import { validateLatex } from '../../equations/latex';
+import { sanitizeLatexSource, validateLatex } from '../../equations/latex';
 import { encodeGraphExpression } from '../../graphs/expressionCodec';
 import {
   DEFAULT_GRAPH_SETTINGS,
@@ -46,47 +50,8 @@ import {
   type GraphEditOperation,
 } from './graphOperations';
 
-export type ParseErrorCode =
-  | 'empty'
-  | 'invalid_json'
-  | 'schema'
-  | 'unknown_operation'
-  | 'empty_text'
-  | 'missing_target'
-  | 'target_not_in_context'
-  | 'target_not_text'
-  | 'missing_anchor'
-  | 'anchor_not_in_context'
-  | 'invalid_relation'
-  | 'invalid_coordinates'
-  | 'structure_not_selected'
-  | 'structure_mismatch'
-  | 'unknown_structure_field'
-  | 'missing_required_field'
-  | 'invalid_field_payload'
-  | 'invalid_latex'
-  | 'hierarchy_too_deep'
-  | 'hierarchy_too_large'
-  | 'hierarchy_too_many_children'
-  | 'invalid_graph_expression'
-  | 'invalid_graph_viewport'
-  | 'invalid_graph_domain'
-  | 'empty_graph_content'
-  | 'target_not_graph'
-  | 'expression_not_on_graph'
-  | 'point_not_on_graph';
-
-export class CanvasAgentParseError extends Error {
-  readonly code: ParseErrorCode;
-  readonly detail?: string;
-
-  constructor(code: ParseErrorCode, message: string, detail?: string) {
-    super(message);
-    this.name = 'CanvasAgentParseError';
-    this.code = code;
-    this.detail = detail;
-  }
-}
+export type { ParseErrorCode };
+export { CanvasAgentParseError };
 
 export interface ParseContext {
   /** Element IDs included in the RAG context sent to the model. */
@@ -121,6 +86,22 @@ function requireNonEmptyString(v: unknown, field: string): string {
     throw new CanvasAgentParseError('empty_text', `${field} must be a non-empty string.`);
   }
   return v;
+}
+
+function parseOptionalRef(raw: Record<string, unknown>): string | undefined {
+  if (raw.ref === undefined || raw.ref === null) return undefined;
+  if (typeof raw.ref !== 'string' || !raw.ref.trim()) {
+    throw new CanvasAgentParseError('schema', 'ref must be a non-empty string when provided.');
+  }
+  return raw.ref.trim();
+}
+
+/** Placement is optional on creates assigned to a grid; default viewport_default. */
+function parsePlacementOptional(raw: unknown): Placement {
+  if (raw === undefined || raw === null) {
+    return { mode: 'viewport_default' };
+  }
+  return parsePlacement(raw);
 }
 
 function parsePlacement(raw: unknown): Placement {
@@ -224,12 +205,14 @@ function parseStructuredNote(raw: Record<string, unknown>): CreateStructuredNote
   for (const [fieldId, payload] of Object.entries(raw.fields)) {
     fields[fieldId] = parseFieldPayload(payload, fieldId);
   }
-  const placement = parsePlacement(raw.placement);
+  const placement = parsePlacementOptional(raw.placement);
+  const ref = parseOptionalRef(raw);
   return {
     type: 'create_structured_note',
     structure_id: structureId.trim(),
     fields,
     placement,
+    ...(ref ? { ref } : {}),
   };
 }
 
@@ -422,7 +405,8 @@ function parseCreateGraph(raw: Record<string, unknown>): CreateGraphOperation {
 
   const viewport = parseGraphViewport(raw.viewport);
   const settings = parseGraphSettings(raw.settings);
-  const placement = parsePlacement(raw.placement);
+  const placement = parsePlacementOptional(raw.placement);
+  const ref = parseOptionalRef(raw);
 
   return {
     type: 'create_graph',
@@ -431,6 +415,26 @@ function parseCreateGraph(raw: Record<string, unknown>): CreateGraphOperation {
     viewport,
     settings,
     placement,
+    ...(ref ? { ref } : {}),
+  };
+}
+
+function parseCreateEquation(raw: Record<string, unknown>): CreateEquationOperation {
+  const latex = requireNonEmptyString(raw.latex, 'create_equation.latex');
+  const validated = validateLatex(latex);
+  if (!validated.ok) {
+    throw new CanvasAgentParseError(
+      'invalid_latex',
+      `create_equation latex is invalid: ${validated.error ?? 'unknown error'}`,
+    );
+  }
+  const placement = parsePlacementOptional(raw.placement);
+  const ref = parseOptionalRef(raw);
+  return {
+    type: 'create_equation',
+    latex: sanitizeLatexSource(latex),
+    placement,
+    ...(ref ? { ref } : {}),
   };
 }
 
@@ -440,8 +444,17 @@ function parseOperation(raw: unknown): CanvasOperation {
   }
   if (raw.type === 'create_text') {
     const text = requireNonEmptyString(raw.text, 'create_text.text');
-    const placement = parsePlacement(raw.placement);
-    return { type: 'create_text', text, placement } satisfies CreateTextOperation;
+    const placement = parsePlacementOptional(raw.placement);
+    const ref = parseOptionalRef(raw);
+    return {
+      type: 'create_text',
+      text,
+      placement,
+      ...(ref ? { ref } : {}),
+    } satisfies CreateTextOperation;
+  }
+  if (raw.type === 'create_equation') {
+    return parseCreateEquation(raw);
   }
   if (raw.type === 'update_text') {
     const target = raw.target_element_id;
@@ -707,10 +720,7 @@ function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
       );
     }
   }
-  if (op.type === 'create_text') {
-    validateRelativePlacement(op.placement, ctx);
-  }
-  if (op.type === 'create_graph') {
+  if (op.type === 'create_text' || op.type === 'create_equation' || op.type === 'create_graph') {
     validateRelativePlacement(op.placement, ctx);
   }
   if (op.type === 'create_structured_note') {
@@ -762,7 +772,14 @@ export function parseCanvasAgentResponse(
     operations.push(op);
   }
 
-  return { operations };
+  let layout: GridLayoutSpec | undefined;
+  if (parsed.layout !== undefined && parsed.layout !== null) {
+    layout = parseGridLayout(parsed.layout, parsePlacement);
+    validateRelativePlacement(layout.placement, ctx);
+  }
+  validateLayoutAgainstOperations(layout, operations);
+
+  return layout ? { operations, layout } : { operations };
 }
 
 export interface DescribePlanOptions {
@@ -770,6 +787,8 @@ export interface DescribePlanOptions {
   structureNames?: ReadonlyMap<string, string>;
   /** structure_id → fieldId → label */
   structureFieldLabels?: ReadonlyMap<string, ReadonlyMap<string, string>>;
+  /** Grid layout from the parsed response */
+  layout?: GridLayoutSpec;
 }
 
 function formatPlacementLine(p: Placement, style: 'short' | 'friendly' = 'short'): string {
@@ -798,7 +817,7 @@ export function describeOperationPlan(
   ops: readonly CanvasOperation[],
   options?: DescribePlanOptions,
 ): string[] {
-  return ops.map((op, i) => {
+  const lines = ops.map((op, i) => {
     const n = i + 1;
     if (op.type === 'update_text') {
       const preview = op.text.replace(/\s+/g, ' ').slice(0, 80);
@@ -885,73 +904,103 @@ export function describeOperationPlan(
       ].join('\n');
     }
     if (isGraphEditOperationType(op.type)) {
-      const lines = [`${n}. EDIT GRAPH`, `   Graph: ${op.graph_id}`];
-      switch (op.type) {
+      const edit = op as GraphEditOperation;
+      const lines = [`${n}. EDIT GRAPH`, `   Graph: ${edit.graph_id}`];
+      switch (edit.type) {
         case 'add_graph_expression':
           lines.push(`   ADD CURVE`);
-          lines.push(`   y = ${prettyCurve(op.expression.expression)}`);
+          lines.push(`   y = ${prettyCurve(edit.expression.expression)}`);
           break;
         case 'update_graph_expression':
-          lines.push(`   UPDATE CURVE ${op.expression_id}`);
-          if (op.expression) lines.push(`   y = ${prettyCurve(op.expression)}`);
-          if ('domain_min' in op || 'domain_max' in op) {
+          lines.push(`   UPDATE CURVE ${edit.expression_id}`);
+          if (edit.expression) lines.push(`   y = ${prettyCurve(edit.expression)}`);
+          if ('domain_min' in edit || 'domain_max' in edit) {
             lines.push(
-              `   Domain: ${op.domain_min ?? '…'} → ${op.domain_max ?? '…'}`,
+              `   Domain: ${edit.domain_min ?? '…'} → ${edit.domain_max ?? '…'}`,
             );
           }
           break;
         case 'remove_graph_expression':
-          lines.push(`   REMOVE CURVE ${op.expression_id}`);
+          lines.push(`   REMOVE CURVE ${edit.expression_id}`);
           break;
         case 'set_graph_expression_visibility':
           lines.push(
-            `   ${op.visible ? 'SHOW' : 'HIDE'} CURVE ${op.expression_id}`,
+            `   ${edit.visible ? 'SHOW' : 'HIDE'} CURVE ${edit.expression_id}`,
           );
           break;
         case 'update_graph_viewport': {
           lines.push('   CHANGE VIEWPORT');
-          if ('x_min' in op || 'x_max' in op) {
-            lines.push(`   X: ${op.x_min ?? '…'} → ${op.x_max ?? '…'}`);
+          if ('x_min' in edit || 'x_max' in edit) {
+            lines.push(`   X: ${edit.x_min ?? '…'} → ${edit.x_max ?? '…'}`);
           }
-          if ('y_min' in op || 'y_max' in op) {
-            lines.push(`   Y: ${op.y_min ?? '…'} → ${op.y_max ?? '…'}`);
+          if ('y_min' in edit || 'y_max' in edit) {
+            lines.push(`   Y: ${edit.y_min ?? '…'} → ${edit.y_max ?? '…'}`);
           }
           break;
         }
         case 'update_graph_settings': {
           lines.push('   UPDATE SETTINGS');
-          if ('title' in op) lines.push(`   Title: ${op.title ?? '(none)'}`);
-          if ('show_grid' in op) {
-            lines.push(`   Grid: ${op.show_grid ? 'On' : 'Off'}`);
+          if ('title' in edit) lines.push(`   Title: ${edit.title ?? '(none)'}`);
+          if ('show_grid' in edit) {
+            lines.push(`   Grid: ${edit.show_grid ? 'On' : 'Off'}`);
           }
-          if ('x_axis_label' in op) {
-            lines.push(`   X label: ${op.x_axis_label ?? '(none)'}`);
+          if ('x_axis_label' in edit) {
+            lines.push(`   X label: ${edit.x_axis_label ?? '(none)'}`);
           }
-          if ('y_axis_label' in op) {
-            lines.push(`   Y label: ${op.y_axis_label ?? '(none)'}`);
+          if ('y_axis_label' in edit) {
+            lines.push(`   Y label: ${edit.y_axis_label ?? '(none)'}`);
           }
           break;
         }
         case 'add_graph_point':
           lines.push(
-            `   ADD POINT (${op.x}, ${op.y})${op.label ? ` ${op.label}` : ''}`,
+            `   ADD POINT (${edit.x}, ${edit.y})${edit.label ? ` ${edit.label}` : ''}`,
           );
           break;
         case 'update_graph_point':
-          lines.push(`   UPDATE POINT ${op.point_id}`);
+          lines.push(`   UPDATE POINT ${edit.point_id}`);
           break;
         case 'remove_graph_point':
-          lines.push(`   REMOVE POINT ${op.point_id}`);
+          lines.push(`   REMOVE POINT ${edit.point_id}`);
           break;
         default:
           break;
       }
       return lines.join('\n');
     }
-    const placementLine = formatPlacementLine(op.placement, 'short');
-    const preview = op.text.replace(/\s+/g, ' ').slice(0, 80);
-    return `${n}. CREATE TEXT\n   Placement: ${placementLine}\n   Text: ${preview}${op.text.length > 80 ? '…' : ''}`;
+    if (op.type === 'create_equation') {
+      const placementLine = formatPlacementLine(op.placement, 'short');
+      const refLine = op.ref ? `\n   Ref: ${op.ref}` : '';
+      return `${n}. CREATE EQUATION${refLine}\n   Placement: ${placementLine}\n   LaTeX: ${op.latex}`;
+    }
+    if (op.type === 'create_text') {
+      const placementLine = formatPlacementLine(op.placement, 'short');
+      const preview = op.text.replace(/\s+/g, ' ').slice(0, 80);
+      const refLine = op.ref ? `\n   Ref: ${op.ref}` : '';
+      return `${n}. CREATE TEXT${refLine}\n   Placement: ${placementLine}\n   Text: ${preview}${op.text.length > 80 ? '…' : ''}`;
+    }
+    return `${n}. UNKNOWN OPERATION`;
   });
+
+  if (options?.layout) {
+    const L = options.layout;
+    const itemLines = L.items.map(
+      (it) =>
+        `   ${it.ref} → row ${it.row}, col ${it.column}` +
+        (it.column_span && it.column_span > 1 ? ` (span ${it.column_span})` : ''),
+    );
+    lines.unshift(
+      [
+        'GRID LAYOUT',
+        `   Columns: ${L.columns}`,
+        `   Group placement: ${formatPlacementLine(L.placement, 'short')}`,
+        '   Cells:',
+        ...itemLines,
+      ].join('\n'),
+    );
+  }
+
+  return lines;
 }
 
 export { CANVAS_AGENT_JSON_SCHEMA };
