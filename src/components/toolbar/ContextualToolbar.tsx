@@ -64,6 +64,13 @@ export function ContextualToolbar() {
     activeTool === 'arrow' ||
     selected.some((el) => el.type === 'connector' && el.connectorType === 'arrow');
 
+  // Hooks must run unconditionally — create_text / apply selects content and
+  // would otherwise add these after an early return (Rules of Hooks crash).
+  const openGraphEditor = useGraphUiStore((s) => s.openEditor);
+  const enterInteract = useGraphUiStore((s) => s.enterInteract);
+  const interactingGraphId = useGraphUiStore((s) => s.interactingGraphId);
+  const exitInteract = useGraphUiStore((s) => s.exitInteract);
+
   if (!mode && !hasSelection) return null;
 
   const onLive = (partial: Parameters<typeof setStyle>[0]) => {
@@ -122,10 +129,6 @@ export function ContextualToolbar() {
   };
 
   const graph = selected.find((el) => el.type === 'graph');
-  const openGraphEditor = useGraphUiStore((s) => s.openEditor);
-  const enterInteract = useGraphUiStore((s) => s.enterInteract);
-  const interactingGraphId = useGraphUiStore((s) => s.interactingGraphId);
-  const exitInteract = useGraphUiStore((s) => s.exitInteract);
 
   const resetGraphView = () => {
     if (!graph || graph.type !== 'graph') return;
