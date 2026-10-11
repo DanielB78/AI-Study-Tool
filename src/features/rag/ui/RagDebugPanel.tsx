@@ -1846,10 +1846,16 @@ export function RagDebugPanel() {
                         `Collided at preferred: ${layoutDebug.collidedAtPreferred}`,
                         `Collision-free: ${layoutDebug.collisionFree}`,
                         `Obstacles: ${layoutDebug.obstacleCount}`,
-                        ...layoutDebug.items.map(
-                          (it) =>
-                            `  ${it.ref}: r${it.row}c${it.column} span${it.columnSpan} → ${it.width.toFixed(0)}×${it.height.toFixed(0)} @ (${it.localX.toFixed(0)}, ${it.localY.toFixed(0)})`,
-                        ),
+                        ...layoutDebug.items.map((it) => {
+                          const base = `  ${it.ref}: r${it.row}c${it.column} span${it.columnSpan} → ${it.width.toFixed(0)}×${it.height.toFixed(0)} @ (${it.localX.toFixed(0)}, ${it.localY.toFixed(0)})`;
+                          const tas = it.textAutoSize;
+                          if (!tas) return base;
+                          return [
+                            base,
+                            `    autoSize: content ${tas.contentWidth.toFixed(0)}×${tas.contentHeight.toFixed(0)} → box ${tas.finalWidth.toFixed(0)}×${tas.finalHeight.toFixed(0)} pad=${tas.padding}`,
+                            `    lines=${tas.wrappedLines ?? '—'} dom=${tas.measuredWithDom} rowExpanded=${tas.rowExpanded} reflow=${tas.reflowChanged}`,
+                          ].join('\n');
+                        }),
                         ...(layoutDebug.diagnostics.length
                           ? ['Diagnostics:', ...layoutDebug.diagnostics.map((d) => `  ${d}`)]
                           : []),

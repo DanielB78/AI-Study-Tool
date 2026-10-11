@@ -1,8 +1,7 @@
 import type { CanvasElement, StyleDefaults, TextElement } from '../../../types/canvas';
 import type { Camera } from '../../../types/canvas';
-import { createAiTextElement } from './createAiTextElement';
+import { createAiTextElement, measureAiTextSize } from './createAiTextElement';
 import {
-  AI_TEXT_DEFAULT_WIDTH,
   getDefaultViewportSize,
   placeAiTextRect,
   type ViewportSize,
@@ -42,31 +41,25 @@ export function insertAiTextResponse(
   const elements = target.getElements();
   const style = target.getStyle();
   const viewport = target.getViewportSize?.() ?? getDefaultViewportSize();
-  const width = AI_TEXT_DEFAULT_WIDTH;
   const zIndex = target.nextZIndex();
-
-  // Probe height with a temporary origin; placement uses the measured size.
-  const probe = createAiTextElement(trimmed, { x: 0, y: 0 }, {
-    zIndex,
-    style,
-    width,
-  });
+  const sized = measureAiTextSize(trimmed, { style });
 
   const placed = placeAiTextRect({
     camera,
     viewport,
     elements,
-    width: probe.width,
-    height: probe.height,
+    width: sized.width,
+    height: sized.height,
   });
 
   const element = createAiTextElement(trimmed, { x: placed.x, y: placed.y }, {
     zIndex,
     style,
-    width,
+    width: sized.width,
+    autoSize: true,
+    metadata: { source: 'chat', autoSize: true },
   });
-  // Keep height from estimate (createAiTextElement recalculates identically).
-  element.height = probe.height;
+  element.height = sized.height;
 
   target.addElement(element, true);
   target.afterInsert?.(element);

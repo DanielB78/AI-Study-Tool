@@ -3,8 +3,12 @@
  */
 
 import type { StyleDefaults } from '../../../../types/canvas';
-import { estimateContentHeight } from '../../canvas/createAiTextElement';
 import type { RichTextDocument } from '../../../text/richText';
+import {
+  TextElementAutoSizer,
+  TEXT_AUTO_SIZE_WIDTH_DEFAULTS,
+  type TextMeasureResult,
+} from '../../../text/textAutoSizer';
 import { measureEquationSize } from '../../../equations/latex';
 import { EQUATION_DEFAULT_FONT_SIZE } from '../../../equations/latex';
 import {
@@ -21,43 +25,77 @@ import type {
   CreateTextOperation,
 } from '../operations';
 import { GRID_LAYOUT_CONFIG } from './gridConfig';
-import type { MeasuredLayoutItem } from './types';
+import type { MeasuredLayoutItem, TextAutoSizeDebug } from './types';
 
 export type MeasureContext = {
   style: StyleDefaults;
   getStructureById?: (id: string) => NoteStructure | null;
 };
 
-function measureTextItem(op: CreateTextOperation, style: StyleDefaults): MeasuredLayoutItem {
+export type MeasuredTextLayoutItem = MeasuredLayoutItem & {
+  textAutoSize?: TextAutoSizeDebug;
+  /** Last measure snapshot at preferred width (for debug). */
+  initialMeasure?: TextMeasureResult;
+};
+
+function textStyle(style: StyleDefaults, padding: number) {
+  return {
+    fontSize: style.fontSize,
+    fontFamily: style.fontFamily,
+    fontWeight: style.fontWeight,
+    fontItalic: style.fontItalic,
+    underline: style.underline,
+    lineHeight: style.lineHeight,
+    color: style.textColor,
+    padding,
+  };
+}
+
+function measureTextItem(op: CreateTextOperation, style: StyleDefaults): MeasuredTextLayoutItem {
   const cfg = GRID_LAYOUT_CONFIG;
   const padding = Math.max(style.textPadding, 12);
-  const preferredWidth = Math.min(
-    Math.max(cfg.defaultTextWidth, cfg.minTextWidth),
-    cfg.maxTextWidth,
-  );
   const richText = op.rich_text as RichTextDocument | undefined;
+  const content = { text: op.text, richText };
+  const styleCfg = textStyle(style, padding);
+  const limits = {
+    minWidth: cfg.minTextWidth,
+    maxWidth: cfg.maxTextWidth,
+    defaultWidth: cfg.defaultTextWidth,
+    compactMinWidth: TEXT_AUTO_SIZE_WIDTH_DEFAULTS.compactMinWidth,
+  };
+
+  const initial = TextElementAutoSizer.measure({
+    content,
+    style: styleCfg,
+    limits,
+    autoSized: true,
+  });
+
   const measureHeightAtWidth = (contentWidth: number) =>
-    estimateContentHeight(
-      op.text,
-      contentWidth,
-      {
-        fontSize: style.fontSize,
-        lineHeight: style.lineHeight,
-        textPadding: padding,
-        fontFamily: style.fontFamily,
-        textColor: style.textColor,
-      },
-      richText,
-    );
+    TextElementAutoSizer.measureHeightAtWidth(content, contentWidth, styleCfg);
 
   return {
     ref: op.ref!,
     kind: 'text',
-    preferredWidth,
-    preferredHeight: measureHeightAtWidth(preferredWidth),
+    preferredWidth: initial.preferredWidth,
+    preferredHeight: initial.height,
     minWidth: cfg.minTextWidth,
     minHeight: 56,
     measureHeightAtWidth,
+    initialMeasure: initial,
+    textAutoSize: {
+      preferredWidth: initial.preferredWidth,
+      contentWidth: initial.contentWidth,
+      contentHeight: initial.contentHeight,
+      finalWidth: initial.width,
+      finalHeight: initial.height,
+      wrappedLines: initial.wrappedLines,
+      padding: initial.padding,
+      autoSized: true,
+      measuredWithDom: initial.measuredWithDom,
+      rowExpanded: false,
+      reflowChanged: false,
+    },
   };
 }
 

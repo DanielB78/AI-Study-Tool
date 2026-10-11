@@ -36,4 +36,5 @@ export type {
   ObstacleRect,
   CanvasPlacementResult,
   LayoutDebugInfo,
+  TextAutoSizeDebug,
 } from './types';

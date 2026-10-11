@@ -10,6 +10,23 @@ export type {
   GridLayoutSpec,
 } from '../operations';
 
+/** Per-textbox auto-size diagnostics for layout debug. */
+export type TextAutoSizeDebug = {
+  preferredWidth: number;
+  contentWidth: number;
+  contentHeight: number;
+  finalWidth: number;
+  finalHeight: number;
+  wrappedLines: number | null;
+  padding: number;
+  autoSized: boolean;
+  measuredWithDom: boolean;
+  /** True when this textbox raised its grid row above its initial preferred height. */
+  rowExpanded: boolean;
+  /** True when final size differs from the initial preferred-width measure. */
+  reflowChanged: boolean;
+};
+
 export type MeasuredLayoutItem = {
   ref: string;
   /** Creation op type for measurement diagnostics. */
@@ -26,6 +43,8 @@ export type MeasuredLayoutItem = {
    * Defaults to preferredHeight when size is independent of width.
    */
   measureHeightAtWidth: (contentWidth: number) => number;
+  /** Optional text auto-size snapshot (create_text only). */
+  textAutoSize?: TextAutoSizeDebug;
 };
 
 export type PlacedLayoutItem = {
@@ -45,6 +64,7 @@ export type PlacedLayoutItem = {
   content: Rect;
   /** Collision rectangle (content + margin) in local coordinates. */
   collision: Rect;
+  textAutoSize?: TextAutoSizeDebug;
 };
 
 export type GridLayoutResult = {
@@ -91,6 +111,7 @@ export type LayoutDebugInfo = {
     height: number;
     localX: number;
     localY: number;
+    textAutoSize?: TextAutoSizeDebug;
   }>;
   localBounds: Rect;
   preferredOrigin: { x: number; y: number };
