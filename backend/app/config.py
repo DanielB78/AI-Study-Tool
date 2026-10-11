@@ -62,6 +62,15 @@ class Settings(BaseSettings):
     query_target_chunk_words: int = 125
     query_chunk_overlap_words: int = 20
 
+    # --- Handwriting OCR (local TrOCR) ---
+    # HANDWRITING_OCR_PROVIDER=trocr | mock (mock for tests / no model)
+    handwriting_ocr_provider: str = "trocr"
+    handwriting_ocr_model: str = "microsoft/trocr-base-handwritten"
+    # Optional device override: cpu | cuda | mps (empty = auto / cpu-safe)
+    handwriting_ocr_device: str = ""
+    # Max longest edge (px) for line images before TrOCR inference.
+    handwriting_ocr_max_dimension: int = 1024
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

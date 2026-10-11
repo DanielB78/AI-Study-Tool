@@ -38,17 +38,21 @@ import {
   REGION_CONTEXT_MIN_DIMENSION,
   REGION_CONTEXT_RENDER_SCALE,
 } from './config';
+import {
+  canvasElementsAsSpatial,
+  findElementsNearAnchors,
+  type SpatialHit,
+} from './spatialContext';
+import {
+  handwritingRegionsAsSpatial,
+  resolveHandwritingRecognition,
+} from './handwritingSync';
 import { formatGraphElementForContext } from './graphContext';
 import {
   ragRetrievalService,
   type PromptIntentClassification,
   type RetrievedCandidate,
 } from './ragRetrieval';
-import {
-  canvasElementsAsSpatial,
-  findElementsNearAnchors,
-  type SpatialHit,
-} from './spatialContext';
 import {
   allExpansionChildIds,
   buildSemanticTrees,
@@ -259,6 +263,18 @@ function resolveLiveElement(
   docElements: readonly CanvasElement[],
   elementId: string,
 ): { text: string; type: string; geometry: { x: number; y: number; width: number; height: number } } | null {
+  // Derived handwriting regions are not CanvasElements — resolve from OCR sync.
+  if (elementId.startsWith('hw_')) {
+    const hw = resolveHandwritingRecognition(elementId);
+    if (hw && hw.status === 'ready') {
+      return {
+        text: hw.recognizedText,
+        type: 'handwriting_region',
+        geometry: { ...hw.bounds },
+      };
+    }
+    return null;
+  }
   const el = docElements.find((e) => e.id === elementId);
   if (!el) return null;
   if (el.type === 'text') {
@@ -316,7 +332,10 @@ export function computeDebugContext(
     resolveLiveElement(docElements, elementId),
   );
 
-  const canvasEls = canvasElementsAsSpatial(docElements);
+  const canvasEls = canvasElementsAsSpatial(
+    docElements,
+    handwritingRegionsAsSpatial(),
+  );
   const anchorSpatials = anchors.map((a) => ({
     id: a.element_id,
     type: a.element_type,
@@ -370,7 +389,7 @@ export function computeDebugContext(
         }
       : null;
 
-  // Enrich spatial image/graph hits with live CanvasDocument state.
+  // Enrich spatial image/graph/handwriting hits with live state.
   const enrichedSpatialHits = spatialHits.map((hit) => {
     if (hit.element_type === 'image') {
       if (hit.image_src) return hit;
@@ -386,8 +405,64 @@ export function computeDebugContext(
         return { ...hit, text: formatGraphElementForContext(live) };
       }
     }
+    if (hit.element_type === 'handwriting_region') {
+      const hw = resolveHandwritingRecognition(hit.element_id);
+      if (hw?.status === 'ready') {
+        return { ...hit, text: hw.recognizedText };
+      }
+    }
     return hit;
   });
+
+  // Collect handwriting region images for multimodal LLM context.
+  // OCR text is for retrieval; original stroke crop is what the LLM sees.
+  const handwritingImages: import('./contextBuilder').HandwritingImageInput[] = [];
+  const seenHw = new Set<string>();
+
+  for (const anchor of anchors) {
+    if (anchor.element_type !== 'handwriting_region') continue;
+    if (seenHw.has(anchor.element_id)) continue;
+    const hw = resolveHandwritingRecognition(anchor.element_id);
+    if (!hw || hw.status !== 'ready' || !hw.regionImageDataUrl) continue;
+    seenHw.add(anchor.element_id);
+    handwritingImages.push({
+      region_id: anchor.element_id,
+      asset_src: hw.regionImageDataUrl,
+      geometry: { ...hw.bounds },
+      stroke_ids: [...hw.strokeIds],
+      ocr_transcription: hw.recognizedText,
+      reason: 'semantic_handwriting',
+      sources: [{ type: 'semantic', similarity: anchor.similarity, matched_chunks: anchor.matched_chunks }],
+      nearest_distance: null,
+    });
+  }
+
+  for (const hit of enrichedSpatialHits) {
+    if (hit.element_type !== 'handwriting_region') continue;
+    if (seenHw.has(hit.element_id)) {
+      // Already a semantic anchor — merge spatial provenance later via dedupe.
+      continue;
+    }
+    const hw = resolveHandwritingRecognition(hit.element_id);
+    if (!hw || hw.status !== 'ready' || !hw.regionImageDataUrl) continue;
+    seenHw.add(hit.element_id);
+    handwritingImages.push({
+      region_id: hit.element_id,
+      asset_src: hw.regionImageDataUrl,
+      geometry: { ...hw.bounds },
+      stroke_ids: [...hw.strokeIds],
+      ocr_transcription: hw.recognizedText,
+      reason: 'spatial_neighbor',
+      sources: [
+        {
+          type: 'spatial',
+          anchor_element_id: hit.anchor_element_id,
+          distance: hit.distance,
+        },
+      ],
+      nearest_distance: hit.distance,
+    });
+  }
 
   const context = buildRagContext({
     query: state.prompt.trim(),
@@ -395,6 +470,7 @@ export function computeDebugContext(
     regionStructuredSelections,
     regionBounds,
     regionImage,
+    handwritingImages,
     semanticAnchors: anchors,
     spatialHits: enrichedSpatialHits,
     semanticNeighborHits,

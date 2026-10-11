@@ -123,3 +123,24 @@ export {
   useHandwritingDebugStore,
   createHandwritingDebugStore,
 } from './handwritingDebugStore';
+export {
+  handwritingRecognitionController,
+  startHandwritingRecognitionSync,
+  resolveHandwritingRecognition,
+  handwritingRegionsAsSpatial,
+  stableHandwritingRegionId,
+  regionSourceContentHash,
+  HandwritingRecognitionController,
+} from './handwritingSync';
+export type {
+  HandwritingRecognitionRecord,
+  HandwritingRecognitionStatus,
+  HandwritingLineRecognition,
+} from './handwritingSync';
+export {
+  recognizeHandwritingLines,
+  indexHandwritingRegion,
+  deleteHandwritingRegionIndex,
+} from './handwritingRecognition';
+export { renderHandwritingStrokes } from './handwritingLineRenderer';
+export type { HandwritingImageInput } from './contextBuilder';

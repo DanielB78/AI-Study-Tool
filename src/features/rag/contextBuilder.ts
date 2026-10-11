@@ -90,7 +90,7 @@ export interface RagContextElement {
 /** Multimodal attachment — binary/image data stays out of text context strings. */
 export interface RagContextImageAttachment {
   element_id: string;
-  element_type: 'image' | 'region';
+  element_type: 'image' | 'region' | 'handwriting_region';
   /** Asset reference (data URL / storage URL) resolved from CanvasDocument or region render. */
   asset_src: string;
   geometry: WorldRect;
@@ -99,17 +99,21 @@ export interface RagContextImageAttachment {
   nearest_distance: number | null;
   /**
    * Why this image was selected into the attachment budget.
-   * Priority: explicit_region_selection > explicit_selection > spatial_neighbor.
+   * Priority: explicit_region_selection > explicit_selection >
+   *           semantic_handwriting > spatial_neighbor.
    */
   selection_reason:
     | 'explicit_region_selection'
     | 'explicit_selection'
+    | 'semantic_handwriting'
     | 'spatial_neighbor';
-  /** Present when element_type === 'region'. */
+  /** Present when element_type === 'region' | 'handwriting_region'. */
   region?: {
     included_element_ids: string[];
     contains_unstructured_visuals: boolean;
   };
+  /** Derived OCR preview for debug only — never authoritative for the LLM. */
+  ocr_transcription?: string | null;
 }
 
 /** Selected-region visual context (transient — not stored in CanvasDocument). */
@@ -181,6 +185,19 @@ export interface RegionImageInput {
   containsUnstructuredVisuals: boolean;
 }
 
+/** Pre-rendered handwriting-region crop (strokes only) for multimodal LLM context. */
+export interface HandwritingImageInput {
+  region_id: string;
+  asset_src: string;
+  geometry: WorldRect;
+  stroke_ids: string[];
+  ocr_transcription?: string | null;
+  /** How this handwriting item entered context. */
+  reason: 'semantic_handwriting' | 'spatial_neighbor';
+  sources?: ElementProvenance[];
+  nearest_distance?: number | null;
+}
+
 export interface BuildRagContextOptions {
   query: string;
   /** Editor selection snapshot — highest priority, always retained. */
@@ -194,6 +211,8 @@ export interface BuildRagContextOptions {
   regionBounds?: WorldRect | null;
   /** When visual content was detected and rendered — attach as required multimodal input. */
   regionImage?: RegionImageInput | null;
+  /** Recognized handwriting regions that should attach original stroke crops. */
+  handwritingImages?: HandwritingImageInput[];
   semanticAnchors: SemanticAnchorInput[];
   /** Raw spatial hits (may include duplicates across anchors / overlap with anchors) */
   spatialHits: SpatialHit[];
@@ -264,6 +283,10 @@ function isGraphElement(el: { element_type: string }): boolean {
   return el.element_type === 'graph';
 }
 
+function isHandwritingRegion(el: { element_type: string }): boolean {
+  return el.element_type === 'handwriting_region';
+}
+
 function formatElementBlock(el: RagContextElement): string {
   const lines: string[] = [];
   lines.push('ELEMENT');
@@ -305,6 +328,21 @@ function formatElementBlock(el: RagContextElement): string {
   } else if (isGraphElement(el)) {
     // Structured GraphContext body (already includes GRAPH ELEMENT header).
     lines.push(el.text || '(empty graph)');
+  } else if (isHandwritingRegion(el)) {
+    lines.push('HANDWRITTEN CANVAS CONTEXT');
+    lines.push(`Element/Region ID: ${el.element_id}`);
+    lines.push(
+      'This region was retrieved because its local OCR transcription was semantically related to the request.',
+    );
+    lines.push(
+      'The ORIGINAL handwritten region is attached as an image. Interpret the attached handwriting directly.',
+    );
+    if (el.text.trim()) {
+      lines.push('DERIVED OCR TRANSCRIPTION — MAY CONTAIN ERRORS (retrieval aid only):');
+      lines.push(el.text);
+    }
+    lines.push('ATTACHED HANDWRITING REGION IMAGE:');
+    lines.push(el.element_id);
   } else {
     lines.push('TEXT:');
     lines.push(el.text || '(empty)');
@@ -326,6 +364,28 @@ function formatImageAttachmentBlock(att: RagContextImageAttachment): string {
     lines.push('ATTACHED CANVAS REGION IMAGE:');
     lines.push(att.element_id);
     lines.push('(image bytes are supplied as a multimodal attachment — not OCR’d here)');
+    return lines.join('\n');
+  }
+
+  if (
+    att.element_type === 'handwriting_region' ||
+    att.selection_reason === 'semantic_handwriting'
+  ) {
+    const lines: string[] = [
+      'HANDWRITTEN REGION IMAGE',
+      `REGION ID: ${att.element_id}`,
+      `SOURCE: ${att.selection_reason}`,
+      `BOUNDS: x=${att.geometry.x}, y=${att.geometry.y}, width=${att.geometry.width}, height=${att.geometry.height}`,
+    ];
+    if (att.ocr_transcription) {
+      lines.push('DERIVED OCR TRANSCRIPTION — MAY CONTAIN ERRORS (retrieval aid only):');
+      lines.push(att.ocr_transcription);
+    }
+    lines.push('ATTACHED HANDWRITING REGION IMAGE:');
+    lines.push(att.element_id);
+    lines.push(
+      '(original strokes as multimodal attachment — interpret the image, not the OCR text)',
+    );
     return lines.join('\n');
   }
 
@@ -801,10 +861,10 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
   }
 
   // 5. Image attachment budget —
-  //    region (required) → explicit images (required) → nearest spatial.
+  //    region → explicit images → semantic handwriting → spatial images/handwriting.
   type ImageCand = {
     element_id: string;
-    element_type: 'image' | 'region';
+    element_type: 'image' | 'region' | 'handwriting_region';
     geometry: WorldRect;
     sources: ElementProvenance[];
     nearest: number | null;
@@ -812,15 +872,18 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     selection_reason:
       | 'explicit_region_selection'
       | 'explicit_selection'
+      | 'semantic_handwriting'
       | 'spatial_neighbor';
     explicitOrder: number;
     region?: {
       included_element_ids: string[];
       contains_unstructured_visuals: boolean;
     };
+    ocr_transcription?: string | null;
   };
 
   const imageCandMap = new Map<string, ImageCand>();
+  const handwritingImages = options.handwritingImages ?? [];
 
   // Priority 1: explicit selected-region image.
   let regionImageContext: CanvasRegionImageContext | null = null;
@@ -880,6 +943,53 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
       explicitOrder: index,
     });
   });
+
+  // Priority 3: semantic handwriting region crops (required-ish; drop spatial first).
+  for (const hw of handwritingImages) {
+    if (!hw.asset_src) continue;
+    const existing = imageCandMap.get(hw.region_id);
+    if (existing) {
+      // Exact same id already attached (e.g. duplicate sources) — merge provenance.
+      if (hw.sources) {
+        for (const s of hw.sources) {
+          if (!existing.sources.some((x) => JSON.stringify(x) === JSON.stringify(s))) {
+            existing.sources.push(s);
+          }
+        }
+      }
+      if (!existing.ocr_transcription && hw.ocr_transcription) {
+        existing.ocr_transcription = hw.ocr_transcription;
+      }
+      continue;
+    }
+    const sources = hw.sources?.length
+      ? [...hw.sources]
+      : hw.reason === 'semantic_handwriting'
+        ? [{ type: 'explicit_selection' as const }]
+        : [];
+    // Prefer semantic provenance marker via selection_reason; keep sources honest.
+    const el = byId.get(hw.region_id);
+    imageCandMap.set(hw.region_id, {
+      element_id: hw.region_id,
+      element_type: 'handwriting_region',
+      geometry: hw.geometry,
+      sources: sources.length
+        ? sources
+        : el?.sources
+          ? [...el.sources]
+          : [{ type: 'explicit_selection' }],
+      nearest: hw.nearest_distance ?? el?.nearest_distance ?? null,
+      asset_src: hw.asset_src,
+      selection_reason: hw.reason,
+      explicitOrder:
+        hw.reason === 'semantic_handwriting' ? 10_000 : Number.POSITIVE_INFINITY,
+      region: {
+        included_element_ids: [...hw.stroke_ids],
+        contains_unstructured_visuals: true,
+      },
+      ocr_transcription: hw.ocr_transcription ?? null,
+    });
+  }
 
   // Spatial image candidates (and merge provenance onto explicit images).
   for (const cand of spatialImageOrdered) {
@@ -941,7 +1051,8 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
   const reasonRank = (r: ImageCand['selection_reason']): number => {
     if (r === 'explicit_region_selection') return 0;
     if (r === 'explicit_selection') return 1;
-    return 2;
+    if (r === 'semantic_handwriting') return 2;
+    return 3;
   };
 
   const imageOrdered = Array.from(imageCandMap.values()).sort((a, b) => {
@@ -962,14 +1073,15 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
   for (const cand of imageOrdered) {
     const isRequired =
       cand.selection_reason === 'explicit_region_selection' ||
-      cand.selection_reason === 'explicit_selection';
+      cand.selection_reason === 'explicit_selection' ||
+      cand.selection_reason === 'semantic_handwriting';
     if (!isRequired && imageAttachments.length >= maxImages) {
       truncatedByImageBudget = true;
       imageBudgetExcludedIds.push(cand.element_id);
       continue;
     }
     if (isRequired && imageAttachments.length >= maxImages) {
-      // Still include required explicit / region images; flag budget overrun.
+      // Still include required explicit / region / semantic handwriting; flag overrun.
       truncatedByImageBudget = true;
     }
     imageAttachments.push({
@@ -981,6 +1093,7 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
       nearest_distance: cand.nearest,
       selection_reason: cand.selection_reason,
       region: cand.region,
+      ocr_transcription: cand.ocr_transcription ?? null,
     });
 
     // Ensure spatial image elements appear in spatialElements / byId for UI.
@@ -999,6 +1112,20 @@ export function buildRagContext(options: BuildRagContextOptions): RagContext {
     } else if (cand.element_type === 'image') {
       const existing = byId.get(cand.element_id)!;
       if (!existing.image_src) existing.image_src = cand.asset_src;
+    } else if (
+      cand.element_type === 'handwriting_region' &&
+      !byId.has(cand.element_id)
+    ) {
+      const el = makeElement({
+        element_id: cand.element_id,
+        element_type: 'handwriting_region',
+        text: cand.ocr_transcription ?? '',
+        geometry: cand.geometry,
+        sources: [...cand.sources],
+        nearest_distance: cand.nearest,
+      });
+      spatialElements.push(el);
+      byId.set(el.element_id, el);
     }
   }
 

@@ -29,6 +29,9 @@ def create_app() -> FastAPI:
     app.include_router(chat.router)
     app.include_router(rag_routes.router)
     app.include_router(embedding_routes.router)
+    from .rag.handwriting import routes as handwriting_routes
+
+    app.include_router(handwriting_routes.router)
     return app
 
 

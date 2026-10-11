@@ -98,6 +98,37 @@ function formatElementBlock(el: RagContextElement): string {
     ].join('\n');
   }
 
+  if (el.element_type === 'handwriting_region') {
+    return [
+      'HANDWRITTEN CANVAS CONTEXT',
+      '',
+      `Element/Region ID: ${el.element_id}`,
+      `TYPE: handwriting_region`,
+      '',
+      'This region was retrieved because its local OCR transcription was semantically related to the request.',
+      'The ORIGINAL handwritten region is attached as an image.',
+      'Interpret the attached handwriting directly.',
+      '',
+      ...(el.text.trim()
+        ? [
+            'DERIVED OCR TRANSCRIPTION — MAY CONTAIN ERRORS (retrieval aid only):',
+            el.text,
+            '',
+          ]
+        : []),
+      'ATTACHED HANDWRITING REGION IMAGE:',
+      el.element_id,
+      '',
+      'POSITION:',
+      `x: ${g.x}`,
+      `y: ${g.y}`,
+      `width: ${g.width}`,
+      `height: ${g.height}`,
+      '',
+      ...formatRetrieval(el),
+    ].join('\n');
+  }
+
   const isImage = el.element_type === 'image';
   const contentLines = isImage
     ? [
@@ -134,8 +165,16 @@ function formatImageContextSection(
   const regionAtts = attachments.filter(
     (a) => a.selection_reason === 'explicit_region_selection',
   );
+  const handwritingAtts = attachments.filter(
+    (a) =>
+      a.element_type === 'handwriting_region' ||
+      a.selection_reason === 'semantic_handwriting',
+  );
   const imageAtts = attachments.filter(
-    (a) => a.selection_reason !== 'explicit_region_selection',
+    (a) =>
+      a.selection_reason !== 'explicit_region_selection' &&
+      a.element_type !== 'handwriting_region' &&
+      a.selection_reason !== 'semantic_handwriting',
   );
 
   const parts: string[] = [];
@@ -182,6 +221,57 @@ function formatImageContextSection(
         '"this diagram"',
         '',
         'Do NOT invent a machine transcription.',
+        '',
+        blocks.join(`\n\n${'-'.repeat(50)}\n\n`),
+      ].join('\n'),
+    );
+  }
+
+  if (handwritingAtts.length > 0) {
+    const blocks = handwritingAtts.map((att) => {
+      const g = att.geometry;
+      return [
+        'HANDWRITTEN REGION',
+        '',
+        `ID: ${att.element_id}`,
+        `SOURCE: ${att.selection_reason}`,
+        att.nearest_distance != null
+          ? `DISTANCE: ${att.nearest_distance.toFixed(1)}`
+          : null,
+        '',
+        'Attachment required — attach this handwriting region image alongside the prompt.',
+        'Status: Attachment required',
+        '',
+        ...(att.ocr_transcription
+          ? [
+              'DERIVED OCR TRANSCRIPTION — MAY CONTAIN ERRORS (retrieval aid only):',
+              att.ocr_transcription,
+              '',
+            ]
+          : []),
+        'BOUNDS:',
+        `x: ${g.x}`,
+        `y: ${g.y}`,
+        `width: ${g.width}`,
+        `height: ${g.height}`,
+        '',
+        'ATTACHED HANDWRITING REGION IMAGE:',
+        att.element_id,
+        '',
+        '[MANUAL ATTACHMENT]',
+        `Attach handwriting region ${att.element_id} as a multimodal image input.`,
+        'Interpret the original handwriting image; do not treat OCR text as ground truth.',
+      ]
+        .filter((line): line is string => line != null)
+        .join('\n');
+    });
+    parts.push(
+      [
+        'HANDWRITTEN CANVAS CONTEXT',
+        '',
+        'These regions were retrieved via local OCR text used only for semantic search.',
+        'The ORIGINAL handwritten strokes are attached as images.',
+        'Interpret the attached handwriting directly.',
         '',
         blocks.join(`\n\n${'-'.repeat(50)}\n\n`),
       ].join('\n'),

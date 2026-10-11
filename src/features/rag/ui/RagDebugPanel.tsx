@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useSyncExternalStore } from 'react';
 import { useCanvasStore } from '../../../store/canvasStore';
 import { buildLlmPrompt } from '../../ai/llm';
 import { StructureSelector } from '../../structures/ui/StructureSelector';
@@ -20,6 +20,12 @@ import {
 import { computeDebugContext, useRagDebugStore } from '../ragDebugStore';
 import { useHandwritingDebugStore } from '../handwritingDebugStore';
 import { DEFAULT_HANDWRITING_REGION_CONFIG } from '../handwritingConfig';
+import {
+  handwritingRecognitionController,
+  resolveHandwritingRecognition,
+  stableHandwritingRegionId,
+  type HandwritingRecognitionRecord,
+} from '../handwritingSync';
 import type { SemanticTreeNode } from '../semanticExpansion';
 
 type RagDebugPage =
@@ -218,6 +224,12 @@ export function RagDebugPanel() {
   const selectHwLine = useHandwritingDebugStore((s) => s.selectLine);
   const refreshHwDetection = useHandwritingDebugStore((s) => s.refreshDetection);
   const ensureHwDetection = useHandwritingDebugStore((s) => s.ensureDetection);
+
+  const hwRecognitionRecords = useSyncExternalStore(
+    (cb) => handwritingRecognitionController.subscribe(cb),
+    () => handwritingRecognitionController.getRecords(),
+    () => handwritingRecognitionController.getRecords(),
+  );
 
   // Keep handwriting stats fresh while that debug page is open.
   useEffect(() => {
@@ -664,6 +676,10 @@ export function RagDebugPanel() {
                     {candidates.map((c) => {
                       const checked = selectedSet.has(c.element_id);
                       const preview = c.matched_chunks[0]?.text ?? '';
+                      const isHw = c.element_type === 'handwriting_region';
+                      const hwRec = isHw
+                        ? resolveHandwritingRecognition(c.element_id)
+                        : null;
                       return (
                         <li
                           key={c.element_id}
@@ -678,13 +694,29 @@ export function RagDebugPanel() {
                             <span className="rag-debug-score">
                               {c.score.toFixed(3)}
                             </span>
+                            <span className="rag-debug-badge spatial">
+                              {isHw ? 'HandwritingRegion' : c.element_type || 'TextElement'}
+                            </span>
                             <span className="rag-debug-id">{c.element_id}</span>
                           </label>
-                          <p className="rag-debug-preview">{previewText(preview)}</p>
+                          <p className="rag-debug-preview">
+                            {isHw ? `OCR: ${previewText(preview)}` : previewText(preview)}
+                          </p>
+                          {isHw && hwRec?.regionImageDataUrl && (
+                            <img
+                              className="rag-debug-thumb"
+                              src={hwRec.regionImageDataUrl}
+                              alt=""
+                              title={c.element_id}
+                            />
+                          )}
                           <p className="rag-debug-meta">
                             {c.matched_chunks.length} matched chunk(s)
                             {c.matched_chunks[0] != null
                               ? ` · best chunk #${c.matched_chunks[0].chunk_index}`
+                              : ''}
+                            {isHw
+                              ? ` · bounds x=${c.geometry.x.toFixed(0)},y=${c.geometry.y.toFixed(0)}`
                               : ''}
                           </p>
                         </li>
@@ -981,8 +1013,8 @@ export function RagDebugPanel() {
                   </div>
                   <p className="rag-debug-meta">
                     Geometric grouping of pen strokes into lines → regions (world
-                    coordinates). No OCR, embeddings, or LLM. Overlays are transient
-                    and not stored in CanvasDocument.
+                    coordinates), then local TrOCR + EmbeddingGemma for semantic RAG.
+                    Overlays are transient and not stored in CanvasDocument.
                   </p>
                   <label className="rag-debug-check">
                     <input
@@ -1098,6 +1130,94 @@ export function RagDebugPanel() {
                 </section>
 
                 <section className="rag-debug-section">
+                  <div className="rag-debug-section-title">
+                    TrOCR recognition + indexing
+                  </div>
+                  <p className="rag-debug-meta">
+                    Local microsoft/trocr-base-handwritten per line → combined text →
+                    EmbeddingGemma. OCR is for retrieval; LLM gets the original stroke
+                    image. Derived only — CanvasDocument strokes stay canonical.
+                  </p>
+                  <div className="rag-debug-row">
+                    <button
+                      type="button"
+                      className="rag-debug-btn"
+                      onClick={() => {
+                        void handwritingRecognitionController.refreshAll();
+                      }}
+                    >
+                      Reindex handwriting
+                    </button>
+                    <button
+                      type="button"
+                      className="rag-debug-btn ghost"
+                      onClick={() => {
+                        ensureHwDetection({ force: true });
+                        void handwritingRecognitionController.refreshAll();
+                      }}
+                    >
+                      Detect + re-recognize all
+                    </button>
+                  </div>
+                  {hwRecognitionRecords.length === 0 ? (
+                    <p className="rag-debug-empty">
+                      No recognition records yet. Draw with the Pen tool, wait for
+                      debounce, or click Reindex.
+                    </p>
+                  ) : (
+                    <ul className="rag-debug-list compact">
+                      {hwRecognitionRecords.map((rec) => (
+                        <li key={rec.ragElementId} className="rag-debug-item">
+                          <div className="rag-debug-row tight">
+                            <span className="rag-debug-badge spatial">
+                              {rec.regionId}
+                            </span>
+                            <span className="rag-debug-id">{rec.ragElementId}</span>
+                            <span className="rag-debug-meta">{rec.status}</span>
+                          </div>
+                          <p className="rag-debug-meta">
+                            Lines: {rec.lineResults.length} · Embedding:{' '}
+                            {rec.embeddingIndexed ? 'ready' : 'none'} · Model:{' '}
+                            {rec.recognizerModel || '(pending)'}
+                          </p>
+                          {rec.lineResults.map((lr) => (
+                            <p key={lr.lineId} className="rag-debug-meta">
+                              {lr.lineId}: &quot;{lr.recognizedText || '(empty)'}&quot;
+                              {lr.status !== 'ready' ? ` [${lr.status}]` : ''}
+                            </p>
+                          ))}
+                          <p className="rag-debug-preview">
+                            Combined: {rec.recognizedText || '(none)'}
+                          </p>
+                          {rec.regionImageDataUrl && (
+                            <img
+                              className="rag-debug-thumb"
+                              src={rec.regionImageDataUrl}
+                              alt=""
+                              title={rec.ragElementId}
+                            />
+                          )}
+                          {rec.error && (
+                            <p className="rag-debug-meta">Error: {rec.error}</p>
+                          )}
+                          <button
+                            type="button"
+                            className="rag-debug-btn ghost"
+                            onClick={() => {
+                              void handwritingRecognitionController.reRecognizeRegion(
+                                rec.ragElementId,
+                              );
+                            }}
+                          >
+                            Re-run recognition
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+
+                <section className="rag-debug-section">
                   <div className="rag-debug-section-title">Regions</div>
                   {hwResult.regions.length === 0 ? (
                     <p className="rag-debug-empty">
@@ -1105,7 +1225,10 @@ export function RagDebugPanel() {
                     </p>
                   ) : (
                     <ul className="rag-debug-list compact">
-                      {hwResult.regions.map((r) => (
+                      {hwResult.regions.map((r) => {
+                        const ragId = stableHandwritingRegionId(r.strokeIds);
+                        const rec = resolveHandwritingRecognition(ragId);
+                        return (
                         <li
                           key={r.id}
                           className={`rag-debug-item${
@@ -1131,6 +1254,7 @@ export function RagDebugPanel() {
                             <span className="rag-debug-badge spatial">{r.id}</span>
                             <span className="rag-debug-meta">
                               {r.lineCount} lines · {r.strokeCount} strokes
+                              {rec ? ` · OCR ${rec.status}` : ''}
                             </span>
                           </button>
                           <p className="rag-debug-meta">
@@ -1139,6 +1263,11 @@ export function RagDebugPanel() {
                             {r.rawBounds.width.toFixed(1)}, h=
                             {r.rawBounds.height.toFixed(1)}
                           </p>
+                          {rec?.recognizedText && (
+                            <p className="rag-debug-preview">
+                              OCR: {previewText(rec.recognizedText, 100)}
+                            </p>
+                          )}
                           {hwSelectedRegionId === r.id && (
                             <>
                               <p className="rag-debug-meta">
@@ -1147,10 +1276,12 @@ export function RagDebugPanel() {
                               <p className="rag-debug-meta">
                                 Strokes: {r.strokeIds.join(', ')}
                               </p>
+                              <p className="rag-debug-meta">RAG id: {ragId}</p>
                             </>
                           )}
                         </li>
-                      ))}
+                        );
+                      })}
                     </ul>
                   )}
                 </section>
@@ -1349,7 +1480,11 @@ export function RagDebugPanel() {
                         <li key={`img-${att.element_id}`} className="rag-debug-item">
                           <div className="rag-debug-row tight">
                             <span className="rag-debug-badge spatial">
-                              {att.element_type === 'region' ? 'region' : 'image'}
+                              {att.element_type === 'region'
+                                ? 'region'
+                                : att.element_type === 'handwriting_region'
+                                  ? 'handwriting'
+                                  : 'image'}
                             </span>
                             <span className="rag-debug-id">{att.element_id}</span>
                           </div>
@@ -1359,12 +1494,18 @@ export function RagDebugPanel() {
                               ? ` · d=${att.nearest_distance.toFixed(1)}`
                               : ''}
                           </p>
-                          {att.selection_reason === 'explicit_region_selection' && (
+                          {(att.selection_reason === 'explicit_region_selection' ||
+                            att.selection_reason === 'semantic_handwriting') && (
                             <p className="rag-debug-meta">
                               Status: Attachment required
                               {att.region?.included_element_ids?.length
                                 ? ` · includes ${att.region.included_element_ids.join(', ')}`
                                 : ''}
+                            </p>
+                          )}
+                          {att.ocr_transcription && (
+                            <p className="rag-debug-preview">
+                              OCR (retrieval only): {previewText(att.ocr_transcription, 100)}
                             </p>
                           )}
                           {att.sources
@@ -1551,9 +1692,39 @@ export function RagDebugPanel() {
                                 </p>
                               ) : null,
                             )}
-                            <p className="rag-debug-preview">
-                              {previewText(el.text, 100)}
-                            </p>
+                            {el.element_type === 'handwriting_region' ? (
+                              <>
+                                <p className="rag-debug-meta">
+                                  HANDWRITTEN REGION · TYPE: handwriting_region
+                                </p>
+                                <p className="rag-debug-preview">
+                                  OCR TRANSCRIPTION FOR RETRIEVAL:{' '}
+                                  {previewText(el.text, 120)}
+                                </p>
+                                <p className="rag-debug-meta">
+                                  NOTE: OCR transcription is derived and may contain
+                                  recognition errors. LLM visual context uses the
+                                  original stroke image.
+                                </p>
+                                {(() => {
+                                  const att = context.imageAttachments.find(
+                                    (a) => a.element_id === el.element_id,
+                                  );
+                                  return att ? (
+                                    <img
+                                      className="rag-debug-thumb"
+                                      src={att.asset_src}
+                                      alt=""
+                                      title="LLM visual context"
+                                    />
+                                  ) : null;
+                                })()}
+                              </>
+                            ) : (
+                              <p className="rag-debug-preview">
+                                {previewText(el.text, 100)}
+                              </p>
+                            )}
                           </li>
                         );
                       })}
