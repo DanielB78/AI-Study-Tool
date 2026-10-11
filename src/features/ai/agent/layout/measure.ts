@@ -3,7 +3,8 @@
  */
 
 import type { StyleDefaults } from '../../../../types/canvas';
-import { estimateTextHeight } from '../../canvas/createAiTextElement';
+import { estimateContentHeight } from '../../canvas/createAiTextElement';
+import type { RichTextDocument } from '../../../text/richText';
 import { measureEquationSize } from '../../../equations/latex';
 import { EQUATION_DEFAULT_FONT_SIZE } from '../../../equations/latex';
 import {
@@ -34,12 +35,20 @@ function measureTextItem(op: CreateTextOperation, style: StyleDefaults): Measure
     Math.max(cfg.defaultTextWidth, cfg.minTextWidth),
     cfg.maxTextWidth,
   );
+  const richText = op.rich_text as RichTextDocument | undefined;
   const measureHeightAtWidth = (contentWidth: number) =>
-    estimateTextHeight(op.text, contentWidth, {
-      fontSize: style.fontSize,
-      lineHeight: style.lineHeight,
-      textPadding: padding,
-    });
+    estimateContentHeight(
+      op.text,
+      contentWidth,
+      {
+        fontSize: style.fontSize,
+        lineHeight: style.lineHeight,
+        textPadding: padding,
+        fontFamily: style.fontFamily,
+        textColor: style.textColor,
+      },
+      richText,
+    );
 
   return {
     ref: op.ref!,

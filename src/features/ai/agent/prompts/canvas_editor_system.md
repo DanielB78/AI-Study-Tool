@@ -192,8 +192,10 @@ When creating **two or more related objects** with no explicit "next to X" instr
 - Give each create op a temporary `ref`
 - Assign every create to exactly one cell via `layout.items` (`row`, `column`, optional `column_span`)
 - Put `placement` on the **layout** (usually `viewport_default`), not on every child
-- Columns: 1–4. Zero-based indices. No nested grids. No row spanning. No per-item coordinates.
-- The application measures sizes, computes positions, prevents overlaps, and moves the **whole grid** if the preferred spot is occupied.
+- Zero-based indices. No nested grids. No row spanning. No per-item coordinates.
+- Column limit: `1 <= columns <= min(4, ceil(sqrt(N)))` (1→1, 2–4→2, 5–9→3, 10+→4). The app reflows if exceeded.
+- Prefer `rich_text` for headings, emphasis, colours/highlights, and lists inside textboxes.
+- The application measures sizes, prevents overlaps, and moves the **whole grid** if blocked.
 
 Do NOT assign `viewport_default` to every child as a way to skip the grid.
 

@@ -12,6 +12,7 @@ import { ElementRenderer } from './elements/ElementRenderer';
 import { SelectionTransformer } from './elements/SelectionTransformer';
 import { TextEditorOverlay } from './TextEditorOverlay';
 import { EquationHtmlLayer } from './EquationHtmlLayer';
+import { TextHtmlLayer } from './TextHtmlLayer';
 import { GraphHtmlLayer } from './GraphHtmlLayer';
 import { DraftShapePreview } from './DraftShapePreview';
 import {
@@ -21,7 +22,13 @@ import {
   zoomAtPoint,
 } from '../utils/coordinates';
 import { snapPosition } from '../utils/snap';
-import { ZOOM_STEP, isShapeTool, type EquationElement, type GraphElement } from '../types/canvas';
+import {
+  ZOOM_STEP,
+  isShapeTool,
+  type EquationElement,
+  type GraphElement,
+  type TextElement,
+} from '../types/canvas';
 import { ragSync } from '../features/rag/ragSync';
 import { RagDebugOverlay } from '../features/rag/ui/RagDebugOverlay';
 import { HandwritingDebugOverlay } from '../features/rag/ui/HandwritingDebugOverlay';
@@ -706,6 +713,12 @@ export function InfiniteCanvas() {
         editingId={null}
       />
 
+      <TextHtmlLayer
+        texts={elements.filter((el): el is TextElement => el.type === 'text')}
+        camera={camera}
+        editingId={editingTextId}
+      />
+
       <GraphHtmlLayer
         graphs={elements.filter((el): el is GraphElement => el.type === 'graph')}
         camera={camera}
@@ -718,7 +731,16 @@ export function InfiniteCanvas() {
           containerRect={containerRect}
           onChangeText={(text, width, height) => {
             updateElement(editingTarget.element.id, (el) =>
-              el.type === 'text' ? { ...el, text, width, height } : el,
+              el.type === 'text'
+                ? { ...el, text, width, height, richText: undefined }
+                : el,
+            );
+          }}
+          onChangeRichText={(richText, plain, width, height) => {
+            updateElement(editingTarget.element.id, (el) =>
+              el.type === 'text'
+                ? { ...el, text: plain, richText, width, height }
+                : el,
             );
           }}
           onChangeLabel={(label) => {

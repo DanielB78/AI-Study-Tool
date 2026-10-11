@@ -74,8 +74,12 @@ export type CanvasPlacementResult = {
 
 /** Debug snapshot for RAG / plan preview. */
 export type LayoutDebugInfo = {
+  objectCount: number;
+  maxColumns: number;
+  requestedColumns: number;
   columns: number;
   rows: number;
+  wrapped: boolean;
   columnWidths: number[];
   rowHeights: number[];
   items: Array<{

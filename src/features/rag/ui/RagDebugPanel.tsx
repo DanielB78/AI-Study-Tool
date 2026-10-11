@@ -1830,7 +1830,9 @@ export function RagDebugPanel() {
                     <div className="rag-debug-section-title">Grid placement debug</div>
                     <pre className="rag-debug-plan">
                       {[
-                        `Columns: ${layoutDebug.columns}  Rows: ${layoutDebug.rows}`,
+                        `Objects: ${layoutDebug.objectCount ?? '—'}  Max columns: ${layoutDebug.maxColumns ?? '—'}`,
+                        `Requested columns: ${layoutDebug.requestedColumns ?? layoutDebug.columns}  Final: ${layoutDebug.columns}`,
+                        `Wrapped: ${layoutDebug.wrapped ?? false}  Rows: ${layoutDebug.rows}`,
                         `Column widths: ${layoutDebug.columnWidths.map((w) => w.toFixed(0)).join(', ')}`,
                         `Row heights: ${layoutDebug.rowHeights.map((h) => h.toFixed(0)).join(', ')}`,
                         `Local bounds: ${layoutDebug.localBounds.width.toFixed(0)}×${layoutDebug.localBounds.height.toFixed(0)}`,
