@@ -4,7 +4,7 @@
  */
 
 import Konva from 'konva';
-import type { CanvasDocument, DrawingElement } from '../../types/canvas';
+import type { CanvasDocument, CanvasElement, DrawingElement } from '../../types/canvas';
 import { strokeDashFor } from '../../types/canvas';
 import type { WorldRect } from './geometry';
 import { expandRect } from './geometry';
@@ -36,7 +36,7 @@ export interface HandwritingRenderResult {
 }
 
 function drawingsById(
-  elements: readonly CanvasDocument['elements'],
+  elements: readonly CanvasElement[],
 ): Map<string, DrawingElement> {
   const map = new Map<string, DrawingElement>();
   for (const el of elements) {
