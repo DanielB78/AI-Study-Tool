@@ -5,7 +5,12 @@
 
 import type { Camera, CanvasElement, StyleDefaults, TextElement } from '../../../types/canvas';
 import { ragSync } from '../../rag/ragSync';
-import { createAiTextElement, estimateTextHeight } from '../canvas/createAiTextElement';
+import {
+  createAiTextElement,
+  estimateContentHeight,
+} from '../canvas/createAiTextElement';
+import type { RichTextDocument } from '../../text/richText';
+import { richTextToPlainText } from '../../text/richText';
 import { createAiEquationElement } from '../canvas/createAiEquationElement';
 import { createAiGraphElement } from '../canvas/createAiGraphElement';
 import {
@@ -116,13 +121,22 @@ function createOne(
     const camera = target.getCamera();
     const elements = target.getElements();
     const width = forced?.width ?? AI_TEXT_DEFAULT_WIDTH;
+    const padding = Math.max(style.textPadding, 12);
+    const richText = op.rich_text as RichTextDocument | undefined;
     const height =
       forced?.height ??
-      estimateTextHeight(op.text, width, {
-        fontSize: style.fontSize,
-        lineHeight: style.lineHeight,
-        textPadding: Math.max(style.textPadding, 12),
-      });
+      estimateContentHeight(
+        op.text,
+        width,
+        {
+          fontSize: style.fontSize,
+          lineHeight: style.lineHeight,
+          textPadding: padding,
+          fontFamily: style.fontFamily,
+          textColor: style.textColor,
+        },
+        richText,
+      );
     const placed = forced
       ? { x: forced.x, y: forced.y, width, height }
       : resolvePlacement({
@@ -138,6 +152,7 @@ function createOne(
       zIndex,
       style,
       width,
+      richText,
       metadata: { createdBy: 'ai', source: 'agent', operation: 'create_text' },
     });
     element.height = height;
@@ -292,14 +307,24 @@ export function executeCanvasOperations(
           if (el.type !== 'text') return el;
           const width = el.width;
           const padding = el.padding;
-          const height = estimateTextHeight(op.text, width, {
-            fontSize: el.fontSize,
-            lineHeight: el.lineHeight,
-            textPadding: padding,
-          });
+          const richText = op.rich_text as RichTextDocument | undefined;
+          const plain = richText ? richTextToPlainText(richText) : op.text;
+          const height = estimateContentHeight(
+            plain,
+            width,
+            {
+              fontSize: el.fontSize,
+              lineHeight: el.lineHeight,
+              textPadding: padding,
+              fontFamily: el.fontFamily,
+              textColor: el.color,
+            },
+            richText,
+          );
           return {
             ...el,
-            text: op.text,
+            text: plain,
+            richText: richText ?? undefined,
             height,
             metadata: {
               ...el.metadata,

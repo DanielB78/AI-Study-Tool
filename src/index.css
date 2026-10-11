@@ -1242,6 +1242,23 @@ textarea {
   overflow: auto;
 }
 
+/* —— Rich-text HTML overlays —— */
+.text-html-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.text-html-item {
+  pointer-events: none;
+}
+
+.text-editor-overlay--rich {
+  white-space: normal;
+}
+
 /* —— Equation HTML overlays —— */
 .equation-html-layer {
   position: absolute;

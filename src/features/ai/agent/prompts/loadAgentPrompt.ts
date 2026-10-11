@@ -159,8 +159,11 @@ When creating **two or more related objects** with no explicit "next to X" instr
 - Give each create op a temporary \`ref\`
 - Assign every create to exactly one cell via \`layout.items\` (\`row\`, \`column\`, optional \`column_span\`)
 - Put \`placement\` on the **layout** (usually \`viewport_default\`), not on every child
-- Columns: 1–4. Zero-based indices. No nested grids. No row spanning. No per-item coordinates.
-- The application measures sizes, computes positions, prevents overlaps, and moves the **whole grid** if the preferred spot is occupied.
+- Zero-based indices. No nested grids. No row spanning. No per-item coordinates.
+- **Column limit:** \`1 <= columns <= min(4, ceil(sqrt(N)))\` where N is the number of created objects.
+  - 1 object → max 1; 2–4 → max 2; 5–9 → max 3; 10+ → max 4
+- The app reflows/wraps into more rows if you exceed the limit or the grid is excessively wide.
+- The application measures sizes (including rich-text), prevents overlaps, and moves the **whole grid** if blocked.
 
 Do NOT assign \`viewport_default\` to every child as a way to skip the grid.
 
@@ -170,6 +173,17 @@ Sensible patterns:
 - Explanation | graph side-by-side
 - Equations on their own rows
 - Long text gets enough horizontal space (wider column or span)
+
+### Rich text formatting
+
+Prefer \`rich_text\` on \`create_text\` / \`update_text\` for structured study notes:
+
+- Headings, bold/italic/underline, colours, highlights, bullets, numbered lists
+- Span styles are optional; unspecified values inherit defaults
+- Colours: \`default|blue|green|red|orange|purple|grey\` or \`#RRGGBB\`
+- Font size presets: \`heading_large|heading|subheading|body|small\` (or 10–48)
+- Be intentional — avoid rainbow paragraphs, wall-of-bold, or bullets for everything
+- One formatted textbox beats many tiny boxes used only for emphasis
 
 ### Single-element placement
 

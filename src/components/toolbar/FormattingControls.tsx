@@ -1,4 +1,9 @@
 import type { StyleDefaults, StrokeStyle, ArrowHeads } from '../../types/canvas';
+import {
+  applyRichPaletteColor,
+  applyRichSelectionCommand,
+  isRichTextEditing,
+} from '../../features/text/richTextCommands';
 import { ColorSwatchButton } from './ColorPickerPopover';
 import { CtxPopover, OpacityControl } from './CtxPopover';
 
@@ -50,9 +55,17 @@ export function TextFormattingControls({
         type="button"
         className={style.fontWeight === 'bold' ? 'ctx-chip active' : 'ctx-chip'}
         title="Bold"
-        onClick={() =>
-          onCommit({ fontWeight: style.fontWeight === 'bold' ? 'normal' : 'bold' })
-        }
+        onMouseDown={(e) => {
+          if (isRichTextEditing()) {
+            e.preventDefault();
+            applyRichSelectionCommand('bold');
+            return;
+          }
+        }}
+        onClick={() => {
+          if (isRichTextEditing()) return;
+          onCommit({ fontWeight: style.fontWeight === 'bold' ? 'normal' : 'bold' });
+        }}
       >
         B
       </button>
@@ -60,7 +73,17 @@ export function TextFormattingControls({
         type="button"
         className={style.fontItalic ? 'ctx-chip active' : 'ctx-chip'}
         title="Italic"
-        onClick={() => onCommit({ fontItalic: !style.fontItalic })}
+        onMouseDown={(e) => {
+          if (isRichTextEditing()) {
+            e.preventDefault();
+            applyRichSelectionCommand('italic');
+            return;
+          }
+        }}
+        onClick={() => {
+          if (isRichTextEditing()) return;
+          onCommit({ fontItalic: !style.fontItalic });
+        }}
       >
         <em>I</em>
       </button>
@@ -68,7 +91,17 @@ export function TextFormattingControls({
         type="button"
         className={style.underline ? 'ctx-chip active' : 'ctx-chip'}
         title="Underline"
-        onClick={() => onCommit({ underline: !style.underline })}
+        onMouseDown={(e) => {
+          if (isRichTextEditing()) {
+            e.preventDefault();
+            applyRichSelectionCommand('underline');
+            return;
+          }
+        }}
+        onClick={() => {
+          if (isRichTextEditing()) return;
+          onCommit({ underline: !style.underline });
+        }}
       >
         <span style={{ textDecoration: 'underline' }}>U</span>
       </button>
@@ -98,7 +131,26 @@ export function TextFormattingControls({
         label="Text"
         value={style.textColor}
         allowTransparent={false}
-        onChange={(c) => c && onCommit({ textColor: c })}
+        onChange={(c) => {
+          if (!c) return;
+          if (isRichTextEditing()) {
+            applyRichPaletteColor('text', c);
+            return;
+          }
+          onCommit({ textColor: c });
+        }}
+      />
+      <ColorSwatchButton
+        label="Highlight"
+        value="#FEF08A"
+        allowTransparent
+        onChange={(c) => {
+          if (isRichTextEditing()) {
+            if (c) applyRichPaletteColor('highlight', c);
+            return;
+          }
+          onCommit({ textBackgroundColor: c });
+        }}
       />
       <ColorSwatchButton
         label="Fill"

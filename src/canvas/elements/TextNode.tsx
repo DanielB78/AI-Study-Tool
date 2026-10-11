@@ -87,24 +87,27 @@ export function TextNode({
         fill={element.backgroundColor ?? 'rgba(0,0,0,0.001)'}
         cornerRadius={element.cornerRadius}
       />
-      <Text
-        x={element.padding}
-        y={element.padding}
-        width={Math.max(element.width - element.padding * 2, 1)}
-        height={Math.max(element.height - element.padding * 2, 1)}
-        text={element.text}
-        fontSize={element.fontSize}
-        fontFamily={element.fontFamily}
-        fontStyle={konvaFontStyle(element)}
-        textDecoration={konvaDecoration(element)}
-        fill={element.color}
-        align={element.alignment}
-        verticalAlign="top"
-        lineHeight={element.lineHeight}
-        wrap="word"
-        opacity={isEditing ? 0 : 1}
-        listening={false}
-      />
+      {/* Rich-text elements render via TextHtmlLayer; keep Konva text for plain/legacy. */}
+      {!(element.richText && element.richText.blocks.length > 0) && (
+        <Text
+          x={element.padding}
+          y={element.padding}
+          width={Math.max(element.width - element.padding * 2, 1)}
+          height={Math.max(element.height - element.padding * 2, 1)}
+          text={element.text}
+          fontSize={element.fontSize}
+          fontFamily={element.fontFamily}
+          fontStyle={konvaFontStyle(element)}
+          textDecoration={konvaDecoration(element)}
+          fill={element.color}
+          align={element.alignment}
+          verticalAlign="top"
+          lineHeight={element.lineHeight}
+          wrap="word"
+          opacity={isEditing ? 0 : 1}
+          listening={false}
+        />
+      )}
     </Group>
   );
 }

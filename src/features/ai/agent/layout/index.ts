@@ -11,6 +11,12 @@ export { collectCanvasObstacles } from './obstacles';
 export { calculateGridLayout } from './gridLayoutEngine';
 export { placeGridOnCanvas, spiralOffsets } from './canvasPlacementEngine';
 export {
+  maxColumnsForObjectCount,
+  reflowGridToMaxColumns,
+  reduceColumnsForWidth,
+  type ReflowResult,
+} from './gridReflow';
+export {
   measureLayoutItems,
   isGridCreatableOp,
   type MeasureContext,

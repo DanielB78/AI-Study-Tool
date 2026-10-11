@@ -7,6 +7,7 @@ import type {
   GraphSettings,
   GraphViewport,
 } from '../features/graphs/types';
+import type { RichTextDocument } from '../features/text/richText';
 
 export const DOCUMENT_VERSION = 4 as const;
 
@@ -67,7 +68,13 @@ export interface BaseElement {
 
 export interface TextElement extends BaseElement {
   type: 'text';
+  /** Plain-text extract (always set). Source of truth for RAG indexing. */
   text: string;
+  /**
+   * Optional structured rich text. When set, rendering/editing use this document
+   * and `text` is kept in sync as the plain extract.
+   */
+  richText?: RichTextDocument;
   fontSize: number;
   fontFamily: string;
   fontWeight: FontWeight;

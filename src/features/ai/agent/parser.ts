@@ -36,6 +36,8 @@ import {
 import type { NoteStructure } from '../../structures/types';
 import { isNodeSection, isStructureField } from '../../structures/types';
 import { sanitizeLatexSource, validateLatex } from '../../equations/latex';
+import { richTextToPlainText, type RichTextDocument } from '../../text/richText';
+import { parseRichTextDocument, RichTextParseError } from '../../text/richTextValidate';
 import { encodeGraphExpression } from '../../graphs/expressionCodec';
 import {
   DEFAULT_GRAPH_SETTINGS,
@@ -443,13 +445,33 @@ function parseOperation(raw: unknown): CanvasOperation {
     throw new CanvasAgentParseError('schema', 'Each operation needs a type.');
   }
   if (raw.type === 'create_text') {
-    const text = requireNonEmptyString(raw.text, 'create_text.text');
     const placement = parsePlacementOptional(raw.placement);
     const ref = parseOptionalRef(raw);
+    let rich_text: RichTextDocument | undefined;
+    if (raw.rich_text !== undefined && raw.rich_text !== null) {
+      try {
+        rich_text = parseRichTextDocument(raw.rich_text);
+      } catch (err) {
+        throw new CanvasAgentParseError(
+          'schema',
+          err instanceof RichTextParseError ? err.message : 'Invalid rich_text.',
+        );
+      }
+    }
+    const plainFromRich = rich_text ? richTextToPlainText(rich_text) : '';
+    const textRaw = typeof raw.text === 'string' ? raw.text : '';
+    const text = (textRaw.trim() ? textRaw : plainFromRich).trim();
+    if (!text) {
+      throw new CanvasAgentParseError(
+        'empty_text',
+        'create_text needs non-empty text or rich_text.',
+      );
+    }
     return {
       type: 'create_text',
       text,
       placement,
+      ...(rich_text ? { rich_text } : {}),
       ...(ref ? { ref } : {}),
     } satisfies CreateTextOperation;
   }
@@ -461,11 +483,31 @@ function parseOperation(raw: unknown): CanvasOperation {
     if (typeof target !== 'string' || !target.trim()) {
       throw new CanvasAgentParseError('missing_target', 'update_text needs target_element_id.');
     }
-    const text = requireNonEmptyString(raw.text, 'update_text.text');
+    let rich_text: RichTextDocument | undefined;
+    if (raw.rich_text !== undefined && raw.rich_text !== null) {
+      try {
+        rich_text = parseRichTextDocument(raw.rich_text);
+      } catch (err) {
+        throw new CanvasAgentParseError(
+          'schema',
+          err instanceof RichTextParseError ? err.message : 'Invalid rich_text.',
+        );
+      }
+    }
+    const plainFromRich = rich_text ? richTextToPlainText(rich_text) : '';
+    const textRaw = typeof raw.text === 'string' ? raw.text : '';
+    const text = (textRaw.trim() ? textRaw : plainFromRich).trim();
+    if (!text) {
+      throw new CanvasAgentParseError(
+        'empty_text',
+        'update_text needs non-empty text or rich_text.',
+      );
+    }
     return {
       type: 'update_text',
       target_element_id: target.trim(),
       text,
+      ...(rich_text ? { rich_text } : {}),
     } satisfies UpdateTextOperation;
   }
   if (raw.type === 'create_structured_note') {
@@ -977,7 +1019,8 @@ export function describeOperationPlan(
       const placementLine = formatPlacementLine(op.placement, 'short');
       const preview = op.text.replace(/\s+/g, ' ').slice(0, 80);
       const refLine = op.ref ? `\n   Ref: ${op.ref}` : '';
-      return `${n}. CREATE TEXT${refLine}\n   Placement: ${placementLine}\n   Text: ${preview}${op.text.length > 80 ? '…' : ''}`;
+      const richLine = op.rich_text ? `\n   Rich text: ${op.rich_text.blocks.length} block(s)` : '';
+      return `${n}. CREATE TEXT${refLine}\n   Placement: ${placementLine}${richLine}\n   Text: ${preview}${op.text.length > 80 ? '…' : ''}`;
     }
     return `${n}. UNKNOWN OPERATION`;
   });

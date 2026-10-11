@@ -46,9 +46,40 @@ export type GridLayoutSpec = {
   items: GridLayoutItemSpec[];
 };
 
+/** Structured rich-text document (mirrors features/text/richText). */
+export type AgentRichTextSpanStyle = {
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  color?: string;
+  highlight_color?: string;
+  font_size?: string | number;
+};
+
+export type AgentRichTextSpan = {
+  text: string;
+  style?: AgentRichTextSpanStyle;
+};
+
+export type AgentRichTextBlock = {
+  type: 'paragraph' | 'heading' | 'bullet' | 'numbered';
+  role?: 'heading' | 'body';
+  spans: AgentRichTextSpan[];
+};
+
+export type AgentRichTextDocument = {
+  blocks: AgentRichTextBlock[];
+};
+
 export type CreateTextOperation = {
   type: 'create_text';
+  /**
+   * Plain-text extract (always populated by the parser).
+   * LLM may omit this when providing `rich_text`.
+   */
   text: string;
+  /** Structured rich text — preferred for formatted notes. */
+  rich_text?: AgentRichTextDocument;
   /** Omitted when assigned via layout.items — parser defaults to viewport_default. */
   placement: Placement;
   /** Temporary ref for layout.items */
@@ -65,7 +96,9 @@ export type CreateEquationOperation = {
 export type UpdateTextOperation = {
   type: 'update_text';
   target_element_id: string;
+  /** Plain-text extract (always populated by the parser). */
   text: string;
+  rich_text?: AgentRichTextDocument;
 };
 
 /** TEXT field payload for create_structured_note. */
@@ -274,10 +307,11 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
           {
             type: 'object',
             additionalProperties: false,
-            required: ['type', 'text'],
+            required: ['type'],
             properties: {
               type: { const: 'create_text' },
               text: { type: 'string', minLength: 1 },
+              rich_text: { $ref: '#/$defs/richText' },
               ref: { type: 'string', minLength: 1 },
               placement: { $ref: '#/$defs/placement' },
             },
@@ -296,11 +330,12 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
           {
             type: 'object',
             additionalProperties: false,
-            required: ['type', 'target_element_id', 'text'],
+            required: ['type', 'target_element_id'],
             properties: {
               type: { const: 'update_text' },
               target_element_id: { type: 'string', minLength: 1 },
               text: { type: 'string', minLength: 1 },
+              rich_text: { $ref: '#/$defs/richText' },
             },
           },
           {
@@ -597,6 +632,67 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
         },
       },
     },
+    richText: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['blocks'],
+      properties: {
+        blocks: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'spans'],
+            properties: {
+              type: {
+                type: 'string',
+                enum: ['paragraph', 'heading', 'bullet', 'numbered'],
+              },
+              role: { type: 'string', enum: ['heading', 'body'] },
+              spans: {
+                type: 'array',
+                minItems: 1,
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['text'],
+                  properties: {
+                    text: { type: 'string' },
+                    style: {
+                      type: 'object',
+                      additionalProperties: false,
+                      properties: {
+                        bold: { type: 'boolean' },
+                        italic: { type: 'boolean' },
+                        underline: { type: 'boolean' },
+                        color: { type: 'string' },
+                        highlight_color: { type: 'string' },
+                        font_size: {
+                          anyOf: [
+                            { type: 'number' },
+                            {
+                              type: 'string',
+                              enum: [
+                                'heading_large',
+                                'heading',
+                                'subheading',
+                                'body',
+                                'small',
+                              ],
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   },
 } as const;
 
@@ -614,7 +710,8 @@ create_text:
 {
   "type": "create_text",
   "ref": "<temp id for layout — required when using layout>",
-  "text": "<non-empty string>",
+  "text": "<plain string — optional if rich_text provided>",
+  "rich_text": { /* optional structured formatting — see RICH TEXT */ },
   "placement":  /* omit when item is in layout.items */
     { "mode": "viewport_default" }
     | { "mode": "relative_to_element", "anchor_element_id": "<id from context>", "relation": "left_of"|"right_of"|"above"|"below"|"near" }
@@ -633,8 +730,32 @@ update_text:
 {
   "type": "update_text",
   "target_element_id": "<id from context>",
-  "text": "<complete replacement text>"
+  "text": "<complete plain replacement — optional if rich_text>",
+  "rich_text": { /* optional complete rich-text replacement */ }
 }
+
+RICH TEXT (optional on create_text / update_text):
+{
+  "rich_text": {
+    "blocks": [
+      { "type": "heading", "spans": [{ "text": "Title", "style": { "bold": true, "font_size": "heading", "color": "blue" } }] },
+      { "type": "paragraph", "spans": [
+          { "text": "Gauss's law", "style": { "bold": true, "highlight_color": "default" } },
+          { "text": " relates flux to enclosed charge." }
+      ]},
+      { "type": "bullet", "spans": [{ "text": "Closed surface required." }] },
+      { "type": "numbered", "spans": [{ "text": "First step." }] }
+    ]
+  }
+}
+Span style (all optional): bold, italic, underline, color (default|blue|green|red|orange|purple|grey|#hex),
+highlight_color (same palette), font_size (heading_large|heading|subheading|body|small|number 10–48).
+Use formatting intentionally — not every sentence needs colour/highlight.
+Prefer one textbox with headings/lists over many tiny textboxes for emphasis.
+
+GRID COLUMN LIMIT:
+For N created objects: columns must satisfy 1 <= columns <= min(4, ceil(sqrt(N))).
+Examples: 1→1, 2–4→2, 5–9→3, 10+→4. The app reflows/wraps if exceeded.
 
 create_structured_note (ONLY when a note structure is selected):
 {
