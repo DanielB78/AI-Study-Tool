@@ -153,6 +153,7 @@ export function resolveGridPlan(input: ResolveGridPlanInput): ResolveGridPlanRes
       height: i.height,
       localX: i.localX,
       localY: i.localY,
+      textAutoSize: i.textAutoSize,
     })),
     localBounds: grid.bounds,
     preferredOrigin: placement.preferredOrigin,

@@ -5,16 +5,17 @@
 
 import type { Camera, CanvasElement, StyleDefaults, TextElement } from '../../../types/canvas';
 import { ragSync } from '../../rag/ragSync';
-import {
-  createAiTextElement,
-  estimateContentHeight,
-} from '../canvas/createAiTextElement';
+import { createAiTextElement } from '../canvas/createAiTextElement';
 import type { RichTextDocument } from '../../text/richText';
 import { richTextToPlainText } from '../../text/richText';
+import {
+  TextElementAutoSizer,
+  textElementAllowsAiAutoWidth,
+  textElementIsUserResized,
+} from '../../text/textAutoSizer';
 import { createAiEquationElement } from '../canvas/createAiEquationElement';
 import { createAiGraphElement } from '../canvas/createAiGraphElement';
 import {
-  AI_TEXT_DEFAULT_WIDTH,
   getDefaultViewportSize,
   type ViewportSize,
 } from '../canvas/placement';
@@ -120,23 +121,25 @@ function createOne(
   if (op.type === 'create_text') {
     const camera = target.getCamera();
     const elements = target.getElements();
-    const width = forced?.width ?? AI_TEXT_DEFAULT_WIDTH;
-    const padding = Math.max(style.textPadding, 12);
     const richText = op.rich_text as RichTextDocument | undefined;
-    const height =
-      forced?.height ??
-      estimateContentHeight(
-        op.text,
-        width,
-        {
-          fontSize: style.fontSize,
-          lineHeight: style.lineHeight,
-          textPadding: padding,
-          fontFamily: style.fontFamily,
-          textColor: style.textColor,
-        },
-        richText,
-      );
+    const padding = Math.max(style.textPadding, 12);
+    const measured = TextElementAutoSizer.measure({
+      content: { text: op.text, richText },
+      availableWidth: forced?.width,
+      style: {
+        fontSize: style.fontSize,
+        fontFamily: style.fontFamily,
+        fontWeight: style.fontWeight,
+        fontItalic: style.fontItalic,
+        underline: style.underline,
+        lineHeight: style.lineHeight,
+        color: style.textColor,
+        padding,
+      },
+      autoSized: true,
+    });
+    const width = forced?.width ?? measured.width;
+    const height = forced?.height ?? measured.height;
     const placed = forced
       ? { x: forced.x, y: forced.y, width, height }
       : resolvePlacement({
@@ -153,7 +156,13 @@ function createOne(
       style,
       width,
       richText,
-      metadata: { createdBy: 'ai', source: 'agent', operation: 'create_text' },
+      autoSize: true,
+      metadata: {
+        createdBy: 'ai',
+        source: 'agent',
+        operation: 'create_text',
+        autoSize: true,
+      },
     });
     element.height = height;
     target.addElement(element, false);
@@ -305,31 +314,45 @@ export function executeCanvasOperations(
         const id = op.target_element_id;
         target.updateElement(id, (el) => {
           if (el.type !== 'text') return el;
-          const width = el.width;
-          const padding = el.padding;
           const richText = op.rich_text as RichTextDocument | undefined;
           const plain = richText ? richTextToPlainText(richText) : op.text;
-          const height = estimateContentHeight(
-            plain,
-            width,
-            {
-              fontSize: el.fontSize,
-              lineHeight: el.lineHeight,
-              textPadding: padding,
-              fontFamily: el.fontFamily,
-              textColor: el.color,
-            },
-            richText,
-          );
+          const padding = el.padding;
+          const styleCfg = {
+            fontSize: el.fontSize,
+            fontFamily: el.fontFamily,
+            fontWeight: el.fontWeight,
+            fontItalic: el.fontItalic,
+            underline: el.underline,
+            lineHeight: el.lineHeight,
+            color: el.color,
+            padding,
+          };
+          const allowsAutoWidth = textElementAllowsAiAutoWidth(el.metadata);
+          const userResized = textElementIsUserResized(el.metadata);
+          const measured = TextElementAutoSizer.measure({
+            content: { text: plain, richText },
+            availableWidth: allowsAutoWidth ? undefined : el.width,
+            style: styleCfg,
+            autoSized: allowsAutoWidth,
+          });
+          // Auto-sized AI boxes: take content-preferred width + height.
+          // Otherwise keep width; expand height so content never clips.
+          const nextWidth = allowsAutoWidth ? measured.width : el.width;
+          const nextHeight = allowsAutoWidth
+            ? measured.height
+            : Math.max(el.height, measured.height);
           return {
             ...el,
             text: plain,
             richText: richText ?? undefined,
-            height,
+            width: nextWidth,
+            height: nextHeight,
             metadata: {
               ...el.metadata,
               lastEditedBy: 'ai',
               source: 'agent',
+              ...(allowsAutoWidth ? { autoSize: true } : {}),
+              ...(userResized ? { userResized: true } : {}),
             },
           };
         });

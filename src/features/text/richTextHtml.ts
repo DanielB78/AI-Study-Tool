@@ -89,7 +89,7 @@ export function richTextToHtml(
     numbered = block.type === 'numbered' ? nextNumbered : 0;
     parts.push(html);
   }
-  return `<div data-rt-root="1" style="font-family:${defaults.fontFamily};font-size:${defaults.fontSize}px;color:${defaults.color};line-height:1.35;word-wrap:break-word;overflow-wrap:break-word">${parts.join('')}</div>`;
+  return `<div data-rt-root="1" style="font-family:${defaults.fontFamily};font-size:${defaults.fontSize}px;color:${defaults.color};line-height:1.35;word-wrap:break-word;overflow-wrap:anywhere">${parts.join('')}</div>`;
 }
 
 function styleFromElement(el: HTMLElement): RichTextSpan['style'] {
@@ -233,7 +233,35 @@ export function measureRichTextHeight(
     fontFamily: defaults.fontFamily,
   });
   document.body.appendChild(host);
-  const height = Math.ceil(host.getBoundingClientRect().height + pad * 2 + 4);
+  const contentHeight = Math.ceil(
+    Math.max(
+      host.getBoundingClientRect().height,
+      host.scrollHeight,
+      host.offsetHeight,
+      0,
+    ),
+  );
   document.body.removeChild(host);
-  return Math.max(56, height);
+
+  // Stub DOM environments (e.g. happy-dom) report 0 — use structural fallback.
+  if (contentHeight < defaults.fontSize * 0.5) {
+    let lines = 0;
+    for (const block of doc.blocks) {
+      const text = block.spans.map((s) => s.text).join('');
+      const size = resolveRichTextFontSize(
+        block.type === 'heading' ? 'heading' : block.spans[0]?.style?.font_size,
+        defaults.fontSize,
+      );
+      const avg = size * 0.52;
+      const cpl = Math.max(1, Math.floor(contentWidth / avg));
+      lines += Math.max(1, Math.ceil(Math.max(text.length, 1) / cpl));
+      lines += 0.35;
+    }
+    return Math.max(
+      56,
+      Math.ceil(lines * defaults.fontSize * (defaults.lineHeight ?? 1.35) + pad * 2),
+    );
+  }
+
+  return Math.max(56, Math.ceil(contentHeight + pad * 2 + 4));
 }

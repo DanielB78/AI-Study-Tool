@@ -19,6 +19,7 @@ import {
   nextExpressionColor,
 } from '../features/graphs/types';
 import { migrateToCanonicalSource } from '../features/graphs/expressionCodec';
+import { parseRichTextDocument } from '../features/text/richTextValidate';
 
 /**
  * Convert legacy parser-native sources (x^2, 2x, …) to canonical GraphMathSyntax.
@@ -75,10 +76,19 @@ function migrateBase(raw: Record<string, unknown>, zFallback: number): BaseEleme
 function migrateText(raw: Record<string, unknown>, z: number): TextElement {
   const legacyBold =
     raw.fontStyle === 'bold' || raw.fontWeight === 'bold';
+  let richText: TextElement['richText'];
+  if (raw.richText != null) {
+    try {
+      richText = parseRichTextDocument(raw.richText);
+    } catch {
+      richText = undefined;
+    }
+  }
   return {
     ...migrateBase(raw, z),
     type: 'text',
     text: str(raw.text, ''),
+    ...(richText ? { richText } : {}),
     fontSize: num(raw.fontSize, DEFAULT_STYLE.fontSize),
     fontFamily: str(raw.fontFamily, DEFAULT_STYLE.fontFamily),
     fontWeight: legacyBold ? 'bold' : 'normal',

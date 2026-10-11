@@ -94,30 +94,66 @@ export function calculateGridLayout(input: {
     );
   }
 
-  // Pass 3 — heights at allocated widths
+  // Pass 3 — heights at allocated widths (reflow: width known → remasure height)
   const maxRow = Math.max(0, ...placements.map((p) => p.row));
   const rowHeights = Array.from({ length: maxRow + 1 }, () => 0);
   const sized = new Map<
     string,
-    { width: number; height: number; cellW: number }
+    {
+      width: number;
+      height: number;
+      cellW: number;
+      initialHeight: number;
+      measureWidth: number;
+    }
   >();
 
-  for (const p of placements) {
-    const m = measuredByRef.get(p.ref);
-    if (!m) continue;
-    const cellW = cellContentWidth(
-      p.column,
-      p.columnSpan,
-      columnWidths,
-      config.columnGap,
-    );
-    const width = Math.min(Math.max(m.preferredWidth, m.minWidth), cellW);
-    // Text uses full cell width for wrapping so height is accurate.
-    const measureWidth = m.kind === 'text' ? cellW : width;
-    const height = Math.max(m.measureHeightAtWidth(measureWidth), m.minHeight);
-    const finalWidth = m.kind === 'text' ? cellW : width;
-    sized.set(p.ref, { width: finalWidth, height, cellW });
-    rowHeights[p.row] = Math.max(rowHeights[p.row]!, height);
+  // Bounded iterative reflow: column widths are fixed after pass 2; remasure
+  // heights once at final widths, then optionally once more if a text column
+  // grew from a spanning pass (already reflected in columnWidths).
+  const MAX_HEIGHT_PASSES = 2;
+  for (let pass = 0; pass < MAX_HEIGHT_PASSES; pass++) {
+    for (let r = 0; r < rowHeights.length; r++) rowHeights[r] = 0;
+    sized.clear();
+
+    for (const p of placements) {
+      const m = measuredByRef.get(p.ref);
+      if (!m) continue;
+      const cellW = cellContentWidth(
+        p.column,
+        p.columnSpan,
+        columnWidths,
+        config.columnGap,
+      );
+      const width = Math.min(Math.max(m.preferredWidth, m.minWidth), cellW);
+      // Text uses full cell width for wrapping so height matches the renderer.
+      const measureWidth = m.kind === 'text' ? cellW : width;
+      const height = Math.max(m.measureHeightAtWidth(measureWidth), m.minHeight);
+      const finalWidth = m.kind === 'text' ? cellW : width;
+      sized.set(p.ref, {
+        width: finalWidth,
+        height,
+        cellW,
+        initialHeight: m.preferredHeight,
+        measureWidth,
+      });
+      rowHeights[p.row] = Math.max(rowHeights[p.row]!, height);
+    }
+
+    // Second pass only needed if any text height changed vs preferred (logged).
+    if (pass === 0) {
+      let anyChange = false;
+      for (const p of placements) {
+        const m = measuredByRef.get(p.ref);
+        const s = sized.get(p.ref);
+        if (!m || !s || m.kind !== 'text') continue;
+        if (Math.abs(s.height - m.preferredHeight) > 0.5 || Math.abs(s.width - m.preferredWidth) > 0.5) {
+          anyChange = true;
+          break;
+        }
+      }
+      if (!anyChange) break;
+    }
   }
 
   // Floors for empty rows
@@ -143,6 +179,7 @@ export function calculateGridLayout(input: {
   const placed: PlacedLayoutItem[] = [];
   for (const p of placements) {
     const size = sized.get(p.ref);
+    const m = measuredByRef.get(p.ref);
     if (!size) continue;
     const cellX = colStarts[p.column]!;
     const cellY = rowStarts[p.row]!;
@@ -158,6 +195,35 @@ export function calculateGridLayout(input: {
     };
     const cell: Rect = { x: cellX, y: cellY, width: cellW, height: cellH };
     const collision = expandRect(content, config.collisionMargin);
+
+    let textAutoSize = m?.textAutoSize;
+    if (m?.kind === 'text' && textAutoSize) {
+      const pad = textAutoSize.padding;
+      const rowExpanded = cellH > size.initialHeight + 0.5;
+      const reflowChanged =
+        Math.abs(size.height - size.initialHeight) > 0.5 ||
+        Math.abs(size.width - m.preferredWidth) > 0.5;
+      textAutoSize = {
+        ...textAutoSize,
+        contentWidth: Math.max(size.measureWidth - pad * 2, 40),
+        contentHeight: Math.max(0, size.height - pad * 2),
+        finalWidth: size.width,
+        finalHeight: size.height,
+        rowExpanded,
+        reflowChanged,
+      };
+      if (reflowChanged) {
+        diagnostics.push(
+          `Text "${p.ref}" reflow: ${m.preferredWidth.toFixed(0)}×${size.initialHeight.toFixed(0)} → ${size.width.toFixed(0)}×${size.height.toFixed(0)}`,
+        );
+      }
+      if (rowExpanded) {
+        diagnostics.push(
+          `Text "${p.ref}" expanded row ${p.row} to ${cellH.toFixed(0)}`,
+        );
+      }
+    }
+
     placed.push({
       ref: p.ref,
       row: p.row,
@@ -170,6 +236,7 @@ export function calculateGridLayout(input: {
       cell,
       content,
       collision,
+      textAutoSize,
     });
   }
 
