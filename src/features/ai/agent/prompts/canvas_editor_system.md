@@ -185,9 +185,21 @@ If there is no reasonable edit target, prefer `create_text` rather than overwrit
 
 Use world-space relationships. Do NOT invent arbitrary x/y for ordinary relative language.
 
-### viewport_default
+### Multi-element grid (preferred for related creates)
 
-Use when the user gives NO positioning instruction.
+When creating **two or more related objects** with no explicit "next to X" instruction, return a response-level `layout` of type `grid`:
+
+- Give each create op a temporary `ref`
+- Assign every create to exactly one cell via `layout.items` (`row`, `column`, optional `column_span`)
+- Put `placement` on the **layout** (usually `viewport_default`), not on every child
+- Columns: 1–4. Zero-based indices. No nested grids. No row spanning. No per-item coordinates.
+- The application measures sizes, computes positions, prevents overlaps, and moves the **whole grid** if the preferred spot is occupied.
+
+Do NOT assign `viewport_default` to every child as a way to skip the grid.
+
+### viewport_default (single create)
+
+Use when the user gives NO positioning instruction for a **single** create.
 
 Example: "Explain electric potential."
 
