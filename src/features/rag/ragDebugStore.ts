@@ -81,6 +81,8 @@ import {
   parseAgentResponsePlan,
 } from '../ai/llm/handleLlmResponse';
 import type { CanvasAgentResponse } from '../ai/agent/operations';
+import type { LayoutDebugInfo } from '../ai/agent/layout';
+import { previewGridPlan } from '../ai/agent/layout';
 import { CANVAS_EDITOR_SYSTEM_PROMPT } from '../ai/agent/prompts/loadAgentPrompt';
 import { useStructureStore } from '../structures/structureStore';
 import type { NoteStructure } from '../structures/types';
@@ -140,6 +142,8 @@ export interface RagDebugState {
   /** Parsed plan ready for Apply (null until valid JSON is previewed). */
   pendingPlan: string[] | null;
   pendingOperations: CanvasAgentResponse | null;
+  /** Grid placement debug from last preview/apply (not persisted). */
+  layoutDebug: LayoutDebugInfo | null;
   parseError: string | null;
   llmExecutionMode: LlmExecutionMode;
   lastCopiedPrompt: string | null;
@@ -612,6 +616,7 @@ export function createRagDebugStore() {
       pastedResponse: '',
       pendingPlan: null,
       pendingOperations: null,
+      layoutDebug: null,
       parseError: null,
       llmExecutionMode: DEFAULT_LLM_EXECUTION_MODE,
       lastCopiedPrompt: null,
@@ -629,6 +634,7 @@ export function createRagDebugStore() {
           responseModalOpen: false,
           pendingPlan: null,
           pendingOperations: null,
+          layoutDebug: null,
           parseError: null,
         }),
       togglePanel: () =>
@@ -639,6 +645,7 @@ export function createRagDebugStore() {
           responseModalOpen: s.open ? false : s.responseModalOpen,
           pendingPlan: s.open ? null : s.pendingPlan,
           pendingOperations: s.open ? null : s.pendingOperations,
+          layoutDebug: s.open ? null : s.layoutDebug,
         })),
 
       setPrompt: (value) => set({ prompt: value, error: null }),
@@ -912,6 +919,7 @@ export function createRagDebugStore() {
           pastedResponse: '',
           pendingPlan: null,
           pendingOperations: null,
+          layoutDebug: null,
           parseError: null,
           error: null,
         }),
@@ -921,6 +929,7 @@ export function createRagDebugStore() {
           pastedResponse: '',
           pendingPlan: null,
           pendingOperations: null,
+          layoutDebug: null,
           parseError: null,
         }),
       setPastedResponse: (value) =>
@@ -928,6 +937,7 @@ export function createRagDebugStore() {
           pastedResponse: value,
           pendingPlan: null,
           pendingOperations: null,
+          layoutDebug: null,
           parseError: null,
         }),
 
@@ -945,9 +955,23 @@ export function createRagDebugStore() {
             elementTypes,
             selectedStructure,
           });
+          let layoutDebug: LayoutDebugInfo | null = null;
+          if (parsed.response.layout) {
+            const canvas = useCanvasStore.getState();
+            layoutDebug = previewGridPlan({
+              layout: parsed.response.layout,
+              operations: parsed.response.operations,
+              camera: canvas.document.camera,
+              elements: canvas.document.elements,
+              style: canvas.style,
+              getStructureById: (id) =>
+                useStructureStore.getState().getStructureById(id),
+            });
+          }
           set({
             pendingPlan: parsed.plan,
             pendingOperations: parsed.response,
+            layoutDebug,
             parseError: null,
             error: null,
           });
@@ -962,6 +986,7 @@ export function createRagDebugStore() {
           set({
             pendingPlan: null,
             pendingOperations: null,
+            layoutDebug: null,
             parseError: message,
             error: message,
           });
@@ -976,6 +1001,7 @@ export function createRagDebugStore() {
             pastedResponse: text,
             pendingPlan: null,
             pendingOperations: null,
+            layoutDebug: null,
             parseError: null,
           });
           return true;
@@ -999,12 +1025,13 @@ export function createRagDebugStore() {
         }
 
         try {
-          const result = applyAgentOperations(ops.operations);
+          const result = applyAgentOperations(ops);
           set({
             responseModalOpen: false,
             pastedResponse: '',
             pendingPlan: null,
             pendingOperations: null,
+            layoutDebug: result.layoutDebug ?? null,
             parseError: null,
             statusMessage: `Applied ${ops.operations.length} operation(s)`,
             error: null,

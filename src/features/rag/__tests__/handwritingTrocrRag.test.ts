@@ -195,12 +195,16 @@ describe('HandwritingRecognitionController', () => {
     await ctrl.refreshAll();
 
     expect(recognizeFn).toHaveBeenCalled();
-    const call = recognizeFn.mock.calls[0]?.[0];
-    expect(call?.lines.length).toBeGreaterThanOrEqual(1);
+    const recognizeCalls = recognizeFn.mock.calls as unknown as Array<
+      [{ lines: unknown[] }]
+    >;
+    expect(recognizeCalls[0]?.[0]?.lines.length).toBeGreaterThanOrEqual(1);
     expect(indexFn).toHaveBeenCalledTimes(1);
-    const indexed = indexFn.mock.calls[0]?.[0];
-    expect(indexed?.element_type).toBe('handwriting_region');
-    expect(indexed?.text).toContain('Gauss law');
+    const indexCalls = indexFn.mock.calls as unknown as Array<
+      [{ element_type: string; text: string }]
+    >;
+    expect(indexCalls[0]?.[0]?.element_type).toBe('handwriting_region');
+    expect(indexCalls[0]?.[0]?.text).toContain('Gauss law');
 
     const records = ctrl.getRecords();
     expect(records.length).toBeGreaterThanOrEqual(1);

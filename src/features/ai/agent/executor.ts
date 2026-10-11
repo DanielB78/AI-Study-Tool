@@ -6,13 +6,18 @@
 import type { Camera, CanvasElement, StyleDefaults, TextElement } from '../../../types/canvas';
 import { ragSync } from '../../rag/ragSync';
 import { createAiTextElement, estimateTextHeight } from '../canvas/createAiTextElement';
+import { createAiEquationElement } from '../canvas/createAiEquationElement';
 import { createAiGraphElement } from '../canvas/createAiGraphElement';
 import {
   AI_TEXT_DEFAULT_WIDTH,
   getDefaultViewportSize,
   type ViewportSize,
 } from '../canvas/placement';
-import type { CanvasOperation } from './operations';
+import type {
+  CanvasAgentResponse,
+  CanvasOperation,
+  GridLayoutSpec,
+} from './operations';
 import { resolvePlacement } from './placementService';
 import type { NoteStructure } from '../../structures/types';
 import { isNodeSection, isStructureField } from '../../structures/types';
@@ -28,7 +33,11 @@ import {
 import {
   applyGraphEditOperation,
   isGraphEditOperationType,
+  type GraphEditOperation,
 } from './graphOperations';
+import { isGridCreatableOp } from './layout/measure';
+import { resolveGridPlan, type ResolveGridPlanResult } from './layout/resolveGridPlan';
+import type { LayoutDebugInfo } from './layout/types';
 
 export interface AgentExecutorTarget {
   getCamera: () => Camera;
@@ -54,16 +63,191 @@ export interface ExecuteAgentOpsResult {
   updatedIds: string[];
   affectedIds: string[];
   structureInstanceIds: string[];
+  layoutDebug?: LayoutDebugInfo;
+}
+
+function asPlan(
+  operationsOrPlan: readonly CanvasOperation[] | CanvasAgentResponse,
+): CanvasAgentResponse {
+  if (Array.isArray(operationsOrPlan)) {
+    return { operations: [...operationsOrPlan] };
+  }
+  return operationsOrPlan as CanvasAgentResponse;
+}
+
+function fieldValuesForStructure(
+  op: Extract<CanvasOperation, { type: 'create_structured_note' }>,
+  structure: NoteStructure,
+): Map<string, StructureFieldValue> {
+  const fieldValues = new Map<string, StructureFieldValue>();
+  for (const field of structure.fields) {
+    const payload = op.fields[field.id];
+    if (payload == null) continue;
+    if (isNodeSection(field) && 'root' in payload && payload.root) {
+      fieldValues.set(field.id, { kind: 'node_section', root: payload.root });
+    } else if (
+      isStructureField(field) &&
+      field.contentType === 'text' &&
+      'content' in payload
+    ) {
+      fieldValues.set(field.id, { kind: 'text', content: payload.content });
+    } else if (
+      isStructureField(field) &&
+      field.contentType === 'equation' &&
+      'latex' in payload
+    ) {
+      fieldValues.set(field.id, { kind: 'equation', latex: payload.latex });
+    }
+  }
+  return fieldValues;
+}
+
+function createOne(
+  op: CanvasOperation,
+  target: AgentExecutorTarget,
+  style: StyleDefaults,
+  viewport: ViewportSize,
+  forced?: { x: number; y: number; width: number; height: number },
+): { createdIds: string[]; structureInstanceIds: string[] } {
+  const createdIds: string[] = [];
+  const structureInstanceIds: string[] = [];
+
+  if (op.type === 'create_text') {
+    const camera = target.getCamera();
+    const elements = target.getElements();
+    const width = forced?.width ?? AI_TEXT_DEFAULT_WIDTH;
+    const height =
+      forced?.height ??
+      estimateTextHeight(op.text, width, {
+        fontSize: style.fontSize,
+        lineHeight: style.lineHeight,
+        textPadding: Math.max(style.textPadding, 12),
+      });
+    const placed = forced
+      ? { x: forced.x, y: forced.y, width, height }
+      : resolvePlacement({
+          placement: op.placement,
+          width,
+          height,
+          camera,
+          elements,
+          viewport,
+        });
+    const zIndex = target.nextZIndex();
+    const element = createAiTextElement(op.text, { x: placed.x, y: placed.y }, {
+      zIndex,
+      style,
+      width,
+      metadata: { createdBy: 'ai', source: 'agent', operation: 'create_text' },
+    });
+    element.height = height;
+    target.addElement(element, false);
+    createdIds.push(element.id);
+  } else if (op.type === 'create_equation') {
+    const camera = target.getCamera();
+    const elements = target.getElements();
+    const probe = createAiEquationElement(op.latex, { x: 0, y: 0 }, {
+      zIndex: 0,
+      style,
+    });
+    const width = forced?.width ?? probe.width;
+    const height = forced?.height ?? probe.height;
+    const placed = forced
+      ? { x: forced.x, y: forced.y, width, height }
+      : resolvePlacement({
+          placement: op.placement,
+          width,
+          height,
+          camera,
+          elements,
+          viewport,
+        });
+    const zIndex = target.nextZIndex();
+    const element = createAiEquationElement(op.latex, { x: placed.x, y: placed.y }, {
+      zIndex,
+      style,
+    });
+    if (forced) {
+      element.width = width;
+      element.height = height;
+    }
+    target.addElement(element, false);
+    createdIds.push(element.id);
+  } else if (op.type === 'create_structured_note') {
+    const structure = target.getStructureById?.(op.structure_id) ?? null;
+    if (!structure) {
+      throw new Error(`Unknown structure "${op.structure_id}" at execution time.`);
+    }
+    const fieldValues = fieldValuesForStructure(op, structure);
+    const bounds = computeStructuredNoteBounds(structure, fieldValues);
+    const camera = target.getCamera();
+    const elements = target.getElements();
+    const width = forced?.width ?? bounds.width;
+    const height = forced?.height ?? bounds.height;
+    const placed = forced
+      ? { x: forced.x, y: forced.y, width, height }
+      : resolvePlacement({
+          placement: op.placement,
+          width,
+          height,
+          camera,
+          elements,
+          viewport,
+        });
+
+    const instantiated = instantiateNoteStructure({
+      structure,
+      fieldValues,
+      origin: { x: placed.x, y: placed.y },
+      style,
+      nextZIndex: () => target.nextZIndex(),
+    });
+    structureInstanceIds.push(instantiated.structureInstanceId);
+    for (const el of instantiated.elements) {
+      target.addElement(el, false);
+      createdIds.push(el.id);
+    }
+  } else if (op.type === 'create_graph') {
+    const camera = target.getCamera();
+    const elements = target.getElements();
+    const width = forced?.width ?? DEFAULT_GRAPH_WIDTH;
+    const height = forced?.height ?? DEFAULT_GRAPH_HEIGHT;
+    const placed = forced
+      ? { x: forced.x, y: forced.y, width, height }
+      : resolvePlacement({
+          placement: op.placement,
+          width,
+          height,
+          camera,
+          elements,
+          viewport,
+        });
+    const zIndex = target.nextZIndex();
+    const canonical = op.expressions.map((e) => e.expression);
+    const element = createAiGraphElement(op, canonical, {
+      x: placed.x,
+      y: placed.y,
+      zIndex,
+      width,
+      height,
+    });
+    target.addElement(element, false);
+    createdIds.push(element.id);
+  }
+
+  return { createdIds, structureInstanceIds };
 }
 
 /**
  * Execute ALL operations atomically after prior validation.
- * Call only with a fully validated operation list.
+ * Accepts a bare operations list (legacy) or a full CanvasAgentResponse with layout.
  */
 export function executeCanvasOperations(
-  operations: readonly CanvasOperation[],
+  operationsOrPlan: readonly CanvasOperation[] | CanvasAgentResponse,
   target: AgentExecutorTarget,
 ): ExecuteAgentOpsResult {
+  const plan = asPlan(operationsOrPlan);
+  const operations = plan.operations;
   if (operations.length === 0) {
     return {
       createdIds: [],
@@ -81,38 +265,28 @@ export function executeCanvasOperations(
   const createdIds: string[] = [];
   const updatedIds: string[] = [];
   const structureInstanceIds: string[] = [];
+  let layoutDebug: LayoutDebugInfo | undefined;
+
+  // Resolve grid BEFORE mutating — failure commits nothing.
+  let gridResolved: ResolveGridPlanResult | null = null;
+  const layout: GridLayoutSpec | undefined = plan.layout;
+  if (layout) {
+    gridResolved = resolveGridPlan({
+      layout,
+      operations,
+      camera: target.getCamera(),
+      elements: target.getElements(),
+      style,
+      viewport,
+      getStructureById: target.getStructureById,
+    });
+    layoutDebug = gridResolved.debug;
+  }
 
   target.beginInteraction();
   try {
     for (const op of operations) {
-      if (op.type === 'create_text') {
-        const camera = target.getCamera();
-        const elements = target.getElements();
-        const width = AI_TEXT_DEFAULT_WIDTH;
-        const height = estimateTextHeight(op.text, width, {
-          fontSize: style.fontSize,
-          lineHeight: style.lineHeight,
-          textPadding: Math.max(style.textPadding, 12),
-        });
-        const placed = resolvePlacement({
-          placement: op.placement,
-          width,
-          height,
-          camera,
-          elements,
-          viewport,
-        });
-        const zIndex = target.nextZIndex();
-        const element = createAiTextElement(op.text, { x: placed.x, y: placed.y }, {
-          zIndex,
-          style,
-          width,
-          metadata: { createdBy: 'ai', source: 'agent', operation: 'create_text' },
-        });
-        element.height = height;
-        target.addElement(element, false);
-        createdIds.push(element.id);
-      } else if (op.type === 'update_text') {
+      if (op.type === 'update_text') {
         const id = op.target_element_id;
         target.updateElement(id, (el) => {
           if (el.type !== 'text') return el;
@@ -135,99 +309,35 @@ export function executeCanvasOperations(
           };
         });
         updatedIds.push(id);
-      } else if (op.type === 'create_structured_note') {
-        const structure = target.getStructureById?.(op.structure_id) ?? null;
-        if (!structure) {
-          throw new Error(`Unknown structure "${op.structure_id}" at execution time.`);
-        }
+        continue;
+      }
 
-        const fieldValues = new Map<string, StructureFieldValue>();
-        for (const field of structure.fields) {
-          const payload = op.fields[field.id];
-          if (payload == null) continue;
-          if (isNodeSection(field) && 'root' in payload && payload.root) {
-            fieldValues.set(field.id, { kind: 'node_section', root: payload.root });
-          } else if (
-            isStructureField(field) &&
-            field.contentType === 'text' &&
-            'content' in payload
-          ) {
-            fieldValues.set(field.id, { kind: 'text', content: payload.content });
-          } else if (
-            isStructureField(field) &&
-            field.contentType === 'equation' &&
-            'latex' in payload
-          ) {
-            fieldValues.set(field.id, { kind: 'equation', latex: payload.latex });
-          }
-        }
-
-        // Place using effective bounds after Node Section layout expansion.
-        const bounds = computeStructuredNoteBounds(structure, fieldValues);
-        const camera = target.getCamera();
-        const elements = target.getElements();
-        const placed = resolvePlacement({
-          placement: op.placement,
-          width: bounds.width,
-          height: bounds.height,
-          camera,
-          elements,
-          viewport,
-        });
-
-        const instantiated = instantiateNoteStructure({
-          structure,
-          fieldValues,
-          origin: { x: placed.x, y: placed.y },
-          style,
-          nextZIndex: () => target.nextZIndex(),
-        });
-        structureInstanceIds.push(instantiated.structureInstanceId);
-        for (const el of instantiated.elements) {
-          target.addElement(el, false);
-          createdIds.push(el.id);
-        }
-      } else if (op.type === 'create_graph') {
-        const camera = target.getCamera();
-        const elements = target.getElements();
-        const width = DEFAULT_GRAPH_WIDTH;
-        const height = DEFAULT_GRAPH_HEIGHT;
-        const placed = resolvePlacement({
-          placement: op.placement,
-          width,
-          height,
-          camera,
-          elements,
-          viewport,
-        });
-        const zIndex = target.nextZIndex();
-        // Expressions were already strict-validated + canonicalized in the parser.
-        const canonical = op.expressions.map((e) => e.expression);
-        const element = createAiGraphElement(op, canonical, {
-          x: placed.x,
-          y: placed.y,
-          zIndex,
-          width,
-          height,
-        });
-        target.addElement(element, false);
-        createdIds.push(element.id);
-      } else if (isGraphEditOperationType(op.type)) {
-        const graphId = op.graph_id;
+      if (isGraphEditOperationType(op.type)) {
+        const editOp = op as GraphEditOperation;
+        const graphId = editOp.graph_id;
         target.updateElement(graphId, (el) => {
           if (el.type !== 'graph') return el;
-          const next = applyGraphEditOperation(el, op);
+          const next = applyGraphEditOperation(el, editOp);
           return {
             ...next,
             metadata: {
               ...next.metadata,
               lastEditedBy: 'ai',
               source: 'agent',
-              operation: op.type,
+              operation: editOp.type,
             },
           };
         });
         updatedIds.push(graphId);
+        continue;
+      }
+
+      if (isGridCreatableOp(op)) {
+        const forced =
+          gridResolved && op.ref ? gridResolved.byRef.get(op.ref) : undefined;
+        const result = createOne(op, target, style, viewport, forced);
+        createdIds.push(...result.createdIds);
+        structureInstanceIds.push(...result.structureInstanceIds);
       }
     }
   } finally {
@@ -248,5 +358,11 @@ export function executeCanvasOperations(
   }
   target.persist?.();
 
-  return { createdIds, updatedIds, affectedIds, structureInstanceIds };
+  return {
+    createdIds,
+    updatedIds,
+    affectedIds,
+    structureInstanceIds,
+    layoutDebug,
+  };
 }

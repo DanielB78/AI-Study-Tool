@@ -2,8 +2,11 @@ export type {
   CanvasOperation,
   CanvasAgentResponse,
   CreateTextOperation,
+  CreateEquationOperation,
   CreateStructuredNoteOperation,
   CreateGraphOperation,
+  GridLayoutSpec,
+  GridLayoutItemSpec,
   CreateGraphExpressionSpec,
   CreateGraphPointSpec,
   CreateGraphViewportSpec,
@@ -42,3 +45,11 @@ export {
   CANVAS_EDITOR_SYSTEM_PROMPT,
   CANVAS_EDITOR_RESPONSE_INSTRUCTIONS,
 } from './prompts/loadAgentPrompt';
+export {
+  GRID_LAYOUT_CONFIG,
+  calculateGridLayout,
+  placeGridOnCanvas,
+  resolveGridPlan,
+  previewGridPlan,
+  type LayoutDebugInfo,
+} from './layout';
