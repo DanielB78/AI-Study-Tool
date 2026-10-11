@@ -31,7 +31,9 @@ export function FloatingToolPalette({ fileInputRef }: FloatingToolPaletteProps) 
   const shapesOpenRef = useRef(false);
   const prevToolRef = useRef<ToolType | null>(null);
 
-  const [revealed, setRevealed] = useState(false);
+  // Start revealed so first-time users can see tools on a blank board.
+  // Still auto-hides after leaving the left dock / edge zone.
+  const [revealed, setRevealed] = useState(true);
   const [shapesOpen, setShapesOpen] = useState(false);
 
   const activeTool = useCanvasStore((s) => s.activeTool);
