@@ -90,7 +90,7 @@ describe('parseCanvasAgentResponse — grid layout', () => {
         }),
         ctx,
       ),
-    ).toThrow(/grid "layout"/);
+    ).toThrow(/chronological_grid or grid/);
   });
 
   it('allows multi-create with explicit relative placements and no layout', () => {

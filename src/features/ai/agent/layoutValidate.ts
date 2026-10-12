@@ -1,20 +1,20 @@
 /**
- * Validate grid / relationship-grid layout specs against create operations.
+ * Validate grid / chronological-grid layout specs against create operations.
  */
 
 import { GRID_LAYOUT_CONFIG } from './layout/gridConfig';
+import {
+  ChronologicalCellLayoutError,
+  groupCreationOpsIntoCells,
+} from './layout/chronologicalCellLayout';
 import { isGridCreatableOp } from './layout/measure';
-import { topologicalOrder } from './layout/relationshipOptimiser';
 import type {
   AnyLayoutSpec,
   CanvasOperation,
+  ChronologicalGridLayoutSpec,
   GridLayoutItemSpec,
   GridLayoutSpec,
   Placement,
-  RelationshipGridItemSpec,
-  RelationshipGridLayoutSpec,
-  SemanticRelationSpec,
-  TopicSectionSpec,
 } from './operations';
 import { CanvasAgentParseError } from './parseErrors';
 
@@ -105,50 +105,10 @@ function parseExplicitGrid(
   return { type: 'grid', columns, placement, items };
 }
 
-function parseRelation(raw: unknown, path: string): SemanticRelationSpec {
-  if (!isRecord(raw)) {
-    throw new CanvasAgentParseError('schema', `${path} must be an object.`);
-  }
-  if (typeof raw.ref !== 'string' || !raw.ref.trim()) {
-    throw new CanvasAgentParseError('schema', `${path}.ref must be a non-empty string.`);
-  }
-  if (
-    typeof raw.strength !== 'number' ||
-    !Number.isFinite(raw.strength) ||
-    raw.strength < 0 ||
-    raw.strength > 1
-  ) {
-    throw new CanvasAgentParseError(
-      'schema',
-      `${path}.strength must be a finite number between 0 and 1.`,
-    );
-  }
-  return { ref: raw.ref.trim(), strength: raw.strength };
-}
-
-function parseRelationshipGrid(
+function parseChronologicalGrid(
   raw: Record<string, unknown>,
   parsePlacement: (raw: unknown) => Placement,
-): RelationshipGridLayoutSpec {
-  if (!Array.isArray(raw.sections) || raw.sections.length === 0) {
-    throw new CanvasAgentParseError(
-      'schema',
-      'relationship_grid.sections must be a non-empty array.',
-    );
-  }
-  if (!Array.isArray(raw.items) || raw.items.length === 0) {
-    throw new CanvasAgentParseError(
-      'schema',
-      'relationship_grid.items must be a non-empty array.',
-    );
-  }
-  if (raw.items.length > GRID_LAYOUT_CONFIG.maxItems) {
-    throw new CanvasAgentParseError(
-      'schema',
-      `layout.items exceeds maximum of ${GRID_LAYOUT_CONFIG.maxItems}.`,
-    );
-  }
-
+): ChronologicalGridLayoutSpec {
   let columns: number | undefined;
   if (raw.columns !== undefined) {
     if (
@@ -159,175 +119,20 @@ function parseRelationshipGrid(
     ) {
       throw new CanvasAgentParseError(
         'schema',
-        `relationship_grid.columns must be an integer from 1 to ${GRID_LAYOUT_CONFIG.maxColumns}.`,
+        `chronological_grid.columns must be an integer from 1 to ${GRID_LAYOUT_CONFIG.maxColumns}.`,
       );
     }
     columns = raw.columns;
   }
-
   const placement = parsePlacement(raw.placement);
-  const sections: TopicSectionSpec[] = [];
-  const sectionIds = new Set<string>();
-  for (let i = 0; i < raw.sections.length; i++) {
-    const s = raw.sections[i];
-    if (!isRecord(s)) {
-      throw new CanvasAgentParseError('schema', `sections[${i}] must be an object.`);
-    }
-    if (typeof s.id !== 'string' || !s.id.trim()) {
-      throw new CanvasAgentParseError('schema', `sections[${i}].id must be a non-empty string.`);
-    }
-    if (typeof s.order !== 'number' || !Number.isInteger(s.order) || s.order < 0) {
-      throw new CanvasAgentParseError(
-        'schema',
-        `sections[${i}].order must be a non-negative integer.`,
-      );
-    }
-    const id = s.id.trim();
-    if (sectionIds.has(id)) {
-      throw new CanvasAgentParseError('schema', `Duplicate section id "${id}".`);
-    }
-    sectionIds.add(id);
-    sections.push({
-      id,
-      order: s.order,
-      ...(typeof s.title === 'string' ? { title: s.title } : {}),
-    });
-  }
-
-  const items: RelationshipGridItemSpec[] = [];
-  for (let i = 0; i < raw.items.length; i++) {
-    const item = raw.items[i];
-    if (!isRecord(item)) {
-      throw new CanvasAgentParseError('schema', `layout.items[${i}] must be an object.`);
-    }
-    if (typeof item.ref !== 'string' || !item.ref.trim()) {
-      throw new CanvasAgentParseError('schema', `layout.items[${i}].ref must be a non-empty string.`);
-    }
-    if (typeof item.section !== 'string' || !item.section.trim()) {
-      throw new CanvasAgentParseError(
-        'schema',
-        `layout.items[${i}].section must be a non-empty string.`,
-      );
-    }
-    const section = item.section.trim();
-    if (!sectionIds.has(section)) {
-      throw new CanvasAgentParseError(
-        'schema',
-        `layout.items[${i}].section "${section}" is not defined in layout.sections.`,
-      );
-    }
-
-    let preferred_order: number | undefined;
-    if (item.preferred_order !== undefined) {
-      if (typeof item.preferred_order !== 'number' || !Number.isInteger(item.preferred_order)) {
-        throw new CanvasAgentParseError(
-          'schema',
-          `layout.items[${i}].preferred_order must be an integer.`,
-        );
-      }
-      preferred_order = item.preferred_order;
-    }
-
-    let requires: string[] | undefined;
-    if (item.requires !== undefined) {
-      if (!Array.isArray(item.requires)) {
-        throw new CanvasAgentParseError('schema', `layout.items[${i}].requires must be an array.`);
-      }
-      requires = [];
-      const seenReq = new Set<string>();
-      for (let r = 0; r < item.requires.length; r++) {
-        const req = item.requires[r];
-        if (typeof req !== 'string' || !req.trim()) {
-          throw new CanvasAgentParseError(
-            'schema',
-            `layout.items[${i}].requires[${r}] must be a non-empty string.`,
-          );
-        }
-        const id = req.trim();
-        if (id === item.ref.trim()) {
-          throw new CanvasAgentParseError(
-            'schema',
-            `layout.items[${i}] cannot require itself.`,
-          );
-        }
-        if (seenReq.has(id)) {
-          throw new CanvasAgentParseError(
-            'schema',
-            `layout.items[${i}].requires has duplicate "${id}".`,
-          );
-        }
-        seenReq.add(id);
-        requires.push(id);
-      }
-    }
-
-    let relations: SemanticRelationSpec[] | undefined;
-    if (item.relations !== undefined) {
-      if (!Array.isArray(item.relations)) {
-        throw new CanvasAgentParseError('schema', `layout.items[${i}].relations must be an array.`);
-      }
-      if (item.relations.length > 3) {
-        throw new CanvasAgentParseError(
-          'schema',
-          `layout.items[${i}].relations may have at most 3 entries.`,
-        );
-      }
-      relations = [];
-      const seenRel = new Set<string>();
-      for (let r = 0; r < item.relations.length; r++) {
-        const rel = parseRelation(item.relations[r], `layout.items[${i}].relations[${r}]`);
-        if (rel.ref === item.ref.trim()) {
-          throw new CanvasAgentParseError(
-            'schema',
-            `layout.items[${i}] cannot relate to itself.`,
-          );
-        }
-        if (seenRel.has(rel.ref)) {
-          throw new CanvasAgentParseError(
-            'schema',
-            `layout.items[${i}].relations has duplicate target "${rel.ref}".`,
-          );
-        }
-        seenRel.add(rel.ref);
-        relations.push(rel);
-      }
-    }
-
-    let column_span: number | undefined;
-    if (item.column_span !== undefined) {
-      if (
-        typeof item.column_span !== 'number' ||
-        !Number.isInteger(item.column_span) ||
-        item.column_span < 1
-      ) {
-        throw new CanvasAgentParseError(
-          'schema',
-          `layout.items[${i}].column_span must be a positive integer.`,
-        );
-      }
-      column_span = item.column_span;
-    }
-
-    items.push({
-      ref: item.ref.trim(),
-      section,
-      ...(preferred_order !== undefined ? { preferred_order } : {}),
-      ...(requires ? { requires } : {}),
-      ...(relations ? { relations } : {}),
-      ...(column_span !== undefined ? { column_span } : {}),
-    });
-  }
-
   return {
-    type: 'relationship_grid',
+    type: 'chronological_grid',
     placement,
-    sections,
-    items,
     ...(columns !== undefined ? { columns } : {}),
   };
 }
 
-/** Parse either explicit grid or relationship_grid. */
+/** Parse chronological_grid or explicit grid. Rejects legacy relationship_grid. */
 export function parseGridLayout(
   raw: unknown,
   parsePlacement: (raw: unknown) => Placement,
@@ -335,15 +140,22 @@ export function parseGridLayout(
   if (!isRecord(raw)) {
     throw new CanvasAgentParseError('schema', 'layout must be an object.');
   }
+  if (raw.type === 'relationship_grid') {
+    throw new CanvasAgentParseError(
+      'schema',
+      'layout.type "relationship_grid" is no longer supported. Use "chronological_grid" with optional layout_cell on creation operations (operation order is reading order).',
+      'relationship_grid',
+    );
+  }
+  if (raw.type === 'chronological_grid') {
+    return parseChronologicalGrid(raw, parsePlacement);
+  }
   if (raw.type === 'grid') {
     return parseExplicitGrid(raw, parsePlacement);
   }
-  if (raw.type === 'relationship_grid') {
-    return parseRelationshipGrid(raw, parsePlacement);
-  }
   throw new CanvasAgentParseError(
     'schema',
-    'layout.type must be "grid" or "relationship_grid".',
+    'layout.type must be "chronological_grid" or "grid".',
     String(raw.type),
   );
 }
@@ -394,6 +206,48 @@ function validateCreateRefs(
   }
 }
 
+function validateChronologicalAgainstOperations(
+  operations: readonly CanvasOperation[],
+): void {
+  const creates = operations.filter(isGridCreatableOp);
+  for (const op of creates) {
+    if (!op.ref?.trim()) {
+      throw new CanvasAgentParseError(
+        'schema',
+        `${op.type} is missing "ref" required by chronological_grid.`,
+      );
+    }
+    if (op.column_span !== undefined) {
+      if (
+        typeof op.column_span !== 'number' ||
+        !Number.isInteger(op.column_span) ||
+        op.column_span < 1 ||
+        op.column_span > GRID_LAYOUT_CONFIG.maxColumns
+      ) {
+        throw new CanvasAgentParseError(
+          'schema',
+          `${op.type} ref "${op.ref}" column_span must be an integer from 1 to ${GRID_LAYOUT_CONFIG.maxColumns}.`,
+        );
+      }
+    }
+  }
+  const refs = new Set<string>();
+  for (const op of creates) {
+    if (refs.has(op.ref!)) {
+      throw new CanvasAgentParseError('schema', `Duplicate operation ref "${op.ref}".`);
+    }
+    refs.add(op.ref!);
+  }
+  try {
+    groupCreationOpsIntoCells(operations);
+  } catch (err) {
+    if (err instanceof ChronologicalCellLayoutError) {
+      throw new CanvasAgentParseError('schema', err.message);
+    }
+    throw err;
+  }
+}
+
 /**
  * Ensure refs/cells are valid and multi-create viewport_default plans use a grid.
  */
@@ -411,64 +265,29 @@ export function validateLayoutAgainstOperations(
     if (allExplicit) return;
     throw new CanvasAgentParseError(
       'schema',
-      'Multiple create operations require a grid "layout" (or explicit relative/absolute placement on each). Do not assign viewport_default to every object.',
+      'Multiple create operations require a "layout" of type chronological_grid or grid (or explicit relative/absolute placement on each). Do not assign viewport_default to every object.',
     );
+  }
+
+  if (layout.type === 'chronological_grid') {
+    validateChronologicalAgainstOperations(operations);
+    return;
   }
 
   validateCreateRefs(layout.items, operations);
 
-  if (layout.type === 'grid') {
-    const occupied = new Set<string>();
-    for (const item of layout.items) {
-      const span = item.column_span ?? 1;
-      for (let c = item.column; c < item.column + span; c++) {
-        const key = `${item.row}:${c}`;
-        if (occupied.has(key)) {
-          throw new CanvasAgentParseError(
-            'schema',
-            `layout cell (${item.row}, ${c}) is occupied by more than one item.`,
-          );
-        }
-        occupied.add(key);
-      }
-    }
-    return;
-  }
-
-  // relationship_grid — validate relation/require refs + acyclic prerequisites
-  const refs = new Set(layout.items.map((i) => i.ref));
+  const occupied = new Set<string>();
   for (const item of layout.items) {
-    for (const rel of item.relations ?? []) {
-      if (!refs.has(rel.ref)) {
+    const span = item.column_span ?? 1;
+    for (let c = item.column; c < item.column + span; c++) {
+      const key = `${item.row}:${c}`;
+      if (occupied.has(key)) {
         throw new CanvasAgentParseError(
           'schema',
-          `Item "${item.ref}" relation target "${rel.ref}" is not a created layout ref.`,
+          `layout cell (${item.row}, ${c}) is occupied by more than one item.`,
         );
       }
+      occupied.add(key);
     }
-    for (const req of item.requires ?? []) {
-      if (!refs.has(req)) {
-        throw new CanvasAgentParseError(
-          'schema',
-          `Item "${item.ref}" requires unknown ref "${req}".`,
-        );
-      }
-    }
-  }
-
-  const requires = new Map<string, string[]>();
-  for (const item of layout.items) {
-    requires.set(item.ref, [...(item.requires ?? [])]);
-  }
-  try {
-    topologicalOrder(
-      layout.items.map((i) => i.ref),
-      requires,
-    );
-  } catch (err) {
-    throw new CanvasAgentParseError(
-      'schema',
-      err instanceof Error ? err.message : 'Invalid prerequisite graph.',
-    );
   }
 }

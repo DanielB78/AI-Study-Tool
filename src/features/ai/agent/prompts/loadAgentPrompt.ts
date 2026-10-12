@@ -32,7 +32,7 @@ You may:
 - update the text of existing textboxes
 - create new interactive graphs
 - edit existing graphs supplied in context (selection or spatial neighbour)
-- arrange multiple related creates using \`relationship_grid\` (preferred) or explicit \`grid\`
+- arrange multiple related creates using \`chronological_grid\` (preferred) with optional \`layout_cell\`, or explicit \`grid\` when the user demands a specific arrangement
 
 You receive a set of relevant canvas elements retrieved from the user's board.
 
@@ -75,7 +75,7 @@ Introduction/intuition → definitions → mathematical formulation → derivati
 3. \`update_text\` — replace the COMPLETE text of an existing TextElement
 4. \`create_graph\` — create a new interactive GraphElement
 5. Graph edits (context graphs only): \`add_graph_expression\`, \`update_graph_expression\`, \`remove_graph_expression\`, \`set_graph_expression_visibility\`, \`update_graph_viewport\`, \`update_graph_settings\`, \`add_graph_point\`, \`update_graph_point\`, \`remove_graph_point\`
-6. \`layout\` (response-level grid) — assign create ops to rows/columns for multi-element creation
+6. \`layout\` (response-level) — \`chronological_grid\` (default) or explicit \`grid\` for multi-element creation
 
 Do NOT emit: delete, move, resize, style, shape, connector, or group operations.
 
@@ -190,23 +190,24 @@ Use world-space relationships. Do NOT invent arbitrary x/y for ordinary relative
 
 When creating **two or more related objects** with no explicit "next to X" instruction, you MUST return a response-level \`layout\`.
 
-**Prefer \`relationship_grid\` (High-mode default for educational multi-element plans):**
+**Prefer \`chronological_grid\` (High-mode default):**
 
 - Give each create a temporary \`ref\`
-- Define ordered \`sections\` (topic bands) with \`id\`, \`order\`, optional \`title\`
-- For each item: \`section\`, optional \`preferred_order\`, optional \`requires\` (hard prereqs), optional \`relations\` (≤3 strongest links with strength 0–1)
+- Emit creation operations in the **order the learner should read them** (the app places cells left→right, then top→bottom)
+- Optionally set \`layout_cell\` on consecutive creates that belong together (same cell, vertical stack, **max 4** objects)
+- Members of one \`layout_cell\` MUST be contiguous in the operations array
+- Omit \`layout_cell\` to give each object its own cell
 - Put \`placement\` on the layout (usually \`viewport_default\`)
-- Do **not** assign row/column — the app optimises placement to keep related objects close while preserving section order and prerequisites
-- Relation strengths are approximate attraction weights (0.9–1.0 tightly complementary; 0.7–0.9 strong; lower = weaker). Report real links only — do not invent fillers
-- \`requires\` is a hard instructional order (row-major: left→right, then top→bottom). Never create prerequisite cycles
-- Optional \`column_span\` on items that should be wide (titles, large graphs)
+- Do **not** assign row/column, world coordinates, or textbox sizes
+- Do **not** emit relations, preferred_order, requires, topic sections, or relationship scores — they are ignored/rejected
+- Optional \`column_span\` (1–4) on a create widens that object's cell
 
 **Use explicit \`type: "grid"\` only when the user demands a specific arrangement** (e.g. "two columns", "graph on the right"):
 
 - Assign every create to a cell via \`row\`, \`column\`, optional \`column_span\`
 - **Column limit:** \`1 <= columns <= min(4, ceil(sqrt(N)))\` (app reflows if exceeded)
 
-In both modes: the application measures sizes, prevents overlaps, and moves the **whole group** if blocked. Do NOT put \`viewport_default\` on every child to skip layout.
+In both modes: the application measures sizes, stacks cell members, prevents overlaps, and moves the **whole group** if blocked. Do NOT put \`viewport_default\` on every child to skip layout.
 
 ### Rich text formatting
 
@@ -340,11 +341,11 @@ USER: "Write a short note about electric fields next to the electricity note." (
 
 {"operations":[{"type":"create_text","text":"An electric field describes the force that a charge would experience at each point in space.","placement":{"mode":"relative_to_element","anchor_element_id":"textbox_12","relation":"near"}}]}
 
-### Multi-element grid (title + explanation + graph + equation)
+### Multi-element chronological grid (title + explanation + graph + equation)
 
 USER: "Explain Gauss's law with a graph of 1/x**2 and the equation."
 
-{"operations":[{"type":"create_text","ref":"title","text":"Gauss's Law"},{"type":"create_text","ref":"explanation","text":"Gauss's law relates electric flux through a closed surface to the total enclosed charge."},{"type":"create_graph","ref":"graph","expressions":[{"expression":"1/x**2","visible":true,"domain_min":null,"domain_max":null}],"points":[],"viewport":{"x_min":-10,"x_max":10,"y_min":-10,"y_max":10},"settings":{"title":null,"x_axis_label":null,"y_axis_label":null,"show_grid":true,"show_x_axis":true,"show_y_axis":true}},{"type":"create_equation","ref":"equation","latex":"\\\\oint_S \\\\mathbf{E}\\\\cdot d\\\\mathbf{A}=\\\\frac{Q_{\\\\mathrm{enc}}}{\\\\varepsilon_0}"}],"layout":{"type":"grid","columns":2,"placement":{"mode":"viewport_default"},"items":[{"ref":"title","row":0,"column":0,"column_span":2},{"ref":"explanation","row":1,"column":0},{"ref":"graph","row":1,"column":1},{"ref":"equation","row":2,"column":0,"column_span":2}]}}
+{"operations":[{"type":"create_text","ref":"title","layout_cell":"intro","text":"Gauss's Law"},{"type":"create_text","ref":"explanation","layout_cell":"intro","text":"Gauss's law relates electric flux through a closed surface to the total enclosed charge."},{"type":"create_equation","ref":"equation","layout_cell":"maths","latex":"\\\\oint_S \\\\mathbf{E}\\\\cdot d\\\\mathbf{A}=\\\\frac{Q_{\\\\mathrm{enc}}}{\\\\varepsilon_0}"},{"type":"create_graph","ref":"graph","layout_cell":"maths","expressions":[{"expression":"1/x**2","visible":true,"domain_min":null,"domain_max":null}],"points":[],"viewport":{"x_min":-10,"x_max":10,"y_min":-10,"y_max":10},"settings":{"title":null,"x_axis_label":null,"y_axis_label":null,"show_grid":true,"show_x_axis":true,"show_y_axis":true}}],"layout":{"type":"chronological_grid","placement":{"mode":"viewport_default"}}}
 
 ### Edit existing
 

@@ -98,6 +98,48 @@ function parseOptionalRef(raw: Record<string, unknown>): string | undefined {
   return raw.ref.trim();
 }
 
+function parseOptionalLayoutCell(raw: Record<string, unknown>): string | undefined {
+  if (raw.layout_cell === undefined || raw.layout_cell === null) return undefined;
+  if (typeof raw.layout_cell !== 'string' || !raw.layout_cell.trim()) {
+    throw new CanvasAgentParseError(
+      'schema',
+      'layout_cell must be a non-empty string when provided.',
+    );
+  }
+  return raw.layout_cell.trim();
+}
+
+function parseOptionalColumnSpan(raw: Record<string, unknown>): number | undefined {
+  if (raw.column_span === undefined || raw.column_span === null) return undefined;
+  if (
+    typeof raw.column_span !== 'number' ||
+    !Number.isInteger(raw.column_span) ||
+    raw.column_span < 1 ||
+    raw.column_span > 4
+  ) {
+    throw new CanvasAgentParseError(
+      'schema',
+      'column_span must be an integer from 1 to 4 when provided.',
+    );
+  }
+  return raw.column_span;
+}
+
+function creationLayoutExtras(raw: Record<string, unknown>): {
+  ref?: string;
+  layout_cell?: string;
+  column_span?: number;
+} {
+  const ref = parseOptionalRef(raw);
+  const layout_cell = parseOptionalLayoutCell(raw);
+  const column_span = parseOptionalColumnSpan(raw);
+  return {
+    ...(ref ? { ref } : {}),
+    ...(layout_cell ? { layout_cell } : {}),
+    ...(column_span !== undefined ? { column_span } : {}),
+  };
+}
+
 /** Placement is optional on creates assigned to a grid; default viewport_default. */
 function parsePlacementOptional(raw: unknown): Placement {
   if (raw === undefined || raw === null) {
@@ -208,13 +250,12 @@ function parseStructuredNote(raw: Record<string, unknown>): CreateStructuredNote
     fields[fieldId] = parseFieldPayload(payload, fieldId);
   }
   const placement = parsePlacementOptional(raw.placement);
-  const ref = parseOptionalRef(raw);
   return {
     type: 'create_structured_note',
     structure_id: structureId.trim(),
     fields,
     placement,
-    ...(ref ? { ref } : {}),
+    ...creationLayoutExtras(raw),
   };
 }
 
@@ -408,7 +449,6 @@ function parseCreateGraph(raw: Record<string, unknown>): CreateGraphOperation {
   const viewport = parseGraphViewport(raw.viewport);
   const settings = parseGraphSettings(raw.settings);
   const placement = parsePlacementOptional(raw.placement);
-  const ref = parseOptionalRef(raw);
 
   return {
     type: 'create_graph',
@@ -417,7 +457,7 @@ function parseCreateGraph(raw: Record<string, unknown>): CreateGraphOperation {
     viewport,
     settings,
     placement,
-    ...(ref ? { ref } : {}),
+    ...creationLayoutExtras(raw),
   };
 }
 
@@ -431,12 +471,11 @@ function parseCreateEquation(raw: Record<string, unknown>): CreateEquationOperat
     );
   }
   const placement = parsePlacementOptional(raw.placement);
-  const ref = parseOptionalRef(raw);
   return {
     type: 'create_equation',
     latex: sanitizeLatexSource(latex),
     placement,
-    ...(ref ? { ref } : {}),
+    ...creationLayoutExtras(raw),
   };
 }
 
@@ -446,7 +485,6 @@ function parseOperation(raw: unknown): CanvasOperation {
   }
   if (raw.type === 'create_text') {
     const placement = parsePlacementOptional(raw.placement);
-    const ref = parseOptionalRef(raw);
     let rich_text: RichTextDocument | undefined;
     if (raw.rich_text !== undefined && raw.rich_text !== null) {
       try {
@@ -472,7 +510,7 @@ function parseOperation(raw: unknown): CanvasOperation {
       text,
       placement,
       ...(rich_text ? { rich_text } : {}),
-      ...(ref ? { ref } : {}),
+      ...creationLayoutExtras(raw),
     } satisfies CreateTextOperation;
   }
   if (raw.type === 'create_equation') {
@@ -1027,23 +1065,13 @@ export function describeOperationPlan(
 
   if (options?.layout) {
     const L = options.layout;
-    if (L.type === 'relationship_grid') {
-      const itemLines = L.items.map((it) => {
-        const rel =
-          it.relations && it.relations.length
-            ? ` relations=[${it.relations.map((r) => `${r.ref}:${r.strength}`).join(', ')}]`
-            : '';
-        const req =
-          it.requires && it.requires.length ? ` requires=[${it.requires.join(', ')}]` : '';
-        return `   ${it.ref} → section ${it.section}${it.preferred_order !== undefined ? ` order=${it.preferred_order}` : ''}${req}${rel}`;
-      });
+    if (L.type === 'chronological_grid') {
       lines.unshift(
         [
-          'RELATIONSHIP GRID LAYOUT',
-          `   Sections: ${L.sections.map((s) => `${s.order}:${s.id}`).join(', ')}`,
+          'CHRONOLOGICAL GRID LAYOUT',
           `   Group placement: ${formatPlacementLine(L.placement, 'short')}`,
-          '   Items:',
-          ...itemLines,
+          L.columns !== undefined ? `   Columns hint: ${L.columns}` : '   Columns: (app-calculated)',
+          '   Cell grouping: via operation layout_cell (consecutive ops; max 4)',
         ].join('\n'),
       );
     } else {

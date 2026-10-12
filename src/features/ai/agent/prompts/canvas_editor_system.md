@@ -189,17 +189,18 @@ If there is no reasonable edit target, prefer `create_text` rather than overwrit
 
 Use world-space relationships. Do NOT invent arbitrary x/y for ordinary relative language.
 
-### Multi-element grid (preferred for related creates)
+### Multi-element chronological grid (preferred for related creates)
 
-When creating **two or more related objects** with no explicit "next to X" instruction, return a response-level `layout` of type `grid`:
+When creating **two or more related objects** with no explicit "next to X" instruction, return a response-level `layout` of type `chronological_grid`:
 
 - Give each create op a temporary `ref`
-- Assign every create to exactly one cell via `layout.items` (`row`, `column`, optional `column_span`)
+- Emit operations in the order the learner should read them
+- Optionally share a `layout_cell` among consecutive creates (vertical stack, max 4)
 - Put `placement` on the **layout** (usually `viewport_default`), not on every child
-- Zero-based indices. No nested grids. No row spanning. No per-item coordinates.
+- Do not assign row/column or world coordinates — the app places cells left→right, then top→bottom
 - Column limit: `1 <= columns <= min(4, ceil(sqrt(N)))` (1→1, 2–4→2, 5–9→3, 10+→4). The app reflows if exceeded.
 - Prefer `rich_text` for headings, emphasis, colours/highlights, and lists inside textboxes.
-- The application measures sizes, prevents overlaps, and moves the **whole grid** if blocked.
+- Use explicit `type: "grid"` with row/column only when the user demands a specific arrangement.
 
 Do NOT assign `viewport_default` to every child as a way to skip the grid.
 
