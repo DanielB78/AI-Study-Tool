@@ -18,6 +18,7 @@ export function createLiveAgentExecutorTarget(): AgentExecutorTarget {
     getBoardId: () => useCanvasStore.getState().document.id,
     beginInteraction: () => useCanvasStore.getState().beginInteraction(),
     endInteraction: () => useCanvasStore.getState().endInteraction(),
+    rollbackInteraction: () => useCanvasStore.getState().rollbackInteraction(),
     addElement: (element, select) => useCanvasStore.getState().addElement(element, select),
     updateElement: (id, updater) => useCanvasStore.getState().updateElement(id, updater),
     setSelection: (ids) => useCanvasStore.getState().select(ids),

@@ -712,6 +712,9 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               text: { type: 'string', minLength: 1 },
               level: { type: 'integer', enum: [1, 2] },
               after_block_id: { type: 'string', minLength: 1 },
+              before_block_id: { type: 'string', minLength: 1 },
+              before_quote: { $ref: '#/$defs/textAnchor' },
+              after_quote: { $ref: '#/$defs/textAnchor' },
             },
           },
           {
@@ -1090,14 +1093,19 @@ update_text:
 TEXT FEATURES (optional built-in TextElement features — prefer these over new standalone textboxes):
 - set_text_title: { "type":"set_text_title", "target_element_id":"<id>", "text":"Electric Fields" }
 - remove_text_title: { "type":"remove_text_title", "target_element_id":"<id>" }
-- insert_text_heading: { "type":"insert_text_heading", "target_element_id":"<id>", "text":"Field Direction", "level":1, "after_block_id":"<optional>" }
-- highlight_text: { "type":"highlight_text", "target_element_id":"<id>", "anchor":{ "quote":"vector quantity", "block_id":"<optional>" }, "style":"important"|"definition"|"warning"|"emphasis" }
-- add_text_comment: { "type":"add_text_comment", "target_element_id":"<id>", "anchor":{ "quote":"positive test charge" }, "comment":"…", "comment_type":"explanation"|"correction"|"suggestion"|"question" }
+- insert_text_heading: REQUIRES an explicit position (after_block_id | before_block_id | before_quote | after_quote). Never omit it.
+  { "type":"insert_text_heading", "target_element_id":"<id>", "text":"Field Direction", "level":1, "before_quote":{ "quote":"The direction of the field" } }
+  before_quote / after_quote may split a paragraph. Ambiguous quotes need block_id or occurrence.
+- highlight_text: { "type":"highlight_text", "target_element_id":"<id>", "anchor":{ "quote":"vector quantity", "block_id":"<optional>", "occurrence":0 }, "style":"important"|"definition"|"warning"|"emphasis" }
+- add_text_comment: { "type":"add_text_comment", "target_element_id":"<id>", "anchor":{ "quote":"positive test charge", "occurrence":0 }, "comment":"…", "comment_type":"explanation"|"correction"|"suggestion"|"question" }
+  If a quote appears more than once, provide block_id or occurrence — never guess.
 - update_text_comment / remove_text_comment: require comment_id from context
 - add_text_note: { "type":"add_text_note", "target_element_id":"<id>", "text":"…", "note_type":"extra_information"|"important"|"caution"|"reference" }
 - update_text_note / remove_text_note: require note_id from context
-Never invent comment_id / note_id / block_id. Prefer native features when the user asks to comment / highlight / title / note / organise existing text.
+Canonical target field is target_element_id. Never invent comment_id / note_id / block_id.
+Prefer native features when the user asks to comment / highlight / title / note / organise existing text.
 Do NOT simulate comments with extra textboxes, arrows, or floating shapes.
+Use features selectively — do not add every feature to every textbox. Avoid redundant comments, purposeless overlapping annotations, and long notes that repeat the main text.
 
 RICH TEXT (optional on create_text / update_text):
 {

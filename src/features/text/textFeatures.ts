@@ -154,11 +154,21 @@ export function resolveQuoteAnchor(
   );
 }
 
-export function applyHighlightToBlock(
+export type SpanDecorationPatch = {
+  /** Ordinary highlight — does not clear linked_comment_id. */
+  highlightColor?: string;
+  /** Linked-comment mark — does not clear highlight_color. */
+  linkedCommentId?: string;
+  /** Clear linked_comment_id when it matches this id. */
+  clearLinkedCommentId?: string;
+};
+
+/** Apply range decorations without destroying coexisting highlight/comment marks. */
+export function applyDecorationToBlock(
   block: RichTextBlock,
   start: number,
   end: number,
-  highlightColor: string,
+  patch: SpanDecorationPatch,
 ): RichTextBlock {
   if (start >= end) return block;
   const plain = blockPlainText(block);
@@ -170,14 +180,24 @@ export function applyHighlightToBlock(
   for (const span of block.spans) {
     for (const ch of span.text) {
       const inRange = cursor >= lo && cursor < hi;
-      chars.push({
-        ch,
-        style: inRange
-          ? { ...span.style, highlight_color: highlightColor }
-          : span.style
-            ? { ...span.style }
-            : undefined,
-      });
+      let style = span.style ? { ...span.style } : undefined;
+      if (inRange) {
+        style = { ...(style ?? {}) };
+        if (patch.highlightColor !== undefined) {
+          style.highlight_color = patch.highlightColor;
+        }
+        if (patch.linkedCommentId !== undefined) {
+          style.linked_comment_id = patch.linkedCommentId;
+        }
+        if (
+          patch.clearLinkedCommentId &&
+          style.linked_comment_id === patch.clearLinkedCommentId
+        ) {
+          delete style.linked_comment_id;
+        }
+        if (Object.keys(style).length === 0) style = undefined;
+      }
+      chars.push({ ch, style });
       cursor += 1;
     }
   }
@@ -200,6 +220,16 @@ export function applyHighlightToBlock(
   return { ...block, spans: spans.length ? spans : [{ text: '' }] };
 }
 
+/** @deprecated Prefer applyDecorationToBlock — kept for call-site clarity. */
+export function applyHighlightToBlock(
+  block: RichTextBlock,
+  start: number,
+  end: number,
+  highlightColor: string,
+): RichTextBlock {
+  return applyDecorationToBlock(block, start, end, { highlightColor });
+}
+
 export function applyHighlightInDocument(
   doc: RichTextDocument,
   anchor: Pick<TextCommentAnchor, 'blockId' | 'start' | 'end'>,
@@ -209,9 +239,44 @@ export function applyHighlightInDocument(
   return {
     blocks: withIds.blocks.map((b) =>
       b.id === anchor.blockId
-        ? applyHighlightToBlock(b, anchor.start, anchor.end, highlightColor)
+        ? applyDecorationToBlock(b, anchor.start, anchor.end, {
+            highlightColor,
+          })
         : b,
     ),
+  };
+}
+
+export function applyCommentMarkInDocument(
+  doc: RichTextDocument,
+  anchor: Pick<TextCommentAnchor, 'blockId' | 'start' | 'end'>,
+  commentId: string,
+): RichTextDocument {
+  const withIds = ensureBlockIds(doc);
+  return {
+    blocks: withIds.blocks.map((b) =>
+      b.id === anchor.blockId
+        ? applyDecorationToBlock(b, anchor.start, anchor.end, {
+            linkedCommentId: commentId,
+          })
+        : b,
+    ),
+  };
+}
+
+export function clearCommentMarkInDocument(
+  doc: RichTextDocument,
+  commentId: string,
+): RichTextDocument {
+  const withIds = ensureBlockIds(doc);
+  return {
+    blocks: withIds.blocks.map((b) => {
+      const plainLen = blockPlainText(b).length;
+      if (plainLen === 0) return b;
+      return applyDecorationToBlock(b, 0, plainLen, {
+        clearLinkedCommentId: commentId,
+      });
+    }),
   };
 }
 
@@ -312,8 +377,8 @@ export function addCommentToElement(
   const doc = ensureRichText(el);
   const anchor = resolveQuoteAnchor(doc, spec.anchor);
   const commentId = newFeatureId('comment');
-  const color = HIGHLIGHT_STYLE_COLORS.emphasis;
-  const nextDoc = applyHighlightInDocument(doc, anchor, color);
+  // Mark via linked_comment_id so ordinary highlight_color is preserved.
+  const nextDoc = applyCommentMarkInDocument(doc, anchor, commentId);
   const comment: TextComment = {
     id: commentId,
     anchor,
@@ -366,27 +431,99 @@ export function removeCommentFromElement(
   if (comments.length === (el.comments ?? []).length) {
     throw new Error(`Unknown comment_id "${commentId}" on text element "${el.id}".`);
   }
-  return { ...el, comments: comments.length ? comments : undefined };
+  const doc = el.richText ? clearCommentMarkInDocument(el.richText, commentId) : el.richText;
+  return {
+    ...el,
+    ...(doc ? { richText: doc, text: richTextToPlainText(doc) } : {}),
+    comments: comments.length ? comments : undefined,
+  };
 }
 
-export function insertHeadingInElement(
-  el: TextElement,
-  opts: {
-    text: string;
-    level?: 1 | 2;
-    afterBlockId?: string;
-  },
-): { element: TextElement; blockId: string } {
-  const doc = ensureRichText(el);
-  const blockId = newFeatureId('heading');
-  const level = opts.level ?? 1;
-  const block: RichTextBlock = {
-    id: blockId,
+export type InsertHeadingPosition = {
+  afterBlockId?: string;
+  beforeBlockId?: string;
+  /** Insert heading immediately before this quote (may split a paragraph). */
+  beforeQuote?: QuoteAnchorSpec;
+  /** Insert heading immediately after this quote (may split a paragraph). */
+  afterQuote?: QuoteAnchorSpec;
+};
+
+function splitBlockAt(
+  block: RichTextBlock,
+  offset: number,
+): { before: RichTextBlock; after: RichTextBlock } {
+  const plain = blockPlainText(block);
+  const cut = Math.max(0, Math.min(offset, plain.length));
+  const beforeChars: Array<{ ch: string; style?: RichTextSpan['style'] }> = [];
+  const afterChars: Array<{ ch: string; style?: RichTextSpan['style'] }> = [];
+  let cursor = 0;
+  for (const span of block.spans) {
+    for (const ch of span.text) {
+      const entry = { ch, style: span.style ? { ...span.style } : undefined };
+      if (cursor < cut) beforeChars.push(entry);
+      else afterChars.push(entry);
+      cursor += 1;
+    }
+  }
+  const toSpans = (chars: typeof beforeChars): RichTextSpan[] => {
+    const spans: RichTextSpan[] = [];
+    for (const c of chars) {
+      const last = spans[spans.length - 1];
+      const styleKey = JSON.stringify(c.style ?? null);
+      const lastKey = last ? JSON.stringify(last.style ?? null) : null;
+      if (last && styleKey === lastKey) last.text += c.ch;
+      else spans.push({ text: c.ch, ...(c.style ? { style: c.style } : {}) });
+    }
+    return spans.length ? spans : [{ text: '' }];
+  };
+  return {
+    before: { ...block, id: block.id, spans: toSpans(beforeChars) },
+    after: { ...block, id: newFeatureId('block'), spans: toSpans(afterChars) },
+  };
+}
+
+/** Remap comment anchors after splitting `oldBlockId` at `cut` into before/after. */
+export function remapCommentsAfterSplit(
+  comments: TextComment[] | undefined,
+  oldBlockId: string,
+  cut: number,
+  afterBlockId: string,
+): TextComment[] | undefined {
+  if (!comments?.length) return comments;
+  return comments.map((c) => {
+    if (c.anchor.blockId !== oldBlockId) return c;
+    const { start, end } = c.anchor;
+    if (end <= cut) {
+      return c;
+    }
+    if (start >= cut) {
+      return {
+        ...c,
+        anchor: {
+          ...c.anchor,
+          blockId: afterBlockId,
+          start: start - cut,
+          end: end - cut,
+          status: 'resolved',
+        },
+      };
+    }
+    // Span crossed the split — do not silently reattach.
+    return {
+      ...c,
+      anchor: { ...c.anchor, status: 'unresolved' },
+    };
+  });
+}
+
+function buildHeadingBlock(text: string, level: 1 | 2): RichTextBlock {
+  return {
+    id: newFeatureId('heading'),
     type: 'heading',
     role: 'heading',
     spans: [
       {
-        text: opts.text.trim(),
+        text: text.trim(),
         style: {
           bold: true,
           font_size: level === 1 ? 'heading' : 'subheading',
@@ -394,22 +531,86 @@ export function insertHeadingInElement(
       },
     ],
   };
-  const blocks = [...doc.blocks];
-  if (opts.afterBlockId) {
-    const idx = blocks.findIndex((b) => b.id === opts.afterBlockId);
-    if (idx < 0) {
-      throw new Error(`Unknown after_block_id "${opts.afterBlockId}".`);
-    }
-    blocks.splice(idx + 1, 0, block);
-  } else {
-    blocks.push(block);
+}
+
+/**
+ * Insert a heading at an explicit position.
+ * Rejects missing position — never appends arbitrarily.
+ */
+export function insertHeadingInElement(
+  el: TextElement,
+  opts: {
+    text: string;
+    level?: 1 | 2;
+    afterBlockId?: string;
+    beforeBlockId?: string;
+    beforeQuote?: QuoteAnchorSpec;
+    afterQuote?: QuoteAnchorSpec;
+  },
+): { element: TextElement; blockId: string } {
+  const hasPos = !!(
+    opts.afterBlockId ||
+    opts.beforeBlockId ||
+    opts.beforeQuote ||
+    opts.afterQuote
+  );
+  if (!hasPos) {
+    throw new Error(
+      'insert_text_heading requires a position: after_block_id, before_block_id, before_quote, or after_quote.',
+    );
   }
+
+  let doc = ensureRichText(el);
+  let comments = el.comments;
+  const level = opts.level ?? 1;
+  const heading = buildHeadingBlock(opts.text, level);
+  const blockId = heading.id!;
+  let blocks = [...doc.blocks];
+
+  if (opts.afterBlockId || opts.beforeBlockId) {
+    const refId = opts.afterBlockId ?? opts.beforeBlockId!;
+    const idx = blocks.findIndex((b) => b.id === refId);
+    if (idx < 0) {
+      throw new Error(
+        `Unknown ${opts.afterBlockId ? 'after_block_id' : 'before_block_id'} "${refId}".`,
+      );
+    }
+    const insertAt = opts.afterBlockId ? idx + 1 : idx;
+    blocks.splice(insertAt, 0, heading);
+  } else {
+    const quoteSpec = opts.beforeQuote ?? opts.afterQuote!;
+    const anchor = resolveQuoteAnchor(doc, quoteSpec);
+    const idx = blocks.findIndex((b) => b.id === anchor.blockId);
+    if (idx < 0) {
+      throw new Error(`Anchor block "${anchor.blockId}" not found.`);
+    }
+    const block = blocks[idx]!;
+    const cut = opts.beforeQuote ? anchor.start : anchor.end;
+    const plain = blockPlainText(block);
+
+    if (cut <= 0) {
+      blocks.splice(idx, 0, heading);
+    } else if (cut >= plain.length) {
+      blocks.splice(idx + 1, 0, heading);
+    } else {
+      const { before, after } = splitBlockAt(block, cut);
+      comments = remapCommentsAfterSplit(
+        comments,
+        block.id!,
+        cut,
+        after.id!,
+      );
+      blocks.splice(idx, 1, before, heading, after);
+    }
+  }
+
   const richText = { blocks };
   return {
     element: {
       ...el,
       richText,
       text: richTextToPlainText(richText),
+      ...(comments ? { comments } : {}),
     },
     blockId,
   };

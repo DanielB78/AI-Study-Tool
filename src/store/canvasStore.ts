@@ -94,6 +94,8 @@ export interface CanvasStore extends TransientUI, HistorySlice {
   pushHistory: () => void;
   beginInteraction: () => void;
   endInteraction: () => void;
+  /** Restore the snapshot taken by beginInteraction; abort the transaction. */
+  rollbackInteraction: () => void;
   undo: () => void;
   redo: () => void;
 
@@ -299,6 +301,24 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       if (!idSet) continue;
       ragSync.updateGeometry(document.id, el);
     }
+  },
+
+  rollbackInteraction: () => {
+    const { past, historySuspended } = get();
+    if (!historySuspended || past.length === 0) {
+      set({ historySuspended: false, snapGuides: [] });
+      return;
+    }
+    const previous = past[past.length - 1]!;
+    set({
+      document: previous,
+      past: past.slice(0, -1),
+      historySuspended: false,
+      snapGuides: [],
+      editingTextId: null,
+      editingShapeLabelId: null,
+    });
+    get().persist();
   },
 
   undo: () => {

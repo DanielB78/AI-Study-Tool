@@ -25,8 +25,13 @@ export type RichTextSpanStyle = {
   underline?: boolean;
   /** Named palette or #RRGGBB */
   color?: RichTextColorName | string;
-  /** Named palette or #RRGGBB */
+  /** Ordinary semantic/manual highlight (named palette or #RRGGBB). */
   highlight_color?: RichTextColorName | string;
+  /**
+   * Linked-comment mark — coexists with highlight_color.
+   * Comment highlights must not overwrite ordinary highlights.
+   */
+  linked_comment_id?: string;
   /** Preset name or numeric px (validated/capped) */
   font_size?: RichTextSizePreset | number;
 };

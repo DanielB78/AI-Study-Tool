@@ -64,6 +64,12 @@ function parseStyle(raw: unknown, path: string): RichTextSpanStyle | undefined {
     }
     style.highlight_color = raw.highlight_color.trim();
   }
+  if (raw.linked_comment_id !== undefined) {
+    if (typeof raw.linked_comment_id !== 'string' || !raw.linked_comment_id.trim()) {
+      throw new RichTextParseError(`${path}.linked_comment_id must be a non-empty string.`);
+    }
+    style.linked_comment_id = raw.linked_comment_id.trim();
+  }
   if (raw.font_size !== undefined) {
     if (typeof raw.font_size === 'string') {
       if (!(raw.font_size in RICH_TEXT_SIZE_PRESETS)) {

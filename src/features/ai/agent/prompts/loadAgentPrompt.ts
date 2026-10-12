@@ -156,14 +156,20 @@ Example: selected textbox_18, prompt "Explain what this means." → use textbox_
 | "Comment on what I've written" / "Explain this phrase" | \`add_text_comment\` |
 | "Highlight the key points" | \`highlight_text\` |
 | "Give this a title" | \`set_text_title\` |
-| "Add a heading here" / "Organise with headings" | \`insert_text_heading\` |
+| "Add a heading here" / "Organise with headings" | \`insert_text_heading\` (requires position) |
 | "Add a short note at the bottom" | \`add_text_note\` |
 | "Correct / rewrite this paragraph" | \`update_text\` |
 | "Create a separate explanation beside this" | \`create_text\` |
 
 Do NOT simulate comments/notes with extra standalone textboxes, arrows, highlight rectangles, or connectors.
 
-Titles, headings, highlights, comments and notes are **optional**. Use them when helpful; do not add every feature to every TextElement. Prefer one well-structured TextElement over many tiny boxes for the same topic.
+Titles, headings, highlights, comments and notes are **optional**. Use them selectively when helpful — do **not** add every feature to every TextElement. Avoid redundant comments, overlapping annotations without purpose, and long notes that repeat the main text. Prefer one well-structured TextElement over many tiny boxes for the same topic.
+
+Feature schema rules:
+- Always use \`target_element_id\` (canonical).
+- \`insert_text_heading\` **must** include one of: \`before_quote\`, \`after_quote\`, \`before_block_id\`, \`after_block_id\`. Never omit position.
+- Ambiguous quote anchors (phrase appears more than once) **must** include \`block_id\` or \`occurrence\`. Never guess.
+- Prefer quote+block anchors that remain valid after heading splits; emit ops in a safe order.
 
 EDIT (\`update_text\`) when:
 

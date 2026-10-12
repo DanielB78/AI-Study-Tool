@@ -87,14 +87,18 @@ describe('textFeatures — title / notes / headings / highlights', () => {
     expect(el.notes).toBeUndefined();
   });
 
-  it('insert heading into rich text flow', () => {
+  it('insert heading into rich text flow requires position', () => {
     const el = baseText('An electric field describes force.');
+    expect(() =>
+      insertHeadingInElement(el, { text: 'Definition', level: 1 }),
+    ).toThrow(/requires a position/);
     const { element, blockId } = insertHeadingInElement(el, {
       text: 'Definition',
       level: 1,
+      beforeQuote: { quote: 'An electric field' },
     });
     expect(blockId).toMatch(/^heading_/);
-    expect(element.richText!.blocks.some((b) => b.type === 'heading')).toBe(true);
+    expect(element.richText!.blocks[0]!.type).toBe('heading');
     expect(richTextToPlainText(element.richText!)).toContain('Definition');
   });
 
@@ -136,7 +140,7 @@ describe('textFeatures — linked comments', () => {
     expect(element.comments![0]!.anchor.status).toBe('resolved');
     expect(element.comments![0]!.displayState).toBe('collapsed');
     const spans = element.richText!.blocks.flatMap((b) => b.spans);
-    expect(spans.some((s) => s.style?.highlight_color)).toBe(true);
+    expect(spans.some((s) => s.style?.linked_comment_id === commentId)).toBe(true);
   });
 
   it('B: multiple comments on separate phrases', () => {

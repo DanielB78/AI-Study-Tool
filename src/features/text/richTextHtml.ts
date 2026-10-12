@@ -41,20 +41,31 @@ function spanToHtml(
   const highlight = style.highlight_color
     ? resolveRichTextColor(style.highlight_color, 'highlight', '#FEF08A')
     : null;
+  const hasComment = !!style.linked_comment_id;
 
   if (style.bold) parts.push('font-weight:700');
   if (style.italic) parts.push('font-style:italic');
-  if (style.underline) parts.push('text-decoration:underline');
+  if (style.underline || hasComment) parts.push('text-decoration:underline');
   if (color !== defaults.color) parts.push(`color:${color}`);
   // Relative em so zooming the host scales all spans uniformly.
   if (fontSize !== defaults.fontSize) {
     parts.push(`font-size:${fontSizeToEm(fontSize, defaults.fontSize)}`);
   }
+  // Ordinary highlight and linked-comment marks coexist.
   if (highlight) parts.push(`background-color:${highlight}`);
+  else if (hasComment) parts.push('background-color:rgba(221,214,254,0.55)');
+  if (hasComment) {
+    parts.push('box-decoration-break:clone');
+    parts.push('-webkit-box-decoration-break:clone');
+    parts.push('border-bottom:2px solid #7C3AED');
+  }
 
   const text = escapeHtml(span.text).replace(/\n/g, '<br/>');
-  if (parts.length === 0) return text;
-  return `<span style="${parts.join(';')}">${text}</span>`;
+  const attrs = hasComment
+    ? ` data-linked-comment="${escapeHtml(style.linked_comment_id!)}"`
+    : '';
+  if (parts.length === 0 && !attrs) return text;
+  return `<span${attrs}${parts.length ? ` style="${parts.join(';')}"` : ''}>${text}</span>`;
 }
 
 function blockToHtml(

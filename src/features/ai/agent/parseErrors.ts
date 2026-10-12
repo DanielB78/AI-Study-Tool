@@ -39,3 +39,50 @@ export class CanvasAgentParseError extends Error {
     this.detail = detail;
   }
 }
+
+export type ExecuteErrorStage =
+  | 'apply'
+  | 'measure'
+  | 'layout'
+  | 'create'
+  | 'update'
+  | 'text_feature';
+
+/** Structured execution failure — never report success for a failed op. */
+export class CanvasAgentExecuteError extends Error {
+  readonly opIndex: number;
+  readonly opType: string;
+  readonly targetId?: string;
+  readonly stage: ExecuteErrorStage;
+  readonly causeMessage?: string;
+
+  constructor(opts: {
+    opIndex: number;
+    opType: string;
+    targetId?: string;
+    stage: ExecuteErrorStage;
+    message: string;
+    cause?: unknown;
+  }) {
+    const causeMessage =
+      opts.cause instanceof Error
+        ? opts.cause.message
+        : opts.cause != null
+          ? String(opts.cause)
+          : undefined;
+    const target = opts.targetId ? ` target=${opts.targetId}` : '';
+    const causePart = causeMessage ? ` — ${causeMessage}` : '';
+    super(
+      `Operation ${opts.opIndex + 1} (${opts.opType}) failed at ${opts.stage}${target}${causePart}`,
+    );
+    this.name = 'CanvasAgentExecuteError';
+    this.opIndex = opts.opIndex;
+    this.opType = opts.opType;
+    this.targetId = opts.targetId;
+    this.stage = opts.stage;
+    this.causeMessage = causeMessage;
+    if (opts.cause instanceof Error) {
+      this.cause = opts.cause;
+    }
+  }
+}

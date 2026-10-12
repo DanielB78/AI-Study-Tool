@@ -1048,7 +1048,15 @@ export function createRagDebugStore() {
         } catch (err) {
           const message =
             err instanceof Error ? err.message : 'Failed to apply operations';
-          set({ error: message });
+          set({
+            error: message,
+            statusMessage: null,
+          });
+          useAiStore.setState({
+            status: 'error',
+            errorMessage: message,
+            statusMessage: null,
+          });
           return false;
         }
       },

@@ -46,7 +46,14 @@ export type InsertTextHeadingOperation = {
   target_element_id: string;
   text: string;
   level?: 1 | 2;
+  /** Insert after this existing block id. */
   after_block_id?: string;
+  /** Insert before this existing block id. */
+  before_block_id?: string;
+  /** Insert before this quote (may split a paragraph). */
+  before_quote?: TextAnchorSpec;
+  /** Insert after this quote (may split a paragraph). */
+  after_quote?: TextAnchorSpec;
 };
 
 export type HighlightTextOperation = {
@@ -193,14 +200,37 @@ export function parseTextFeatureOperation(raw: Record<string, unknown>): TextFea
         }
         level = raw.level;
       }
+      const after_block_id =
+        typeof raw.after_block_id === 'string' && raw.after_block_id.trim()
+          ? raw.after_block_id.trim()
+          : undefined;
+      const before_block_id =
+        typeof raw.before_block_id === 'string' && raw.before_block_id.trim()
+          ? raw.before_block_id.trim()
+          : undefined;
+      const before_quote =
+        raw.before_quote !== undefined
+          ? parseAnchor(raw.before_quote, 'insert_text_heading.before_quote')
+          : undefined;
+      const after_quote =
+        raw.after_quote !== undefined
+          ? parseAnchor(raw.after_quote, 'insert_text_heading.after_quote')
+          : undefined;
+      if (!after_block_id && !before_block_id && !before_quote && !after_quote) {
+        throw new CanvasAgentParseError(
+          'schema',
+          'insert_text_heading requires a position: after_block_id, before_block_id, before_quote, or after_quote.',
+        );
+      }
       return {
         type,
         target_element_id,
         text: raw.text.trim(),
         ...(level ? { level } : {}),
-        ...(typeof raw.after_block_id === 'string' && raw.after_block_id.trim()
-          ? { after_block_id: raw.after_block_id.trim() }
-          : {}),
+        ...(after_block_id ? { after_block_id } : {}),
+        ...(before_block_id ? { before_block_id } : {}),
+        ...(before_quote ? { before_quote } : {}),
+        ...(after_quote ? { after_quote } : {}),
       };
     }
     case 'highlight_text': {
@@ -345,6 +375,9 @@ export function applyTextFeatureOperation(
         text: op.text,
         level: op.level,
         afterBlockId: op.after_block_id,
+        beforeBlockId: op.before_block_id,
+        beforeQuote: op.before_quote,
+        afterQuote: op.after_quote,
       }).element;
       break;
     case 'highlight_text':

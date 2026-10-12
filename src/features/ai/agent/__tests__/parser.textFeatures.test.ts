@@ -81,7 +81,7 @@ describe('parseCanvasAgentResponse — text features', () => {
     ).toThrow(/not in the supplied canvas context/);
   });
 
-  it('parses highlight_text and insert_text_heading', () => {
+  it('parses highlight_text and insert_text_heading with position', () => {
     const res = parseCanvasAgentResponse(
       JSON.stringify({
         operations: [
@@ -96,6 +96,7 @@ describe('parseCanvasAgentResponse — text features', () => {
             target_element_id: 'text_12',
             text: 'Field Direction',
             level: 1,
+            before_quote: { quote: 'vector' },
           },
         ],
       }),
@@ -104,5 +105,26 @@ describe('parseCanvasAgentResponse — text features', () => {
     expect(res.operations).toHaveLength(2);
     expect(res.operations[0]?.type).toBe('highlight_text');
     expect(res.operations[1]?.type).toBe('insert_text_heading');
+    if (res.operations[1]?.type === 'insert_text_heading') {
+      expect(res.operations[1].before_quote?.quote).toBe('vector');
+    }
+  });
+
+  it('rejects insert_text_heading without position', () => {
+    expect(() =>
+      parseCanvasAgentResponse(
+        JSON.stringify({
+          operations: [
+            {
+              type: 'insert_text_heading',
+              target_element_id: 'text_12',
+              text: 'Field Direction',
+              level: 1,
+            },
+          ],
+        }),
+        ctx,
+      ),
+    ).toThrow(/requires a position/);
   });
 });

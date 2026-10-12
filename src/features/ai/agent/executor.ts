@@ -56,6 +56,7 @@ import { isGridCreatableOp } from './layout/measure';
 import { resolveGridPlan, type ResolveGridPlanResult } from './layout/resolveGridPlan';
 import type { LayoutDebugInfo } from './layout/types';
 import type { CreateTextOperation } from './operations';
+import { CanvasAgentExecuteError } from './parseErrors';
 
 /** Attach optional create_text title/notes/comments and resize. */
 function applyCreateTextFeaturePayload(
@@ -96,6 +97,8 @@ export interface AgentExecutorTarget {
   getBoardId: () => string;
   beginInteraction: () => void;
   endInteraction: () => void;
+  /** Abort the open interaction and restore the pre-transaction snapshot. */
+  rollbackInteraction: () => void;
   addElement: (element: CanvasElement, select?: boolean) => void;
   updateElement: (id: string, updater: (el: CanvasElement) => CanvasElement) => void;
   setSelection: (ids: string[]) => void;
@@ -387,99 +390,130 @@ export function executeCanvasOperations(
   }
 
   target.beginInteraction();
+  let committed = false;
   try {
-    for (const op of operations) {
-      if (op.type === 'update_text') {
-        const id = op.target_element_id;
-        target.updateElement(id, (el) => {
-          if (el.type !== 'text') return el;
-          const richText = op.rich_text as RichTextDocument | undefined;
-          const plain = richText ? richTextToPlainText(richText) : op.text;
-          const padding = el.padding;
-          const styleCfg = {
-            fontSize: el.fontSize,
-            fontFamily: el.fontFamily,
-            fontWeight: el.fontWeight,
-            fontItalic: el.fontItalic,
-            underline: el.underline,
-            lineHeight: el.lineHeight,
-            color: el.color,
-            padding,
-          };
-          const allowsAutoWidth = textElementAllowsAiAutoWidth(el.metadata);
-          const userResized = textElementIsUserResized(el.metadata);
-          const measured = TextElementAutoSizer.measure({
-            content: { text: plain, richText },
-            availableWidth: allowsAutoWidth ? undefined : el.width,
-            style: styleCfg,
-            autoSized: allowsAutoWidth,
+    for (let opIndex = 0; opIndex < operations.length; opIndex++) {
+      const op = operations[opIndex]!;
+      try {
+        if (op.type === 'update_text') {
+          const id = op.target_element_id;
+          target.updateElement(id, (el) => {
+            if (el.type !== 'text') return el;
+            const richText = op.rich_text as RichTextDocument | undefined;
+            const plain = richText ? richTextToPlainText(richText) : op.text;
+            const padding = el.padding;
+            const styleCfg = {
+              fontSize: el.fontSize,
+              fontFamily: el.fontFamily,
+              fontWeight: el.fontWeight,
+              fontItalic: el.fontItalic,
+              underline: el.underline,
+              lineHeight: el.lineHeight,
+              color: el.color,
+              padding,
+            };
+            const allowsAutoWidth = textElementAllowsAiAutoWidth(el.metadata);
+            const userResized = textElementIsUserResized(el.metadata);
+            const measured = TextElementAutoSizer.measure({
+              content: { text: plain, richText },
+              availableWidth: allowsAutoWidth ? undefined : el.width,
+              style: styleCfg,
+              autoSized: allowsAutoWidth,
+            });
+            const nextWidth = allowsAutoWidth ? measured.width : el.width;
+            const nextHeight = allowsAutoWidth
+              ? measured.height
+              : Math.max(el.height, measured.height);
+            return {
+              ...el,
+              text: plain,
+              richText: richText ?? undefined,
+              width: nextWidth,
+              height: nextHeight,
+              metadata: {
+                ...el.metadata,
+                lastEditedBy: 'ai',
+                source: 'agent',
+                ...(allowsAutoWidth ? { autoSize: true } : {}),
+                ...(userResized ? { userResized: true } : {}),
+              },
+            };
           });
-          // Auto-sized AI boxes: take content-preferred width + height.
-          // Otherwise keep width; expand height so content never clips.
-          const nextWidth = allowsAutoWidth ? measured.width : el.width;
-          const nextHeight = allowsAutoWidth
-            ? measured.height
-            : Math.max(el.height, measured.height);
-          return {
-            ...el,
-            text: plain,
-            richText: richText ?? undefined,
-            width: nextWidth,
-            height: nextHeight,
-            metadata: {
-              ...el.metadata,
-              lastEditedBy: 'ai',
-              source: 'agent',
-              ...(allowsAutoWidth ? { autoSize: true } : {}),
-              ...(userResized ? { userResized: true } : {}),
-            },
-          };
-        });
-        updatedIds.push(id);
-        continue;
-      }
+          updatedIds.push(id);
+          continue;
+        }
 
-      if (isGraphEditOperationType(op.type)) {
-        const editOp = op as GraphEditOperation;
-        const graphId = editOp.graph_id;
-        target.updateElement(graphId, (el) => {
-          if (el.type !== 'graph') return el;
-          const next = applyGraphEditOperation(el, editOp);
-          return {
-            ...next,
-            metadata: {
-              ...next.metadata,
-              lastEditedBy: 'ai',
-              source: 'agent',
-              operation: editOp.type,
-            },
-          };
-        });
-        updatedIds.push(graphId);
-        continue;
-      }
+        if (isGraphEditOperationType(op.type)) {
+          const editOp = op as GraphEditOperation;
+          const graphId = editOp.graph_id;
+          target.updateElement(graphId, (el) => {
+            if (el.type !== 'graph') return el;
+            const next = applyGraphEditOperation(el, editOp);
+            return {
+              ...next,
+              metadata: {
+                ...next.metadata,
+                lastEditedBy: 'ai',
+                source: 'agent',
+                operation: editOp.type,
+              },
+            };
+          });
+          updatedIds.push(graphId);
+          continue;
+        }
 
-      if (isTextFeatureOperationType(op.type)) {
-        const featureOp = op as TextFeatureOperation;
-        const id = featureOp.target_element_id;
-        target.updateElement(id, (el) => {
-          if (el.type !== 'text') return el;
-          return applyTextFeatureOperation(el, featureOp);
-        });
-        updatedIds.push(id);
-        continue;
-      }
+        if (isTextFeatureOperationType(op.type)) {
+          const featureOp = op as TextFeatureOperation;
+          const id = featureOp.target_element_id;
+          const before = target.getElements().find((e) => e.id === id);
+          if (!before || before.type !== 'text') {
+            throw new Error(`Target "${id}" is not a TextElement.`);
+          }
+          target.updateElement(id, (el) => {
+            if (el.type !== 'text') return el;
+            return applyTextFeatureOperation(el, featureOp);
+          });
+          updatedIds.push(id);
+          continue;
+        }
 
-      if (isGridCreatableOp(op)) {
-        const forced =
-          gridResolved && op.ref ? gridResolved.byRef.get(op.ref) : undefined;
-        const result = createOne(op, target, style, viewport, forced);
-        createdIds.push(...result.createdIds);
-        structureInstanceIds.push(...result.structureInstanceIds);
+        if (isGridCreatableOp(op)) {
+          const forced =
+            gridResolved && op.ref ? gridResolved.byRef.get(op.ref) : undefined;
+          const result = createOne(op, target, style, viewport, forced);
+          createdIds.push(...result.createdIds);
+          structureInstanceIds.push(...result.structureInstanceIds);
+        }
+      } catch (cause) {
+        if (cause instanceof CanvasAgentExecuteError) throw cause;
+        const targetId =
+          'target_element_id' in op
+            ? String((op as { target_element_id?: string }).target_element_id ?? '')
+            : 'graph_id' in op
+              ? String((op as { graph_id?: string }).graph_id ?? '')
+              : undefined;
+        throw new CanvasAgentExecuteError({
+          opIndex,
+          opType: op.type,
+          targetId: targetId || undefined,
+          stage: isTextFeatureOperationType(op.type)
+            ? 'text_feature'
+            : op.type.startsWith('create_')
+              ? 'create'
+              : 'apply',
+          message: 'Canvas operation failed',
+          cause,
+        });
       }
     }
+    committed = true;
   } finally {
-    target.endInteraction();
+    if (committed) {
+      target.endInteraction();
+    } else {
+      target.rollbackInteraction();
+    }
   }
 
   const latest = target.getElements();

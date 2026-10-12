@@ -59,6 +59,7 @@ import {
   isTextFeatureOperationType,
   parseTextFeatureOperation,
   type TextFeatureOperation,
+  type InsertTextHeadingOperation,
 } from './textFeatureOperations';
 import {
   TEXT_COMMENT_TYPES,
@@ -1236,6 +1237,37 @@ export function describeOperationPlan(
       const refLine = op.ref ? `\n   Ref: ${op.ref}` : '';
       const richLine = op.rich_text ? `\n   Rich text: ${op.rich_text.blocks.length} block(s)` : '';
       return `${n}. CREATE TEXT${refLine}\n   Placement: ${placementLine}${richLine}\n   Text: ${preview}${op.text.length > 80 ? '…' : ''}`;
+    }
+    if (isTextFeatureOperationType(op.type)) {
+      const f = op as TextFeatureOperation;
+      const lines = [
+        `${n}. TEXT FEATURE (${f.type})`,
+        `   Target: ${f.target_element_id}`,
+      ];
+      if (f.type === 'set_text_title' || f.type === 'insert_text_heading' || f.type === 'add_text_note') {
+        lines.push(`   Text: ${'text' in f ? f.text.slice(0, 80) : ''}`);
+      }
+      if (f.type === 'insert_text_heading') {
+        const h = f as InsertTextHeadingOperation;
+        const pos =
+          h.before_quote?.quote
+            ? `before_quote="${h.before_quote.quote}"`
+            : h.after_quote?.quote
+              ? `after_quote="${h.after_quote.quote}"`
+              : h.before_block_id
+                ? `before_block_id=${h.before_block_id}`
+                : h.after_block_id
+                  ? `after_block_id=${h.after_block_id}`
+                  : '(missing position)';
+        lines.push(`   Position: ${pos}`);
+      }
+      if (f.type === 'highlight_text' || f.type === 'add_text_comment') {
+        lines.push(`   Quote: ${f.anchor.quote}`);
+      }
+      if (f.type === 'add_text_comment') {
+        lines.push(`   Comment: ${f.comment.slice(0, 80)}`);
+      }
+      return lines.join('\n');
     }
     return `${n}. UNKNOWN OPERATION`;
   });

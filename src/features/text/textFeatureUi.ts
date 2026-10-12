@@ -10,6 +10,7 @@ import { measureTextElementWithFeatures } from './textAutoSizer';
 import {
   addCommentToElement,
   addNoteToElement,
+  ensureRichText,
   highlightQuoteInElement,
   insertHeadingInElement,
   removeCommentFromElement,
@@ -119,10 +120,19 @@ export function uiInsertHeading(
   level: 1 | 2 = 1,
   elementId?: string,
 ): boolean {
-  return mutateText(
-    (el) => insertHeadingInElement(el, { text, level }).element,
-    elementId,
-  );
+  return mutateText((el) => {
+    const doc = ensureRichText(el);
+    const firstId = doc.blocks[0]?.id;
+    if (!firstId) {
+      throw new Error('Cannot insert heading: text has no blocks.');
+    }
+    // Manual Add menu inserts at the top of the document (explicit position).
+    return insertHeadingInElement(el, {
+      text,
+      level,
+      beforeBlockId: firstId,
+    }).element;
+  }, elementId);
 }
 
 export function uiHighlightSelectedQuote(
