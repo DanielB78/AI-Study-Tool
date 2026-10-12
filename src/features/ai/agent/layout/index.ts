@@ -28,6 +28,17 @@ export {
   type GroupCellsResult,
 } from './chronologicalCellLayout';
 export {
+  getOutputLayoutConfig,
+  classifyOutputTypeHint,
+  LESSON_OUTPUT_LAYOUT,
+  STEP_BY_STEP_OUTPUT_LAYOUT,
+  AGENT_OUTPUT_TYPES,
+  type AgentOutputType,
+  type OutputLayoutConfig,
+  type CellArrangement,
+  type GridArrangement,
+} from './outputLayoutConfig';
+export {
   measureLayoutItems,
   isGridCreatableOp,
   type MeasureContext,

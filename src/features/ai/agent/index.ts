@@ -9,6 +9,8 @@ export type {
   GridLayoutItemSpec,
   AnyLayoutSpec,
   ChronologicalGridLayoutSpec,
+  AgentOutputType,
+  LayoutRole,
   CreateGraphExpressionSpec,
   CreateGraphPointSpec,
   CreateGraphViewportSpec,

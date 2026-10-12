@@ -9,6 +9,7 @@ import {
 } from './layout/chronologicalCellLayout';
 import { isGridCreatableOp } from './layout/measure';
 import type {
+  AgentOutputType,
   AnyLayoutSpec,
   CanvasOperation,
   ChronologicalGridLayoutSpec,
@@ -17,6 +18,7 @@ import type {
   Placement,
 } from './operations';
 import { CanvasAgentParseError } from './parseErrors';
+import { getOutputLayoutConfig } from './layout/outputLayoutConfig';
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -208,7 +210,9 @@ function validateCreateRefs(
 
 function validateChronologicalAgainstOperations(
   operations: readonly CanvasOperation[],
+  outputType?: AgentOutputType,
 ): void {
+  const maxPer = getOutputLayoutConfig(outputType).maxObjectsPerCell;
   const creates = operations.filter(isGridCreatableOp);
   for (const op of creates) {
     if (!op.ref?.trim()) {
@@ -239,7 +243,7 @@ function validateChronologicalAgainstOperations(
     refs.add(op.ref!);
   }
   try {
-    groupCreationOpsIntoCells(operations);
+    groupCreationOpsIntoCells(operations, maxPer);
   } catch (err) {
     if (err instanceof ChronologicalCellLayoutError) {
       throw new CanvasAgentParseError('schema', err.message);
@@ -254,6 +258,7 @@ function validateChronologicalAgainstOperations(
 export function validateLayoutAgainstOperations(
   layout: AnyLayoutSpec | undefined,
   operations: readonly CanvasOperation[],
+  outputType?: AgentOutputType,
 ): void {
   const creates = operations.filter(isGridCreatableOp);
 
@@ -270,7 +275,7 @@ export function validateLayoutAgainstOperations(
   }
 
   if (layout.type === 'chronological_grid') {
-    validateChronologicalAgainstOperations(operations);
+    validateChronologicalAgainstOperations(operations, outputType);
     return;
   }
 

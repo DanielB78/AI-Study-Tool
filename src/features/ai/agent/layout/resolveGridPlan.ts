@@ -5,12 +5,14 @@
 import type { Camera, CanvasElement, StyleDefaults } from '../../../../types/canvas';
 import type { NoteStructure } from '../../../structures/types';
 import type {
+  AgentOutputType,
   AnyLayoutSpec,
   CanvasOperation,
   ChronologicalGridLayoutSpec,
   GridLayoutSpec,
 } from '../operations';
 import { isChronologicalGridLayout } from '../operations';
+import { getOutputLayoutConfig } from './outputLayoutConfig';
 import {
   getDefaultViewportSize,
   getVisibleWorldBounds,
@@ -43,6 +45,8 @@ export type ResolveGridPlanInput = {
   viewport?: ViewportSize;
   getStructureById?: (id: string) => NoteStructure | null;
   includeHandwriting?: boolean;
+  /** LLM-selected output preset; defaults to lesson. */
+  outputType?: AgentOutputType;
 };
 
 export type ResolveGridPlanResult = {
@@ -82,6 +86,7 @@ function finalizePlacement(input: {
   widthWrapped: boolean;
   chronologicalCells?: LayoutDebugInfo['chronologicalCells'];
   effectiveLayout: GridLayoutSpec | ChronologicalGridLayoutSpec;
+  outputType?: AgentOutputType;
 }): ResolveGridPlanResult {
   const obstacles = collectCanvasObstacles(input.elements, {
     includeHandwriting: input.includeHandwriting,
@@ -154,6 +159,7 @@ function finalizePlacement(input: {
     ...(input.chronologicalCells
       ? { chronologicalCells: input.chronologicalCells }
       : {}),
+    ...(input.outputType ? { outputType: input.outputType } : {}),
   };
 
   return {
@@ -170,9 +176,13 @@ function resolveChronologicalGrid(
   layout: ChronologicalGridLayoutSpec,
 ): ResolveGridPlanResult {
   const diagnostics: string[] = [];
+  const outputConfig = getOutputLayoutConfig(input.outputType);
   let grouped;
   try {
-    grouped = groupCreationOpsIntoCells(input.operations);
+    grouped = groupCreationOpsIntoCells(
+      input.operations,
+      outputConfig.maxObjectsPerCell,
+    );
   } catch (err) {
     if (err instanceof ChronologicalCellLayoutError) {
       throw new Error(err.message);
@@ -182,8 +192,9 @@ function resolveChronologicalGrid(
   diagnostics.push(...grouped.diagnostics);
 
   const objectCount = grouped.objectCount;
-  const maxColumns = maxColumnsForObjectCount(objectCount);
-  const requestedColumns = layout.columns ?? maxColumns;
+  const isVerticalSequence = outputConfig.gridArrangement === 'vertical_sequence';
+  const maxColumns = isVerticalSequence ? 1 : maxColumnsForObjectCount(objectCount);
+  const requestedColumns = isVerticalSequence ? 1 : (layout.columns ?? maxColumns);
   const refs = new Set(grouped.objectOrder);
 
   const measured = measureLayoutItems(input.operations, refs, {
@@ -204,6 +215,7 @@ function resolveChronologicalGrid(
     operations: input.operations,
     measured,
     objectCount,
+    outputConfig,
   });
   diagnostics.push(...calc.grid.diagnostics);
 
@@ -212,12 +224,14 @@ function resolveChronologicalGrid(
   const usableWidth = visible.width * 0.92;
 
   let columns = calc.effectiveCellLayout.columns;
-  let wrapped = calc.cellDebug.wrapped || columns < requestedColumns;
+  let wrapped = calc.cellDebug.wrapped || (!isVerticalSequence && columns < requestedColumns);
   let wrapReason = calc.cellDebug.wrapReason;
   let widthWrapped = false;
   let guard = 0;
 
+  // Lesson only: reduce columns when physically too wide.
   while (
+    !isVerticalSequence &&
     calc.grid.bounds.width > Math.max(usableWidth * 1.15, 480) &&
     columns > 1 &&
     guard < 4
@@ -229,6 +243,7 @@ function resolveChronologicalGrid(
       operations: input.operations,
       measured,
       objectCount,
+      outputConfig,
     });
     diagnostics.push(
       `Physical width wrap: reduced chronological columns ${columns} → ${nextColumns}.`,
@@ -240,12 +255,13 @@ function resolveChronologicalGrid(
     wrapReason = 'physical_width';
   }
 
-  if (columns > maxColumns) {
+  if (!isVerticalSequence && columns > maxColumns) {
     calc = calculateChronologicalCellGrid({
       layout: { ...layout, columns: maxColumns },
       operations: input.operations,
       measured,
       objectCount,
+      outputConfig,
     });
     diagnostics.push(...calc.grid.diagnostics);
     columns = maxColumns;
@@ -277,6 +293,7 @@ function resolveChronologicalGrid(
     widthWrapped,
     chronologicalCells: calc.cellDebug,
     effectiveLayout: { type: 'chronological_grid', placement: layout.placement, columns },
+    outputType: outputConfig.outputType,
   });
 }
 

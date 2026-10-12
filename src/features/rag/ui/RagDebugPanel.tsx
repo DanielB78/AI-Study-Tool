@@ -1831,6 +1831,25 @@ export function RagDebugPanel() {
                     <pre className="rag-debug-plan">
                       {[
                         `Generated objects: ${layoutDebug.objectCount ?? '—'}`,
+                        ...(layoutDebug.outputType || layoutDebug.chronologicalCells?.outputType
+                          ? [
+                              `Selected output type: ${
+                                layoutDebug.chronologicalCells?.labels?.outputType ??
+                                (layoutDebug.outputType === 'step_by_step'
+                                  ? 'Step by Step'
+                                  : 'Lesson')
+                              }`,
+                              `Layout: ${
+                                layoutDebug.chronologicalCells?.labels?.layout ?? '—'
+                              }`,
+                              `Cell arrangement: ${
+                                layoutDebug.chronologicalCells?.labels?.cellArrangement ?? '—'
+                              }`,
+                              `Maximum objects per cell: ${
+                                layoutDebug.chronologicalCells?.maxObjectsPerCell ?? '—'
+                              }`,
+                            ]
+                          : []),
                         `Requested columns: ${layoutDebug.requestedColumns ?? layoutDebug.columns}`,
                         `Calculated max columns: ${layoutDebug.maxColumns ?? '—'}`,
                         `Final columns: ${layoutDebug.columns}`,
@@ -1856,7 +1875,6 @@ export function RagDebugPanel() {
                           ? [
                               `Generated cells: ${layoutDebug.chronologicalCells.cellCount}`,
                               `Chronological ordering: ${layoutDebug.chronologicalCells.chronologicalOrderingValid ? 'VALID' : 'INVALID'}`,
-                              `Maximum objects per cell: ${layoutDebug.chronologicalCells.maxObjectsPerCell}`,
                               `Object creation order: ${layoutDebug.chronologicalCells.objectOrder.join(' → ')}`,
                               ...(layoutDebug.chronologicalCells.splits.length
                                 ? [
@@ -1871,8 +1889,12 @@ export function RagDebugPanel() {
                               ...layoutDebug.chronologicalCells.cells.map(
                                 (c, idx) =>
                                   [
-                                    `  Cell ${idx + 1} (${c.cellId})${c.autoSplit ? ' [auto-split]' : ''}: r${c.row}c${c.column} span${c.columnSpan} ${c.width.toFixed(0)}×${c.height.toFixed(0)}`,
-                                    ...c.refs.map((r) => `    - ${r}`),
+                                    `  Cell ${idx + 1} (${c.cellId})${c.autoSplit ? ' [auto-split]' : ''}${c.stepIndex != null ? ` Step ${c.stepIndex}` : ''}: r${c.row}c${c.column} span${c.columnSpan} ${c.width.toFixed(0)}×${c.height.toFixed(0)} [${c.arrangement ?? '—'}]`,
+                                    ...c.refs.map((r, i) => {
+                                      const role = c.layoutRoles?.[i];
+                                      const typ = c.objectTypes?.[i];
+                                      return `    - ${r}${typ ? ` (${typ})` : ''}${role ? ` role=${role}` : ''}`;
+                                    }),
                                   ].join('\n'),
                               ),
                             ]

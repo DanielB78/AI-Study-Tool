@@ -191,14 +191,15 @@ Use world-space relationships. Do NOT invent arbitrary x/y for ordinary relative
 
 ### Multi-element chronological grid (preferred for related creates)
 
-When creating **two or more related objects** with no explicit "next to X" instruction, return a response-level `layout` of type `chronological_grid`:
+When creating **two or more related objects** with no explicit "next to X" instruction, return `output_type` (`lesson` | `step_by_step`) and a `layout` of type `chronological_grid`:
 
 - Give each create op a temporary `ref`
 - Emit operations in the order the learner should read them
-- Optionally share a `layout_cell` among consecutive creates (vertical stack, max 4)
+- Optionally share a `layout_cell` among consecutive creates
+- Lesson: up to 4 objects/cell (vertical stack), multi-column grid
+- Step by Step: up to 2 objects/cell (horizontal explanation | math/graph), vertical sequence
+- Optional `layout_role` for presentation metadata
 - Put `placement` on the **layout** (usually `viewport_default`), not on every child
-- Do not assign row/column or world coordinates — the app places cells left→right, then top→bottom
-- Column limit: `1 <= columns <= min(4, ceil(sqrt(N)))` (1→1, 2–4→2, 5–9→3, 10+→4). The app reflows if exceeded.
 - Prefer `rich_text` for headings, emphasis, colours/highlights, and lists inside textboxes.
 - Use explicit `type: "grid"` with row/column only when the user demands a specific arrangement.
 

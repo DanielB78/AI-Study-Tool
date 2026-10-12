@@ -121,7 +121,29 @@ function createOne(
   if (op.type === 'create_text') {
     const camera = target.getCamera();
     const elements = target.getElements();
-    const richText = op.rich_text as RichTextDocument | undefined;
+    // Final-result presentation: emphasize plain text when no rich_text provided.
+    let richText = op.rich_text as RichTextDocument | undefined;
+    if (!richText && op.layout_role === 'final_result') {
+      richText = {
+        blocks: [
+          {
+            type: 'heading',
+            role: 'heading',
+            spans: [
+              {
+                text: 'Final result',
+                style: { bold: true, font_size: 'subheading' },
+              },
+            ],
+          },
+          {
+            type: 'paragraph',
+            role: 'body',
+            spans: [{ text: op.text, style: { bold: true, font_size: 'heading' } }],
+          },
+        ],
+      };
+    }
     const padding = Math.max(style.textPadding, 12);
     const measured = TextElementAutoSizer.measure({
       content: { text: op.text, richText },
@@ -162,6 +184,7 @@ function createOne(
         source: 'agent',
         operation: 'create_text',
         autoSize: true,
+        ...(op.layout_role ? { layoutRole: op.layout_role } : {}),
       },
     });
     element.height = height;
@@ -190,6 +213,10 @@ function createOne(
     const element = createAiEquationElement(op.latex, { x: placed.x, y: placed.y }, {
       zIndex,
       style,
+      metadata: {
+        ...(op.layout_role ? { layoutRole: op.layout_role } : {}),
+        ...(op.layout_role === 'final_result' ? { emphasize: true } : {}),
+      },
     });
     if (forced) {
       element.width = width;
@@ -303,6 +330,7 @@ export function executeCanvasOperations(
       style,
       viewport,
       getStructureById: target.getStructureById,
+      outputType: plan.output_type,
     });
     layoutDebug = gridResolved.debug;
   }

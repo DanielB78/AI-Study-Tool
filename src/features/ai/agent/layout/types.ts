@@ -22,6 +22,14 @@ export type ChronologicalCellDebug = {
     cellId: string;
     originalCellId: string;
     refs: string[];
+    objectTypes?: Array<'text' | 'equation' | 'graph' | 'structured_note'>;
+    layoutRoles?: Array<string | null>;
+    arrangement?:
+      | 'vertical_stack'
+      | 'horizontal_pair'
+      | 'single'
+      | 'vertical_fallback';
+    stepIndex?: number | null;
     row: number;
     column: number;
     columnSpan: number;
@@ -38,6 +46,14 @@ export type ChronologicalCellDebug = {
   }>;
   wrapped: boolean;
   wrapReason: string;
+  outputType?: 'lesson' | 'step_by_step';
+  cellArrangement?: 'vertical_stack' | 'horizontal_pair';
+  gridArrangement?: 'chronological_grid' | 'vertical_sequence';
+  labels?: {
+    outputType: string;
+    layout: string;
+    cellArrangement: string;
+  };
 };
 
 /** Per-textbox auto-size diagnostics for layout debug. */
@@ -159,4 +175,6 @@ export type LayoutDebugInfo = {
   error?: string;
   /** Present when the plan used chronological_grid. */
   chronologicalCells?: ChronologicalCellDebug;
+  /** Selected LLM output preset (lesson | step_by_step). */
+  outputType?: 'lesson' | 'step_by_step';
 };

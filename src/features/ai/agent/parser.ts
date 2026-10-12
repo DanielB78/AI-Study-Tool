@@ -5,8 +5,10 @@
 
 import {
   CANVAS_AGENT_JSON_SCHEMA,
+  LAYOUT_ROLES,
   PLACEMENT_RELATIONS,
   type AbsolutePlacement,
+  type AgentOutputType,
   type AnyLayoutSpec,
   type CanvasAgentResponse,
   type CanvasOperation,
@@ -18,6 +20,7 @@ import {
   type CreateGraphViewportSpec,
   type CreateStructuredNoteOperation,
   type CreateTextOperation,
+  type LayoutRole,
   type Placement,
   type PlacementRelation,
   type RelativePlacement,
@@ -27,6 +30,7 @@ import {
 } from './operations';
 import { CanvasAgentParseError, type ParseErrorCode } from './parseErrors';
 import { parseGridLayout, validateLayoutAgainstOperations } from './layoutValidate';
+import { isAgentOutputType } from './layout/outputLayoutConfig';
 import {
   countHierarchyNodes,
   formatHierarchyTreePreview,
@@ -125,19 +129,45 @@ function parseOptionalColumnSpan(raw: Record<string, unknown>): number | undefin
   return raw.column_span;
 }
 
+function parseOptionalLayoutRole(raw: Record<string, unknown>): LayoutRole | undefined {
+  if (raw.layout_role === undefined || raw.layout_role === null) return undefined;
+  if (typeof raw.layout_role !== 'string' || !(LAYOUT_ROLES as readonly string[]).includes(raw.layout_role)) {
+    throw new CanvasAgentParseError(
+      'schema',
+      `layout_role must be one of: ${LAYOUT_ROLES.join(', ')}.`,
+    );
+  }
+  return raw.layout_role as LayoutRole;
+}
+
 function creationLayoutExtras(raw: Record<string, unknown>): {
   ref?: string;
   layout_cell?: string;
   column_span?: number;
+  layout_role?: LayoutRole;
 } {
   const ref = parseOptionalRef(raw);
   const layout_cell = parseOptionalLayoutCell(raw);
   const column_span = parseOptionalColumnSpan(raw);
+  const layout_role = parseOptionalLayoutRole(raw);
   return {
     ...(ref ? { ref } : {}),
     ...(layout_cell ? { layout_cell } : {}),
     ...(column_span !== undefined ? { column_span } : {}),
+    ...(layout_role ? { layout_role } : {}),
   };
+}
+
+function parseOutputType(raw: unknown): AgentOutputType | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!isAgentOutputType(raw)) {
+    throw new CanvasAgentParseError(
+      'schema',
+      'output_type must be "lesson" or "step_by_step".',
+      String(raw),
+    );
+  }
+  return raw;
 }
 
 /** Placement is optional on creates assigned to a grid; default viewport_default. */
@@ -857,9 +887,14 @@ export function parseCanvasAgentResponse(
     layout = parseGridLayout(parsed.layout, parsePlacement);
     validateRelativePlacement(layout.placement, ctx);
   }
-  validateLayoutAgainstOperations(layout, operations);
+  const output_type = parseOutputType(parsed.output_type);
+  validateLayoutAgainstOperations(layout, operations, output_type);
 
-  return layout ? { operations, layout } : { operations };
+  return {
+    operations,
+    ...(output_type ? { output_type } : {}),
+    ...(layout ? { layout } : {}),
+  };
 }
 
 export interface DescribePlanOptions {
