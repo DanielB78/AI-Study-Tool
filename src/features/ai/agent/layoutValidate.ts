@@ -31,15 +31,17 @@ export function parseGridLayout(
     );
   }
   const columns = raw.columns;
+  // Accept up to maxItems here — dynamic max_columns = min(4, ceil(sqrt(N))) is
+  // enforced later by grid reflow so oversized LLM requests are normalised, not rejected.
   if (
     typeof columns !== 'number' ||
     !Number.isInteger(columns) ||
     columns < GRID_LAYOUT_CONFIG.minColumns ||
-    columns > GRID_LAYOUT_CONFIG.maxColumns
+    columns > GRID_LAYOUT_CONFIG.maxItems
   ) {
     throw new CanvasAgentParseError(
       'schema',
-      `layout.columns must be an integer from ${GRID_LAYOUT_CONFIG.minColumns} to ${GRID_LAYOUT_CONFIG.maxColumns}.`,
+      `layout.columns must be an integer from ${GRID_LAYOUT_CONFIG.minColumns} to ${GRID_LAYOUT_CONFIG.maxItems}.`,
     );
   }
   if (!Array.isArray(raw.items) || raw.items.length === 0) {

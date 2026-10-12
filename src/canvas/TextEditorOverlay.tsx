@@ -133,7 +133,7 @@ export function TextEditorOverlay({
     if (!host || !textEl || !onChangeRichText) return;
     const root =
       (host.querySelector('[data-rt-root]') as HTMLElement | null) ?? host;
-    const rich = htmlToRichText(root);
+    const rich = htmlToRichText(root, { baseFontSize: textEl.fontSize });
     const plain = richTextToPlainText(rich);
     const measuredHeight = Math.max(
       textEl.fontSize * textEl.lineHeight + textEl.padding * 2,

@@ -1,5 +1,8 @@
 /**
  * HTML overlays for TextElements that carry structured richText.
+ *
+ * Screen geometry = world geometry × camera.zoom. Rich HTML uses em sizes
+ * relative to this host font-size so headings/spans scale with the box.
  */
 
 import { useMemo } from 'react';
@@ -21,6 +24,7 @@ export function TextHtmlLayer({ texts, camera, editingId }: Props) {
       .map((el) => {
         const topLeft = worldToScreen({ x: el.x, y: el.y }, camera);
         const doc = getRichTextDocument(el);
+        // World-unit base fontSize — host applies zoom via CSS font-size.
         const html = richTextToHtml(doc, {
           color: el.color,
           fontSize: el.fontSize,
@@ -34,9 +38,10 @@ export function TextHtmlLayer({ texts, camera, editingId }: Props) {
     <div className="text-html-layer" aria-hidden>
       {items.map(({ el, topLeft, html }) => {
         if (el.id === editingId) return null;
-        const w = el.width * camera.zoom;
-        const h = el.height * camera.zoom;
-        const pad = el.padding * camera.zoom;
+        const zoom = camera.zoom;
+        const w = el.width * zoom;
+        const h = el.height * zoom;
+        const pad = el.padding * zoom;
         return (
           <div
             key={el.id}
@@ -52,11 +57,12 @@ export function TextHtmlLayer({ texts, camera, editingId }: Props) {
               padding: pad,
               boxSizing: 'border-box',
               background: el.backgroundColor ?? 'transparent',
-              borderRadius: el.cornerRadius * camera.zoom,
+              borderRadius: el.cornerRadius * zoom,
               opacity: el.opacity,
               overflow: 'hidden',
               pointerEvents: 'none',
-              fontSize: el.fontSize * camera.zoom,
+              // Single zoom scale for all nested em-based rich text sizes.
+              fontSize: el.fontSize * zoom,
             }}
             dangerouslySetInnerHTML={{ __html: html }}
           />

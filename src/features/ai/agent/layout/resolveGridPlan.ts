@@ -19,8 +19,8 @@ import { collidesAny } from './collision';
 import { GRID_LAYOUT_CONFIG } from './gridConfig';
 import {
   maxColumnsForObjectCount,
+  normalizeGridLayout,
   reduceColumnsForWidth,
-  reflowGridToMaxColumns,
 } from './gridReflow';
 import type { CanvasPlacementResult, GridLayoutResult, LayoutDebugInfo } from './types';
 
@@ -48,16 +48,25 @@ export type ResolveGridPlanResult = {
   >;
 };
 
+function countRows(layout: GridLayoutSpec): number {
+  if (layout.items.length === 0) return 0;
+  return Math.max(0, ...layout.items.map((i) => i.row)) + 1;
+}
+
 export function resolveGridPlan(input: ResolveGridPlanInput): ResolveGridPlanResult {
   const objectCount = input.layout.items.length;
   const maxColumns = maxColumnsForObjectCount(objectCount);
   const requestedColumns = input.layout.columns;
+  const requestedRows = countRows(input.layout);
   const diagnostics: string[] = [];
 
-  let reflow = reflowGridToMaxColumns(input.layout, maxColumns);
+  // Object-count normalisation — always enforce finalColumns <= max_columns(N).
+  let reflow = normalizeGridLayout(input.layout);
   diagnostics.push(...reflow.diagnostics);
   let layout = reflow.layout;
   let wrapped = reflow.wrapped;
+  let wrapReason = reflow.wrapReason;
+  let widthWrapped = false;
 
   const refs = new Set(layout.items.map((i) => i.ref));
   const measured = measureLayoutItems(input.operations, refs, {
@@ -80,21 +89,41 @@ export function resolveGridPlan(input: ResolveGridPlanInput): ResolveGridPlanRes
   const visible = getVisibleWorldBounds(input.camera, viewport);
   const usableWidth = visible.width * 0.92;
 
-  // Physical width pass — may reduce columns once and remeasure.
-  if (grid.bounds.width > Math.max(usableWidth * 1.15, 480) && layout.columns > 1) {
+  // Physical width pass — may reduce columns and remasure (bounded).
+  let guard = 0;
+  while (
+    grid.bounds.width > Math.max(usableWidth * 1.15, 480) &&
+    layout.columns > 1 &&
+    guard < 4
+  ) {
+    guard += 1;
     const widthReflow = reduceColumnsForWidth({
       layout,
       measuredWidth: grid.bounds.width,
       usableWorldWidth: usableWidth,
       maxColumns,
     });
-    if (widthReflow.wrapped && widthReflow.finalColumns < layout.columns) {
-      diagnostics.push(...widthReflow.diagnostics);
-      layout = widthReflow.layout;
-      wrapped = true;
-      grid = calculateGridLayout({ layout, items: measured });
-      diagnostics.push(...grid.diagnostics);
+    if (!widthReflow.wrapped || widthReflow.finalColumns >= layout.columns) {
+      break;
     }
+    diagnostics.push(...widthReflow.diagnostics);
+    layout = widthReflow.layout;
+    wrapped = true;
+    widthWrapped = true;
+    wrapReason = 'physical_width';
+    grid = calculateGridLayout({ layout, items: measured });
+    diagnostics.push(...grid.diagnostics);
+  }
+
+  // Final invariant — never exceed dynamic max columns.
+  if (layout.columns > maxColumns) {
+    const force = normalizeGridLayout({ ...layout, columns: layout.columns });
+    layout = force.layout;
+    wrapped = true;
+    wrapReason = force.wrapReason === 'none' ? 'exceeded_max_columns' : force.wrapReason;
+    diagnostics.push(...force.diagnostics);
+    grid = calculateGridLayout({ layout, items: measured });
+    diagnostics.push(...grid.diagnostics);
   }
 
   const obstacles = collectCanvasObstacles(input.elements, {
@@ -134,14 +163,17 @@ export function resolveGridPlan(input: ResolveGridPlanInput): ResolveGridPlanRes
     ]),
   );
 
-  const maxRow = Math.max(0, ...layout.items.map((i) => i.row));
+  const finalRows = countRows(layout);
   const debug: LayoutDebugInfo = {
     objectCount,
     maxColumns,
     requestedColumns,
+    requestedRows,
     columns: layout.columns,
-    rows: maxRow + 1,
+    rows: finalRows,
     wrapped,
+    wrapReason,
+    widthWrapped,
     columnWidths: grid.columnWidths,
     rowHeights: grid.rowHeights,
     items: placement.worldItems.map((i) => ({
@@ -178,9 +210,12 @@ export function previewGridPlan(input: ResolveGridPlanInput): LayoutDebugInfo {
       objectCount: n,
       maxColumns: maxColumnsForObjectCount(n),
       requestedColumns: input.layout.columns,
+      requestedRows: countRows(input.layout),
       columns: input.layout.columns,
       rows: 0,
       wrapped: false,
+      wrapReason: 'none',
+      widthWrapped: false,
       columnWidths: [],
       rowHeights: [],
       items: [],
