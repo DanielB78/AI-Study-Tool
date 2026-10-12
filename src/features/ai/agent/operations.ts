@@ -40,11 +40,67 @@ export type GridLayoutItemSpec = {
  */
 export type GridLayoutSpec = {
   type: 'grid';
-  /** 1–4 columns */
+  /** 1–4 columns (dynamic max may be lower; app reflows). */
   columns: number;
   placement: Placement;
   items: GridLayoutItemSpec[];
 };
+
+/** Weighted semantic link between two created objects (layout preference). */
+export type SemanticRelationSpec = {
+  ref: OperationRef;
+  /** 0–1 approximate attraction weight. */
+  strength: number;
+};
+
+/** Ordered topic band for relationship-grid layouts. */
+export type TopicSectionSpec = {
+  id: string;
+  order: number;
+  title?: string;
+};
+
+/**
+ * Relationship-grid item — LLM supplies semantics; the app derives row/column.
+ */
+export type RelationshipGridItemSpec = {
+  ref: OperationRef;
+  /** Topic section id (must match layout.sections). */
+  section: string;
+  /** Soft educational sequence hint (lower = earlier). */
+  preferred_order?: number;
+  /** Hard prerequisites — other creation refs that must appear earlier. */
+  requires?: OperationRef[];
+  /** Up to 3 strongest semantic relationships to other created refs. */
+  relations?: SemanticRelationSpec[];
+  column_span?: number;
+};
+
+/**
+ * High-mode preferred layout: sections + relations + prerequisites.
+ * The application optimises grid cells; the LLM does not assign rows/columns.
+ */
+export type RelationshipGridLayoutSpec = {
+  type: 'relationship_grid';
+  placement: Placement;
+  sections: TopicSectionSpec[];
+  items: RelationshipGridItemSpec[];
+  /** Optional column hint; clamped by dynamic max_columns(N). */
+  columns?: number;
+};
+
+/** Explicit grid or relationship-optimised grid. */
+export type AnyLayoutSpec = GridLayoutSpec | RelationshipGridLayoutSpec;
+
+export function isRelationshipGridLayout(
+  layout: AnyLayoutSpec,
+): layout is RelationshipGridLayoutSpec {
+  return layout.type === 'relationship_grid';
+}
+
+export function isExplicitGridLayout(layout: AnyLayoutSpec): layout is GridLayoutSpec {
+  return layout.type === 'grid';
+}
 
 /** Structured rich-text document (mirrors features/text/richText). */
 export type AgentRichTextSpanStyle = {
@@ -278,8 +334,12 @@ export type CanvasOperation =
 
 export type CanvasAgentResponse = {
   operations: CanvasOperation[];
-  /** Required when creating multiple related objects with viewport_default. */
-  layout?: GridLayoutSpec;
+  /**
+   * Required when creating multiple related objects with viewport_default.
+   * Prefer `relationship_grid` for High-mode educational multi-element plans;
+   * use `grid` when the user demands an explicit arrangement.
+   */
+  layout?: AnyLayoutSpec;
 };
 
 export const PLACEMENT_RELATIONS: readonly PlacementRelation[] = [
@@ -298,7 +358,12 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
   additionalProperties: false,
   required: ['operations'],
   properties: {
-    layout: { $ref: '#/$defs/gridLayout' },
+    layout: {
+      oneOf: [
+        { $ref: '#/$defs/gridLayout' },
+        { $ref: '#/$defs/relationshipGridLayout' },
+      ],
+    },
     operations: {
       type: 'array',
       minItems: 1,
@@ -613,7 +678,7 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
       required: ['type', 'columns', 'placement', 'items'],
       properties: {
         type: { const: 'grid' },
-        columns: { type: 'integer', minimum: 1, maximum: 4 },
+        columns: { type: 'integer', minimum: 1, maximum: 48 },
         placement: { $ref: '#/$defs/placement' },
         items: {
           type: 'array',
@@ -626,6 +691,62 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               ref: { type: 'string', minLength: 1 },
               row: { type: 'integer', minimum: 0 },
               column: { type: 'integer', minimum: 0 },
+              column_span: { type: 'integer', minimum: 1, maximum: 48 },
+            },
+          },
+        },
+      },
+    },
+    relationshipGridLayout: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['type', 'placement', 'sections', 'items'],
+      properties: {
+        type: { const: 'relationship_grid' },
+        columns: { type: 'integer', minimum: 1, maximum: 4 },
+        placement: { $ref: '#/$defs/placement' },
+        sections: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['id', 'order'],
+            properties: {
+              id: { type: 'string', minLength: 1 },
+              order: { type: 'integer', minimum: 0 },
+              title: { type: 'string' },
+            },
+          },
+        },
+        items: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['ref', 'section'],
+            properties: {
+              ref: { type: 'string', minLength: 1 },
+              section: { type: 'string', minLength: 1 },
+              preferred_order: { type: 'integer' },
+              requires: {
+                type: 'array',
+                items: { type: 'string', minLength: 1 },
+              },
+              relations: {
+                type: 'array',
+                maxItems: 3,
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['ref', 'strength'],
+                  properties: {
+                    ref: { type: 'string', minLength: 1 },
+                    strength: { type: 'number', minimum: 0, maximum: 1 },
+                  },
+                },
+              },
               column_span: { type: 'integer', minimum: 1, maximum: 4 },
             },
           },
@@ -787,7 +908,44 @@ create_graph (new interactive GraphElement):
   "placement": /* omit when in layout.items */
 }
 
-GRID LAYOUT (mandatory for 2+ related creates that would otherwise all use viewport_default):
+LAYOUT (mandatory for 2+ related creates that would otherwise all use viewport_default):
+
+PREFERRED — relationship_grid (High-mode educational plans; app assigns rows/columns):
+{
+  "layout": {
+    "type": "relationship_grid",
+    "placement": { "mode": "viewport_default" },
+    "sections": [
+      { "id": "fundamentals", "order": 0, "title": "Fundamentals" },
+      { "id": "maths", "order": 1, "title": "Mathematics" }
+    ],
+    "items": [
+      {
+        "ref": "intro",
+        "section": "fundamentals",
+        "preferred_order": 0,
+        "requires": [],
+        "relations": [{ "ref": "equation", "strength": 0.95 }]
+      },
+      {
+        "ref": "equation",
+        "section": "fundamentals",
+        "preferred_order": 1,
+        "requires": ["intro"],
+        "relations": [{ "ref": "graph", "strength": 0.85 }],
+        "column_span": 2
+      }
+    ]
+  }
+}
+Rules for relationship_grid:
+- Assign every created item via ref. No row/column — the app optimises placement.
+- At most 3 outgoing relations per item; strengths in [0,1]; no self-links; targets must be created refs.
+- requires[] = hard prerequisites (must appear earlier in reading order). No cycles.
+- Sections are contiguous topic bands in order; do not invent permanent section rectangles.
+- Relations are layout preferences only — do not emit ConnectorElements for them.
+
+EXPLICIT grid (only when the user demands a specific arrangement):
 {
   "layout": {
     "type": "grid",
@@ -798,14 +956,16 @@ GRID LAYOUT (mandatory for 2+ related creates that would otherwise all use viewp
     ]
   }
 }
-Rules for layout:
-- Assign every created item (create_text / create_equation / create_graph / create_structured_note) to exactly one cell via ref.
+Rules for explicit grid:
 - Zero-based row/column. column_span defaults to 1; must not exceed columns.
 - No two items may occupy the same cell. No nested grids. No row spanning. No per-item x/y.
-- The application measures sizes, computes positions, avoids overlaps, and places the WHOLE grid.
-- Do NOT put viewport_default on every child to bypass the grid.
+- Column limit: 1 <= columns <= min(4, ceil(sqrt(N))); app reflows if exceeded.
+
+Shared layout rules:
+- The application measures sizes, computes positions, avoids overlaps, and places the WHOLE group.
+- Do NOT put viewport_default on every child to bypass the layout.
 - Single independent create may omit layout and use placement as before.
-- Explicit relative_to_element / absolute on a single create remains valid without a grid.
+- Explicit relative_to_element / absolute on a single create remains valid without a layout.
 
 GRAPH EDITING (only for GraphElements supplied in context — explicit selection or spatial neighbour; graphs are NOT semantically retrieved):
 - add_graph_expression: { "type":"add_graph_expression", "graph_id":"<id>", "expression":{ "expression":"x**3", "visible":true, "domain_min":null, "domain_max":null } }
@@ -838,7 +998,7 @@ NODE_SECTION fields:
 Rules:
 - Never invent element IDs, node IDs, connector IDs, structure IDs, graph expression IDs, or point IDs.
 - Prefer relative_to_element over absolute for "next to / below / above / left / right" of ONE object.
-- Prefer a grid layout (layout.placement viewport_default) when creating multiple related objects with no location.
+- Prefer relationship_grid for educational multi-element plans; use explicit grid only for user-specified arrangements.
 - Never invent world coordinates to avoid overlaps — the application guarantees geometric validity.
 - When a structure is selected and the user asks for new structured content, use create_structured_note — do NOT recreate the layout with create_text/create_equation/create_connector.
 - Omit or null optional structure fields when there is no meaningful content.

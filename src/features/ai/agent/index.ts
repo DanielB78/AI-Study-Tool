@@ -7,6 +7,10 @@ export type {
   CreateGraphOperation,
   GridLayoutSpec,
   GridLayoutItemSpec,
+  AnyLayoutSpec,
+  RelationshipGridLayoutSpec,
+  TopicSectionSpec,
+  SemanticRelationSpec,
   CreateGraphExpressionSpec,
   CreateGraphPointSpec,
   CreateGraphViewportSpec,
@@ -44,6 +48,8 @@ export { resolvePlacement, DEFAULT_ELEMENT_GAP } from './placementService';
 export {
   CANVAS_EDITOR_SYSTEM_PROMPT,
   CANVAS_EDITOR_RESPONSE_INSTRUCTIONS,
+  CANVAS_AGENT_DOCUMENT_ID,
+  CANVAS_AGENT_MODE,
 } from './prompts/loadAgentPrompt';
 export {
   GRID_LAYOUT_CONFIG,

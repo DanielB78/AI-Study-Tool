@@ -1852,6 +1852,38 @@ export function RagDebugPanel() {
                         `Collided at preferred: ${layoutDebug.collidedAtPreferred}`,
                         `Collision validation: ${layoutDebug.collisionFree ? 'PASSED' : 'FAILED'}`,
                         `Obstacles: ${layoutDebug.obstacleCount}`,
+                        ...(layoutDebug.relationshipOptimiser
+                          ? [
+                              'Relationship optimiser:',
+                              `  Cost: ${layoutDebug.relationshipOptimiser.initialCost.toFixed(3)} → ${layoutDebug.relationshipOptimiser.finalCost.toFixed(3)}`,
+                              `  Semantic: ${layoutDebug.relationshipOptimiser.semanticCostInitial.toFixed(3)} → ${layoutDebug.relationshipOptimiser.semanticCostFinal.toFixed(3)}`,
+                              `  Ordering: ${layoutDebug.relationshipOptimiser.orderingCostInitial.toFixed(3)} → ${layoutDebug.relationshipOptimiser.orderingCostFinal.toFixed(3)}`,
+                              `  Compactness: ${layoutDebug.relationshipOptimiser.compactnessCostInitial.toFixed(3)} → ${layoutDebug.relationshipOptimiser.compactnessCostFinal.toFixed(3)}`,
+                              `  Iterations: ${layoutDebug.relationshipOptimiser.iterations}  Accepted moves: ${layoutDebug.relationshipOptimiser.acceptedMoves}`,
+                              '  Sections:',
+                              ...layoutDebug.relationshipOptimiser.sections.map(
+                                (s) =>
+                                  `    [${s.order}] ${s.id}${s.title ? ` — ${s.title}` : ''}`,
+                              ),
+                              '  Edges:',
+                              ...layoutDebug.relationshipOptimiser.edges.map(
+                                (e) =>
+                                  `    ${e.a} ↔ ${e.b} (${e.strength.toFixed(2)})`,
+                              ),
+                              '  Item meta:',
+                              ...layoutDebug.relationshipOptimiser.itemMeta.map((m) =>
+                                [
+                                  `    ${m.ref}  section=${m.section}  order=${m.preferredOrder}`,
+                                  m.requires.length
+                                    ? `      requires: ${m.requires.join(', ')}`
+                                    : '      requires: (none)',
+                                  m.relations.length
+                                    ? `      relations: ${m.relations.map((r) => `${r.ref}:${r.strength.toFixed(2)}`).join(', ')}`
+                                    : '      relations: (none)',
+                                ].join('\n'),
+                              ),
+                            ]
+                          : []),
                         ...layoutDebug.items.map((it) => {
                           const base = `  ${it.ref}: r${it.row}c${it.column} span${it.columnSpan} → ${it.width.toFixed(0)}×${it.height.toFixed(0)} @ (${it.localX.toFixed(0)}, ${it.localY.toFixed(0)})`;
                           const tas = it.textAutoSize;

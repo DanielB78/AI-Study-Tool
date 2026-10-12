@@ -19,6 +19,13 @@ export {
   type WrapReason,
 } from './gridReflow';
 export {
+  optimiseRelationshipGrid,
+  normalizeUndirectedRelations,
+  topologicalOrder,
+  RELATIONSHIP_OPTIMISER_CONFIG,
+  type RelationshipOptimiserResult,
+} from './relationshipOptimiser';
+export {
   measureLayoutItems,
   isGridCreatableOp,
   type MeasureContext,

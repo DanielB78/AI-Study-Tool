@@ -8,6 +8,8 @@ import type { Rect } from '../../canvas/placement';
 export type {
   GridLayoutItemSpec,
   GridLayoutSpec,
+  AnyLayoutSpec,
+  RelationshipGridLayoutSpec,
 } from '../operations';
 
 /** Per-textbox auto-size diagnostics for layout debug. */
@@ -127,4 +129,26 @@ export type LayoutDebugInfo = {
   obstacleCount: number;
   diagnostics: string[];
   error?: string;
+  /** Present when the plan used relationship_grid. */
+  relationshipOptimiser?: {
+    initialCost: number;
+    finalCost: number;
+    semanticCostInitial: number;
+    semanticCostFinal: number;
+    orderingCostInitial: number;
+    orderingCostFinal: number;
+    compactnessCostInitial: number;
+    compactnessCostFinal: number;
+    iterations: number;
+    acceptedMoves: number;
+    edges: Array<{ a: string; b: string; strength: number }>;
+    sections: Array<{ id: string; order: number; title?: string }>;
+    itemMeta: Array<{
+      ref: string;
+      section: string;
+      preferredOrder: number;
+      requires: string[];
+      relations: Array<{ ref: string; strength: number }>;
+    }>;
+  };
 };

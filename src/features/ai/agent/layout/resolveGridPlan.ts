@@ -4,8 +4,8 @@
 
 import type { Camera, CanvasElement, StyleDefaults } from '../../../../types/canvas';
 import type { NoteStructure } from '../../../structures/types';
-import type { CanvasOperation } from '../operations';
-import type { GridLayoutSpec } from './types';
+import type { AnyLayoutSpec, CanvasOperation, GridLayoutSpec } from '../operations';
+import { isRelationshipGridLayout } from '../operations';
 import {
   getDefaultViewportSize,
   getVisibleWorldBounds,
@@ -22,10 +22,11 @@ import {
   normalizeGridLayout,
   reduceColumnsForWidth,
 } from './gridReflow';
+import { optimiseRelationshipGrid } from './relationshipOptimiser';
 import type { CanvasPlacementResult, GridLayoutResult, LayoutDebugInfo } from './types';
 
 export type ResolveGridPlanInput = {
-  layout: GridLayoutSpec;
+  layout: AnyLayoutSpec;
   operations: readonly CanvasOperation[];
   camera: Camera;
   elements: CanvasElement[];
@@ -54,14 +55,47 @@ function countRows(layout: GridLayoutSpec): number {
 }
 
 export function resolveGridPlan(input: ResolveGridPlanInput): ResolveGridPlanResult {
-  const objectCount = input.layout.items.length;
-  const maxColumns = maxColumnsForObjectCount(objectCount);
-  const requestedColumns = input.layout.columns;
-  const requestedRows = countRows(input.layout);
   const diagnostics: string[] = [];
+  let relationshipDebug: LayoutDebugInfo['relationshipOptimiser'];
+
+  // Relationship-grid → explicit grid via semantic optimiser.
+  let workingLayout: GridLayoutSpec;
+  if (isRelationshipGridLayout(input.layout)) {
+    const optimised = optimiseRelationshipGrid(input.layout);
+    diagnostics.push(...optimised.diagnostics);
+    workingLayout = optimised.grid;
+    relationshipDebug = {
+      initialCost: optimised.initialCost,
+      finalCost: optimised.finalCost,
+      semanticCostInitial: optimised.semanticCostInitial,
+      semanticCostFinal: optimised.semanticCostFinal,
+      orderingCostInitial: optimised.orderingCostInitial,
+      orderingCostFinal: optimised.orderingCostFinal,
+      compactnessCostInitial: optimised.compactnessCostInitial,
+      compactnessCostFinal: optimised.compactnessCostFinal,
+      iterations: optimised.iterations,
+      acceptedMoves: optimised.acceptedMoves,
+      edges: optimised.undirectedEdges,
+      sections: optimised.sectionOrder,
+      itemMeta: input.layout.items.map((it) => ({
+        ref: it.ref,
+        section: it.section,
+        preferredOrder: it.preferred_order ?? 0,
+        requires: [...(it.requires ?? [])],
+        relations: [...(it.relations ?? [])],
+      })),
+    };
+  } else {
+    workingLayout = input.layout;
+  }
+
+  const objectCount = workingLayout.items.length;
+  const maxColumns = maxColumnsForObjectCount(objectCount);
+  const requestedColumns = workingLayout.columns;
+  const requestedRows = countRows(workingLayout);
 
   // Object-count normalisation — always enforce finalColumns <= max_columns(N).
-  let reflow = normalizeGridLayout(input.layout);
+  let reflow = normalizeGridLayout(workingLayout);
   diagnostics.push(...reflow.diagnostics);
   let layout = reflow.layout;
   let wrapped = reflow.wrapped;
@@ -195,6 +229,7 @@ export function resolveGridPlan(input: ResolveGridPlanInput): ResolveGridPlanRes
     collisionFree: true,
     obstacleCount: obstacles.length,
     diagnostics,
+    ...(relationshipDebug ? { relationshipOptimiser: relationshipDebug } : {}),
   };
 
   return { grid, placement, debug, effectiveLayout: layout, byRef };
@@ -206,12 +241,15 @@ export function previewGridPlan(input: ResolveGridPlanInput): LayoutDebugInfo {
     return resolveGridPlan(input).debug;
   } catch (err) {
     const n = input.layout.items.length;
+    const requestedColumns = isRelationshipGridLayout(input.layout)
+      ? (input.layout.columns ?? maxColumnsForObjectCount(n))
+      : input.layout.columns;
     return {
       objectCount: n,
       maxColumns: maxColumnsForObjectCount(n),
-      requestedColumns: input.layout.columns,
-      requestedRows: countRows(input.layout),
-      columns: input.layout.columns,
+      requestedColumns,
+      requestedRows: isRelationshipGridLayout(input.layout) ? 0 : countRows(input.layout),
+      columns: requestedColumns,
       rows: 0,
       wrapped: false,
       wrapReason: 'none',
