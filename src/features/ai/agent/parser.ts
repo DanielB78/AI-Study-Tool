@@ -7,6 +7,7 @@ import {
   CANVAS_AGENT_JSON_SCHEMA,
   PLACEMENT_RELATIONS,
   type AbsolutePlacement,
+  type AnyLayoutSpec,
   type CanvasAgentResponse,
   type CanvasOperation,
   type CreateEquationOperation,
@@ -17,7 +18,6 @@ import {
   type CreateGraphViewportSpec,
   type CreateStructuredNoteOperation,
   type CreateTextOperation,
-  type GridLayoutSpec,
   type Placement,
   type PlacementRelation,
   type RelativePlacement,
@@ -814,7 +814,7 @@ export function parseCanvasAgentResponse(
     operations.push(op);
   }
 
-  let layout: GridLayoutSpec | undefined;
+  let layout: AnyLayoutSpec | undefined;
   if (parsed.layout !== undefined && parsed.layout !== null) {
     layout = parseGridLayout(parsed.layout, parsePlacement);
     validateRelativePlacement(layout.placement, ctx);
@@ -830,7 +830,7 @@ export interface DescribePlanOptions {
   /** structure_id → fieldId → label */
   structureFieldLabels?: ReadonlyMap<string, ReadonlyMap<string, string>>;
   /** Grid layout from the parsed response */
-  layout?: GridLayoutSpec;
+  layout?: AnyLayoutSpec;
 }
 
 function formatPlacementLine(p: Placement, style: 'short' | 'friendly' = 'short'): string {
@@ -1027,20 +1027,41 @@ export function describeOperationPlan(
 
   if (options?.layout) {
     const L = options.layout;
-    const itemLines = L.items.map(
-      (it) =>
-        `   ${it.ref} → row ${it.row}, col ${it.column}` +
-        (it.column_span && it.column_span > 1 ? ` (span ${it.column_span})` : ''),
-    );
-    lines.unshift(
-      [
-        'GRID LAYOUT',
-        `   Columns: ${L.columns}`,
-        `   Group placement: ${formatPlacementLine(L.placement, 'short')}`,
-        '   Cells:',
-        ...itemLines,
-      ].join('\n'),
-    );
+    if (L.type === 'relationship_grid') {
+      const itemLines = L.items.map((it) => {
+        const rel =
+          it.relations && it.relations.length
+            ? ` relations=[${it.relations.map((r) => `${r.ref}:${r.strength}`).join(', ')}]`
+            : '';
+        const req =
+          it.requires && it.requires.length ? ` requires=[${it.requires.join(', ')}]` : '';
+        return `   ${it.ref} → section ${it.section}${it.preferred_order !== undefined ? ` order=${it.preferred_order}` : ''}${req}${rel}`;
+      });
+      lines.unshift(
+        [
+          'RELATIONSHIP GRID LAYOUT',
+          `   Sections: ${L.sections.map((s) => `${s.order}:${s.id}`).join(', ')}`,
+          `   Group placement: ${formatPlacementLine(L.placement, 'short')}`,
+          '   Items:',
+          ...itemLines,
+        ].join('\n'),
+      );
+    } else {
+      const itemLines = L.items.map(
+        (it) =>
+          `   ${it.ref} → row ${it.row}, col ${it.column}` +
+          (it.column_span && it.column_span > 1 ? ` (span ${it.column_span})` : ''),
+      );
+      lines.unshift(
+        [
+          'GRID LAYOUT',
+          `   Columns: ${L.columns}`,
+          `   Group placement: ${formatPlacementLine(L.placement, 'short')}`,
+          '   Cells:',
+          ...itemLines,
+        ].join('\n'),
+      );
+    }
   }
 
   return lines;

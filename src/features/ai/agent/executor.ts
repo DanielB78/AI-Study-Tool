@@ -20,9 +20,9 @@ import {
   type ViewportSize,
 } from '../canvas/placement';
 import type {
+  AnyLayoutSpec,
   CanvasAgentResponse,
   CanvasOperation,
-  GridLayoutSpec,
 } from './operations';
 import { resolvePlacement } from './placementService';
 import type { NoteStructure } from '../../structures/types';
@@ -293,7 +293,7 @@ export function executeCanvasOperations(
 
   // Resolve grid BEFORE mutating — failure commits nothing.
   let gridResolved: ResolveGridPlanResult | null = null;
-  const layout: GridLayoutSpec | undefined = plan.layout;
+  const layout: AnyLayoutSpec | undefined = plan.layout;
   if (layout) {
     gridResolved = resolveGridPlan({
       layout,

@@ -5,7 +5,7 @@ import { ragSync } from '../../../../rag/ragSync';
 import { serializeDocument, parseDocument } from '../../../../../persistence/storage';
 import { executeCanvasOperations } from '../../executor';
 import { createLiveAgentExecutorTarget } from '../../liveExecutor';
-import type { CanvasAgentResponse } from '../../operations';
+import type { CanvasAgentResponse, GridLayoutSpec } from '../../operations';
 import { parseCanvasAgentResponse } from '../../parser';
 import {
   maxColumnsForObjectCount,
@@ -43,7 +43,7 @@ function textOps(n: number, text = 'Note') {
   }));
 }
 
-function singleRowLayout(n: number, columns: number): CanvasAgentResponse['layout'] {
+function singleRowLayout(n: number, columns: number): GridLayoutSpec {
   return {
     type: 'grid',
     columns,
