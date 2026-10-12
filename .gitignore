@@ -26,6 +26,17 @@ __pycache__/
 .coverage
 htmlcov/
 
+# Hugging Face / model caches (never commit weights)
+.cache/
+**/huggingface/
+**/.huggingface/
+**/sentence-transformers/
+*.bin
+*.safetensors
+*.onnx
+*.pt
+*.pth
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

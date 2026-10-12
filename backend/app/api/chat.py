@@ -22,5 +22,10 @@ async def chat(
     llm: LLMService = Depends(get_llm_service),
 ) -> ChatResponse:
     # `prompt` is already stripped/validated by ChatRequest.
-    text = await llm.generate(body.prompt)
+    text = await llm.generate(
+        body.prompt,
+        system_instruction=body.system_instruction,
+        canvas_context=body.canvas_context,
+        image_attachments=body.image_attachments,
+    )
     return ChatResponse(text=text)

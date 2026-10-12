@@ -1,5 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react';
 import { ArrowUp, Loader2, Sparkles } from 'lucide-react';
+import { StructureSelector } from '../../structures/ui/StructureSelector';
 import { useAiStore } from '../state/aiStore';
 
 const MAX_TEXTAREA_HEIGHT = 140;
@@ -13,10 +14,13 @@ export function AiPromptBar({ onInteraction }: AiPromptBarProps) {
   const expanded = useAiStore((s) => s.expanded);
   const prompt = useAiStore((s) => s.prompt);
   const status = useAiStore((s) => s.status);
+  const errorMessage = useAiStore((s) => s.errorMessage);
+  const statusMessage = useAiStore((s) => s.statusMessage);
   const expand = useAiStore((s) => s.expand);
   const setPrompt = useAiStore((s) => s.setPrompt);
   const sendPrompt = useAiStore((s) => s.sendPrompt);
   const collapse = useAiStore((s) => s.collapse);
+  const clearError = useAiStore((s) => s.clearError);
 
   const loading = status === 'loading';
   const canSend = prompt.trim().length > 0 && !loading;
@@ -25,7 +29,6 @@ export function AiPromptBar({ onInteraction }: AiPromptBarProps) {
     if (!expanded) return;
     const el = textareaRef.current;
     if (!el) return;
-    // Defer focus so the expand animation can start first.
     const id = window.requestAnimationFrame(() => el.focus());
     return () => window.cancelAnimationFrame(id);
   }, [expanded]);
@@ -38,7 +41,6 @@ export function AiPromptBar({ onInteraction }: AiPromptBarProps) {
   }, [prompt, expanded]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // Stop canvas shortcuts (Delete, Space, tool keys, etc.) while typing.
     e.stopPropagation();
 
     if (e.key === 'Escape') {
@@ -76,44 +78,68 @@ export function AiPromptBar({ onInteraction }: AiPromptBarProps) {
 
   return (
     <div
-      className="ai-prompt-bar"
+      className="ai-prompt-stack"
       onPointerDown={(e) => {
         e.stopPropagation();
         onInteraction();
       }}
       onKeyDown={(e) => e.stopPropagation()}
     >
-      <textarea
-        ref={textareaRef}
-        className="ai-prompt-input"
-        value={prompt}
-        placeholder="Ask anything…"
-        rows={1}
-        disabled={loading}
-        onChange={(e) => {
-          onInteraction();
-          setPrompt(e.target.value);
-        }}
-        onFocus={onInteraction}
-        onKeyDown={onKeyDown}
-        aria-label="AI prompt"
-      />
-      <button
-        type="button"
-        className="ai-send-btn"
-        disabled={!canSend}
-        onClick={() => {
-          onInteraction();
-          void sendPrompt();
-        }}
-        aria-label={loading ? 'Sending' : 'Send prompt'}
-      >
-        {loading ? (
-          <Loader2 size={16} className="ai-spin" aria-hidden />
-        ) : (
-          <ArrowUp size={16} strokeWidth={2.4} aria-hidden />
-        )}
-      </button>
+      {(errorMessage || statusMessage) && (
+        <div
+          className={`ai-status-chip${errorMessage ? ' is-error' : ' is-success'}`}
+          role="status"
+        >
+          <span>{errorMessage ?? statusMessage}</span>
+          {errorMessage && (
+            <button
+              type="button"
+              className="ai-status-dismiss"
+              aria-label="Dismiss error"
+              onClick={() => {
+                onInteraction();
+                clearError();
+              }}
+            >
+              ×
+            </button>
+          )}
+        </div>
+      )}
+      <StructureSelector disabled={loading} onInteraction={onInteraction} />
+      <div className="ai-prompt-bar">
+        <textarea
+          ref={textareaRef}
+          className="ai-prompt-input"
+          value={prompt}
+          placeholder="Ask anything…"
+          rows={1}
+          disabled={loading}
+          onChange={(e) => {
+            onInteraction();
+            setPrompt(e.target.value);
+          }}
+          onFocus={onInteraction}
+          onKeyDown={onKeyDown}
+          aria-label="AI prompt"
+        />
+        <button
+          type="button"
+          className="ai-send-btn"
+          disabled={!canSend}
+          onClick={() => {
+            onInteraction();
+            void sendPrompt();
+          }}
+          aria-label={loading ? 'Sending' : 'Send prompt'}
+        >
+          {loading ? (
+            <Loader2 size={16} className="ai-spin" aria-hidden />
+          ) : (
+            <ArrowUp size={16} strokeWidth={2.4} aria-hidden />
+          )}
+        </button>
+      </div>
     </div>
   );
 }

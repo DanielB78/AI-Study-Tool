@@ -1,6 +1,8 @@
 import type { CanvasElement } from '../../types/canvas';
 import { ConnectorNode } from './ConnectorNode';
 import { DrawingNode } from './DrawingNode';
+import { EquationNode } from './EquationNode';
+import { GraphNode } from './GraphNode';
 import { ImageNode } from './ImageNode';
 import { ShapeNode } from './ShapeNode';
 import { TextNode } from './TextNode';
@@ -9,24 +11,30 @@ interface Props {
   element: CanvasElement;
   listening: boolean;
   isEditingText: boolean;
+  interactingGraph: boolean;
   onSelect: (id: string, additive: boolean) => void;
   onDragStart: (id: string) => void;
   onDragMove: (id: string, x: number, y: number) => void;
   onDragEnd: (id: string, x: number, y: number) => void;
   onEditText: (id: string) => void;
   onEditShapeLabel: (id: string) => void;
+  onEditEquation?: (id: string) => void;
+  onInteractGraph?: (id: string) => void;
 }
 
 export function ElementRenderer({
   element,
   listening,
   isEditingText,
+  interactingGraph,
   onSelect,
   onDragStart,
   onDragMove,
   onDragEnd,
   onEditText,
   onEditShapeLabel,
+  onEditEquation,
+  onInteractGraph,
 }: Props) {
   switch (element.type) {
     case 'text':
@@ -40,6 +48,32 @@ export function ElementRenderer({
           onDragMove={onDragMove}
           onDragEnd={onDragEnd}
           onDblClick={onEditText}
+        />
+      );
+    case 'equation':
+      return (
+        <EquationNode
+          element={element}
+          listening={listening}
+          isEditing={false}
+          onSelect={onSelect}
+          onDragStart={onDragStart}
+          onDragMove={onDragMove}
+          onDragEnd={onDragEnd}
+          onDblClick={onEditEquation ?? (() => undefined)}
+        />
+      );
+    case 'graph':
+      return (
+        <GraphNode
+          element={element}
+          listening={listening}
+          interacting={interactingGraph}
+          onSelect={onSelect}
+          onDragStart={onDragStart}
+          onDragMove={onDragMove}
+          onDragEnd={onDragEnd}
+          onDblClick={onInteractGraph ?? (() => undefined)}
         />
       );
     case 'shape':

@@ -96,6 +96,8 @@ export function SelectionTransformer({ selectedIds, elements, enabled }: Props) 
           } else {
             const width = Math.max(8, Math.abs(el.width * scaleX));
             const height = Math.max(8, Math.abs(el.height * scaleY));
+            const sizeChanged =
+              Math.abs(width - el.width) > 0.5 || Math.abs(height - el.height) > 0.5;
             updateElement(id, (prev) => ({
               ...prev,
               x: node.x(),
@@ -103,6 +105,15 @@ export function SelectionTransformer({ selectedIds, elements, enabled }: Props) 
               width,
               height,
               rotation: node.rotation(),
+              // Manual resize freezes AI auto-width so later updates keep the user's width.
+              ...(prev.type === 'text' && sizeChanged
+                ? {
+                    metadata: {
+                      ...prev.metadata,
+                      userResized: true,
+                    },
+                  }
+                : {}),
             }));
           }
         }

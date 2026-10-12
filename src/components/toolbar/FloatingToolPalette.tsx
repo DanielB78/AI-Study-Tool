@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import {
   ArrowUpRight,
+  ChartLine,
   Hand,
   Image as ImageIcon,
   MousePointer2,
@@ -18,7 +19,8 @@ import { ToolButton } from './ToolButton';
 import { ShapesPopover } from './ShapesPopover';
 
 const HIDE_DELAY_MS = 280;
-const EDGE_ZONE_PX = 18;
+/** Wider hit target so the dock is easy to re-open from the left edge. */
+const EDGE_ZONE_PX = 28;
 
 interface FloatingToolPaletteProps {
   fileInputRef: RefObject<HTMLInputElement | null>;
@@ -30,7 +32,9 @@ export function FloatingToolPalette({ fileInputRef }: FloatingToolPaletteProps) 
   const shapesOpenRef = useRef(false);
   const prevToolRef = useRef<ToolType | null>(null);
 
-  const [revealed, setRevealed] = useState(false);
+  // Start revealed so first-time users can see tools on a blank board.
+  // Still auto-hides after leaving the left dock / edge zone.
+  const [revealed, setRevealed] = useState(true);
   const [shapesOpen, setShapesOpen] = useState(false);
 
   const activeTool = useCanvasStore((s) => s.activeTool);
@@ -161,6 +165,16 @@ export function FloatingToolPalette({ fileInputRef }: FloatingToolPaletteProps) 
             onClick={() => {
               closeShapes();
               setTool('text');
+            }}
+          />
+          <ToolButton
+            label="Graph"
+            shortcut="G"
+            icon={ChartLine}
+            active={activeTool === 'graph'}
+            onClick={() => {
+              closeShapes();
+              setTool('graph');
             }}
           />
           <ToolButton
