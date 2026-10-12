@@ -46,7 +46,8 @@ export type ExecuteErrorStage =
   | 'layout'
   | 'create'
   | 'update'
-  | 'text_feature';
+  | 'text_feature'
+  | 'text_component';
 
 /** Structured execution failure — never report success for a failed op. */
 export class CanvasAgentExecuteError extends Error {

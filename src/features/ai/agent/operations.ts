@@ -4,9 +4,11 @@
  */
 
 import type { TextFeatureOperation } from './textFeatureOperations';
+import type { TextComponentOperation } from './textComponentOperations';
 import type { TextCommentType, TextNoteType } from '../../text/textFeatureTypes';
 
 export type { TextFeatureOperation } from './textFeatureOperations';
+export type { TextComponentOperation } from './textComponentOperations';
 
 export type PlacementRelation = 'left_of' | 'right_of' | 'above' | 'below' | 'near';
 
@@ -359,7 +361,8 @@ export type CanvasOperation =
   | AddGraphPointOperation
   | UpdateGraphPointOperation
   | RemoveGraphPointOperation
-  | TextFeatureOperation;
+  | TextFeatureOperation
+  | TextComponentOperation;
 
 export type CanvasAgentResponse = {
   operations: CanvasOperation[];
@@ -683,22 +686,60 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
           {
             type: 'object',
             additionalProperties: false,
-            required: ['type', 'target_element_id', 'text'],
+            required: ['type', 'component', 'content'],
             properties: {
-              type: { const: 'set_text_title' },
-              target_element_id: { type: 'string', minLength: 1 },
-              target_id: { type: 'string', minLength: 1 },
+              type: { const: 'create_text_component' },
+              component: {
+                type: 'string',
+                enum: [
+                  'main_text',
+                  'title',
+                  'definition',
+                  'example',
+                  'warning',
+                  'exercise',
+                ],
+              },
+              content: { type: 'string', minLength: 1 },
               text: { type: 'string', minLength: 1 },
+              ref: { type: 'string', minLength: 1 },
+              associated_element_id: { type: 'string', minLength: 1 },
+              variant: {
+                type: 'string',
+                enum: ['warning', 'common_mistake', 'important_caution'],
+              },
+              rich_text: {},
             },
           },
           {
             type: 'object',
             additionalProperties: false,
-            required: ['type', 'target_element_id'],
+            required: ['type', 'target_element_id', 'anchor'],
             properties: {
-              type: { const: 'remove_text_title' },
+              type: { const: 'add_linked_comment' },
               target_element_id: { type: 'string', minLength: 1 },
               target_id: { type: 'string', minLength: 1 },
+              associated_element_id: { type: 'string', minLength: 1 },
+              anchor: { $ref: '#/$defs/textAnchor' },
+              comment: { type: 'string', minLength: 1 },
+              content: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
+              comment_type: {
+                type: 'string',
+                enum: ['explanation', 'correction', 'suggestion', 'question'],
+              },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'content'],
+            properties: {
+              type: { const: 'update_text_component' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              content: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
             },
           },
           {
@@ -730,6 +771,27 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
                 type: 'string',
                 enum: ['important', 'definition', 'warning', 'emphasis'],
               },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'text'],
+            properties: {
+              type: { const: 'set_text_title' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id'],
+            properties: {
+              type: { const: 'remove_text_title' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
             },
           },
           {
@@ -1050,7 +1112,7 @@ OUTPUT TYPE:
 - "step_by_step" — derivations / worked solutions; ONE vertical column of cells; up to 2 objects per layout_cell (horizontal: explanation left, math/graph right).
 Select from the user request (derive/solve/work through → step_by_step; explain/teach topic → lesson). Ambiguous → lesson. Respect explicit user requests.
 
-create_text:
+create_text (general prose / main textbox — prefer create_text_component for textbook parts):
 {
   "type": "create_text",
   "ref": "<temp id — required for multi-create layout>",
@@ -1059,13 +1121,6 @@ create_text:
   "column_span": 1|2|3|4,  /* optional; lesson grid only */
   "text": "<plain string — optional if rich_text provided>",
   "rich_text": { /* optional structured formatting — see RICH TEXT */ },
-  "title": "<optional title above main text>",
-  "notes": [{ "text": "<supplementary note>", "note_type": "extra_information"|"important"|"caution"|"reference" }],
-  "comments": [{
-    "anchor": { "quote": "<phrase in text>", "block_id": "<optional>", "occurrence": 0 },
-    "comment": "<linked comment text>",
-    "comment_type": "explanation"|"correction"|"suggestion"|"question"
-  }],
   "placement":  /* omit when using response-level layout */
     { "mode": "viewport_default" }
     | { "mode": "relative_to_element", "anchor_element_id": "<id from context>", "relation": "left_of"|"right_of"|"above"|"below"|"near" }
@@ -1090,22 +1145,37 @@ update_text:
   "rich_text": { /* optional complete rich-text replacement */ }
 }
 
-TEXT FEATURES (optional built-in TextElement features — prefer these over new standalone textboxes):
-- set_text_title: { "type":"set_text_title", "target_element_id":"<id>", "text":"Electric Fields" }
-- remove_text_title: { "type":"remove_text_title", "target_element_id":"<id>" }
+TEXTBOOK COMPONENTS (preferred — app owns style, size, and placement; never send x/y/width/height/colours/fonts):
+- create_text_component: { "type":"create_text_component", "component":"main_text"|"title"|"definition"|"example"|"warning"|"exercise", "content":"…", "ref":"<optional>", "associated_element_id":"<optional existing id or plan ref>", "variant":"warning"|"common_mistake"|"important_caution" }
+  Title / definition / example / warning / exercise are SEPARATE editable TextElements. Headings are NOT — use insert_text_heading inside main text.
+  Do NOT supply coordinates, dimensions, font sizes, colours, borders, padding, grid cells, or column indices for components.
+- add_linked_comment: ONE op that highlights the phrase AND creates a permanently visible Comment TextElement nearby.
+  { "type":"add_linked_comment", "target_element_id":"<id>", "anchor":{ "quote":"positive test charge", "occurrence":0 }, "comment":"…" }
+  Identifying the subject phrase is NOT the same as specifying physical placement — the app places the comment.
+  If a quote appears more than once, provide block_id or occurrence — never guess. Ambiguous anchors are rejected.
+- update_text_component: { "type":"update_text_component", "target_element_id":"<component id>", "content":"…" }
+  Prefer updating an existing title/example/definition/comment over creating a duplicate.
+
+IN-DOCUMENT RICH TEXT (inside a Main TextElement — not separate canvas objects):
 - insert_text_heading: REQUIRES an explicit position (after_block_id | before_block_id | before_quote | after_quote). Never omit it.
   { "type":"insert_text_heading", "target_element_id":"<id>", "text":"Field Direction", "level":1, "before_quote":{ "quote":"The direction of the field" } }
-  before_quote / after_quote may split a paragraph. Ambiguous quotes need block_id or occurrence.
-- highlight_text: { "type":"highlight_text", "target_element_id":"<id>", "anchor":{ "quote":"vector quantity", "block_id":"<optional>", "occurrence":0 }, "style":"important"|"definition"|"warning"|"emphasis" }
-- add_text_comment: { "type":"add_text_comment", "target_element_id":"<id>", "anchor":{ "quote":"positive test charge", "occurrence":0 }, "comment":"…", "comment_type":"explanation"|"correction"|"suggestion"|"question" }
-  If a quote appears more than once, provide block_id or occurrence — never guess.
-- update_text_comment / remove_text_comment: require comment_id from context
-- add_text_note: { "type":"add_text_note", "target_element_id":"<id>", "text":"…", "note_type":"extra_information"|"important"|"caution"|"reference" }
-- update_text_note / remove_text_note: require note_id from context
-Canonical target field is target_element_id. Never invent comment_id / note_id / block_id.
-Prefer native features when the user asks to comment / highlight / title / note / organise existing text.
-Do NOT simulate comments with extra textboxes, arrows, or floating shapes.
-Use features selectively — do not add every feature to every textbox. Avoid redundant comments, purposeless overlapping annotations, and long notes that repeat the main text.
+- highlight_text: ordinary emphasis without a comment. { "type":"highlight_text", "target_element_id":"<id>", "anchor":{ "quote":"vector quantity" }, "style":"important"|"definition"|"warning"|"emphasis" }
+  Do NOT also create a linked comment for the same phrase unless the user asked for commentary.
+
+WHEN TO USE COMPONENTS:
+| User request | Operation |
+| Comment on my notes / explain this sentence | add_linked_comment (one or a few precise anchors) |
+| Add a definition / example / warning / exercise | create_text_component with that component |
+| Give this a title | create_text_component title (or update existing) |
+| Organise with headings | insert_text_heading inside existing main text |
+| Highlight this (no commentary) | highlight_text |
+| Rewrite this | update_text / update_text_component |
+
+Rules:
+- Prefer native components over simulating them with plain textboxes, shapes, or arrows.
+- Features are optional — a simple explanation may need only main_text. Do not inflate lessons with redundant definitions, warnings, or comments.
+- Do not highlight every important-looking phrase. Prefer comments that add information, identify an error, or clarify a difficult point.
+- Never invent comment_id / block_id. Canonical target field is target_element_id.
 
 RICH TEXT (optional on create_text / update_text):
 {

@@ -21,6 +21,13 @@ export function createLiveAgentExecutorTarget(): AgentExecutorTarget {
     rollbackInteraction: () => useCanvasStore.getState().rollbackInteraction(),
     addElement: (element, select) => useCanvasStore.getState().addElement(element, select),
     updateElement: (id, updater) => useCanvasStore.getState().updateElement(id, updater),
+    deleteElements: (ids) => {
+      const store = useCanvasStore.getState();
+      const idSet = new Set(ids);
+      store.replaceElements(
+        store.document.elements.filter((el) => !idSet.has(el.id)),
+      );
+    },
     setSelection: (ids) => useCanvasStore.getState().select(ids),
     persist: () => useCanvasStore.getState().persist(),
     getViewportSize: getDefaultViewportSize,

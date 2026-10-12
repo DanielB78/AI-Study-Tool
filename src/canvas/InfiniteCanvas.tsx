@@ -495,6 +495,14 @@ export function InfiniteCanvas() {
   const onDragEndElement = useCallback(
     (id: string, x: number, y: number) => {
       const drag = multiDrag.current;
+      const markManual = (el: import('../types/canvas').CanvasElement) => {
+        if (el.type !== 'text' || !el.componentMeta) return el;
+        if (el.componentMeta.placementMode === 'manual') return el;
+        return {
+          ...el,
+          componentMeta: { ...el.componentMeta, placementMode: 'manual' as const },
+        };
+      };
       if (drag && drag.primaryId === id) {
         const primary = useCanvasStore
           .getState()
@@ -514,10 +522,53 @@ export function InfiniteCanvas() {
         updateElements(ids, (el) => {
           const o = drag.origin.get(el.id);
           if (!o) return el;
-          return { ...el, x: o.x + dx, y: o.y + dy };
+          return markManual({ ...el, x: o.x + dx, y: o.y + dy });
         });
+        // Auto-placed related components follow a moved main text.
+        if (primary?.type === 'text' && (dx !== 0 || dy !== 0)) {
+          const related = useCanvasStore
+            .getState()
+            .document.elements.filter(
+              (el) =>
+                el.type === 'text' &&
+                el.componentMeta?.associatedElementId === id &&
+                el.componentMeta.placementMode !== 'manual' &&
+                !drag.origin.has(el.id),
+            )
+            .map((el) => el.id);
+          if (related.length > 0) {
+            updateElements(related, (el) => ({
+              ...el,
+              x: el.x + dx,
+              y: el.y + dy,
+            }));
+          }
+        }
       } else {
-        updateElement(id, (el) => ({ ...el, x, y }));
+        const before = useCanvasStore
+          .getState()
+          .document.elements.find((el) => el.id === id);
+        const dx = before ? x - before.x : 0;
+        const dy = before ? y - before.y : 0;
+        updateElement(id, (el) => markManual({ ...el, x, y }));
+        if (before?.type === 'text' && (dx !== 0 || dy !== 0)) {
+          const related = useCanvasStore
+            .getState()
+            .document.elements.filter(
+              (el) =>
+                el.type === 'text' &&
+                el.componentMeta?.associatedElementId === id &&
+                el.componentMeta.placementMode !== 'manual',
+            )
+            .map((el) => el.id);
+          if (related.length > 0) {
+            updateElements(related, (el) => ({
+              ...el,
+              x: el.x + dx,
+              y: el.y + dy,
+            }));
+          }
+        }
       }
       multiDrag.current = null;
       setSnapGuides([]);

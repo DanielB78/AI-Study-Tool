@@ -68,7 +68,7 @@ function resetCanvas() {
   });
 }
 
-describe('executeCanvasOperations — text features', () => {
+describe('executeCanvasOperations — text features → components', () => {
   beforeEach(() => {
     resetCanvas();
     vi.spyOn(ragSync, 'indexText').mockImplementation(() => {});
@@ -80,7 +80,7 @@ describe('executeCanvasOperations — text features', () => {
     vi.restoreAllMocks();
   });
 
-  it('applies feature ops on existing text and indexes RAG', () => {
+  it('bridges legacy feature ops to sibling textbook components', () => {
     const plan = parseCanvasAgentResponse(
       JSON.stringify({
         operations: [
@@ -109,21 +109,21 @@ describe('executeCanvasOperations — text features', () => {
     );
 
     const result = executeCanvasOperations(plan, createLiveAgentExecutorTarget());
-    expect(result.updatedIds).toContain('text_12');
-    const el = useCanvasStore
+    expect(result.createdIds.length).toBeGreaterThanOrEqual(3);
+    const texts = useCanvasStore
       .getState()
-      .document.elements.find((e) => e.id === 'text_12');
-    expect(el?.type).toBe('text');
-    if (el?.type === 'text') {
-      expect(el.title?.text).toBe('Electric Fields');
-      expect(el.comments).toHaveLength(1);
-      expect(el.notes).toHaveLength(1);
-      expect(el.height).toBeGreaterThan(140);
-    }
+      .document.elements.filter((e): e is TextElement => e.type === 'text');
+    expect(texts.some((e) => e.componentType === 'title')).toBe(true);
+    expect(texts.some((e) => e.componentType === 'linked_comment')).toBe(true);
+    expect(texts.some((e) => e.componentType === 'example')).toBe(true);
+    const main = texts.find((e) => e.id === 'text_12')!;
+    expect(main.title).toBeUndefined();
+    expect(main.comments).toBeUndefined();
+    expect(main.notes).toBeUndefined();
     expect(ragSync.indexText).toHaveBeenCalled();
   });
 
-  it('create_text with features creates one element', () => {
+  it('create_text with legacy features spawns sibling components', () => {
     const plan = parseCanvasAgentResponse(
       JSON.stringify({
         operations: [
@@ -142,15 +142,17 @@ describe('executeCanvasOperations — text features', () => {
       },
     );
     const result = executeCanvasOperations(plan, createLiveAgentExecutorTarget());
-    expect(result.createdIds).toHaveLength(1);
-    const el = useCanvasStore
+    // main + title + example
+    expect(result.createdIds.length).toBeGreaterThanOrEqual(3);
+    const texts = useCanvasStore
       .getState()
-      .document.elements.find((e) => e.id === result.createdIds[0]);
-    expect(el?.type).toBe('text');
-    if (el?.type === 'text') {
-      expect(el.title?.text).toBe('Gauss');
-      expect(el.notes).toHaveLength(1);
-    }
+      .document.elements.filter((e): e is TextElement =>
+        result.createdIds.includes(e.id),
+      );
+    expect(texts.some((e) => e.componentType === 'title' && e.text === 'Gauss')).toBe(
+      true,
+    );
+    expect(texts.some((e) => e.componentType === 'example')).toBe(true);
   });
 
   it('feature ops undo as one transaction', () => {
@@ -169,20 +171,12 @@ describe('executeCanvasOperations — text features', () => {
       ],
       createLiveAgentExecutorTarget(),
     );
-    let el = useCanvasStore
-      .getState()
-      .document.elements.find((e) => e.id === 'text_12');
-    if (el?.type === 'text') {
-      expect(el.title).toBeTruthy();
-      expect(el.notes).toHaveLength(1);
-    }
+    expect(
+      useCanvasStore.getState().document.elements.filter((e) => e.type === 'text'),
+    ).toHaveLength(3);
     useCanvasStore.getState().undo();
-    el = useCanvasStore
-      .getState()
-      .document.elements.find((e) => e.id === 'text_12');
-    if (el?.type === 'text') {
-      expect(el.title).toBeUndefined();
-      expect(el.notes).toBeUndefined();
-    }
+    expect(
+      useCanvasStore.getState().document.elements.filter((e) => e.type === 'text'),
+    ).toHaveLength(1);
   });
 });

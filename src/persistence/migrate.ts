@@ -30,6 +30,13 @@ import {
   TEXT_COMMENT_TYPES,
   TEXT_NOTE_TYPES,
 } from '../features/text/textFeatureTypes';
+import {
+  applyComponentStyleToElement,
+  createTextComponentElement,
+  isTextComponentType,
+  type TextComponentType,
+} from '../features/text/textComponents';
+import { COMPONENT_LAYOUT } from '../features/text/textComponents';
 
 /**
  * Convert legacy parser-native sources (x^2, 2x, …) to canonical GraphMathSyntax.
@@ -165,11 +172,57 @@ function migrateText(raw: Record<string, unknown>, z: number): TextElement {
   const title = migrateTitle(raw.title);
   const notes = migrateNotes(raw.notes);
   const comments = migrateComments(raw.comments);
+  const componentType = isTextComponentType(raw.componentType)
+    ? (raw.componentType as TextComponentType)
+    : isTextComponentType(raw.metadata && isObject(raw.metadata) ? raw.metadata.componentType : null)
+      ? (raw.metadata as Record<string, unknown>).componentType as TextComponentType
+      : undefined;
+  let componentMeta: TextElement['componentMeta'];
+  if (isObject(raw.componentMeta)) {
+    componentMeta = {
+      placementMode:
+        raw.componentMeta.placementMode === 'manual' ? 'manual' : 'auto',
+      ...(typeof raw.componentMeta.associatedElementId === 'string'
+        ? { associatedElementId: raw.componentMeta.associatedElementId }
+        : {}),
+      ...(typeof raw.componentMeta.label === 'string'
+        ? { label: raw.componentMeta.label }
+        : {}),
+      ...(typeof raw.componentMeta.number === 'number'
+        ? { number: raw.componentMeta.number }
+        : {}),
+      ...(typeof raw.componentMeta.variant === 'string'
+        ? {
+            variant: raw.componentMeta.variant as
+              | 'warning'
+              | 'common_mistake'
+              | 'important_caution',
+          }
+        : {}),
+      ...(isObject(raw.componentMeta.anchor)
+        ? {
+            anchor: {
+              targetElementId: str(raw.componentMeta.anchor.targetElementId, ''),
+              blockId: str(raw.componentMeta.anchor.blockId, ''),
+              start: num(raw.componentMeta.anchor.start, 0),
+              end: num(raw.componentMeta.anchor.end, 0),
+              quote: str(raw.componentMeta.anchor.quote, ''),
+              status:
+                raw.componentMeta.anchor.status === 'unresolved'
+                  ? 'unresolved'
+                  : 'resolved',
+            },
+          }
+        : {}),
+    };
+  }
   return {
     ...migrateBase(raw, z),
     type: 'text',
     text: str(raw.text, ''),
     ...(richText ? { richText } : {}),
+    ...(componentType ? { componentType } : {}),
+    ...(componentMeta ? { componentMeta } : {}),
     ...(title ? { title } : {}),
     ...(notes ? { notes } : {}),
     ...(comments ? { comments } : {}),
@@ -187,6 +240,132 @@ function migrateText(raw: Record<string, unknown>, z: number): TextElement {
     padding: num(raw.padding, DEFAULT_STYLE.textPadding),
     cornerRadius: num(raw.cornerRadius, DEFAULT_STYLE.textCornerRadius),
   };
+}
+
+/**
+ * Convert legacy nested title/notes/comments into standalone textbook
+ * TextElements. Preserves content; strips nested fields from the parent.
+ */
+function flattenLegacyTextFeatures(elements: CanvasElement[]): CanvasElement[] {
+  const out: CanvasElement[] = [];
+  let zBoost = 0;
+  for (const el of elements) {
+    if (el.type !== 'text') {
+      out.push(el);
+      continue;
+    }
+    let main: TextElement = {
+      ...el,
+      componentType: el.componentType ?? 'main_text',
+    };
+    if (!main.componentType) main.componentType = 'main_text';
+
+    if (main.title?.text.trim()) {
+      const titleEl = createTextComponentElement({
+        componentType: 'title',
+        text: main.title.text,
+        position: {
+          x: main.x,
+          y: main.y - 40 - COMPONENT_LAYOUT.titleGap,
+        },
+        zIndex: main.zIndex + ++zBoost,
+        meta: {
+          placementMode: 'auto',
+          associatedElementId: main.id,
+        },
+        metadata: { migratedFrom: 'legacy_title', legacyTitleId: main.title.id },
+      });
+      out.push(titleEl);
+    }
+
+    for (const note of main.notes ?? []) {
+      const kind: TextComponentType =
+        note.noteType === 'caution'
+          ? 'warning'
+          : note.noteType === 'important'
+            ? 'definition'
+            : 'example';
+      const noteEl = createTextComponentElement({
+        componentType: kind,
+        text: note.text,
+        position: {
+          x: main.x + (note.offsetX ?? 0),
+          y: main.y + main.height + COMPONENT_LAYOUT.stackGap + (note.offsetY ?? 0),
+        },
+        zIndex: main.zIndex + ++zBoost,
+        meta: {
+          placementMode: note.layoutMode === 'manual' ? 'manual' : 'auto',
+          associatedElementId: main.id,
+          label: note.noteType === 'extra_information' ? 'Note' : undefined,
+          variant: note.noteType === 'caution' ? 'important_caution' : undefined,
+        },
+        metadata: { migratedFrom: 'legacy_note', legacyNoteId: note.id },
+      });
+      out.push(noteEl);
+    }
+
+    for (const comment of main.comments ?? []) {
+      const commentEl = createTextComponentElement({
+        componentType: 'linked_comment',
+        text: comment.text,
+        position: {
+          x: main.x + main.width + COMPONENT_LAYOUT.sideGap,
+          y: main.y + (comment.panelOffsetY ?? 0),
+        },
+        zIndex: main.zIndex + ++zBoost,
+        meta: {
+          placementMode: 'auto',
+          associatedElementId: main.id,
+          label: 'Comment',
+          anchor: {
+            targetElementId: main.id,
+            blockId: comment.anchor.blockId,
+            start: comment.anchor.start,
+            end: comment.anchor.end,
+            quote: comment.anchor.quote,
+            status: comment.anchor.status,
+          },
+        },
+        metadata: {
+          migratedFrom: 'legacy_comment',
+          legacyCommentId: comment.id,
+        },
+      });
+      out.push(commentEl);
+    }
+
+    // Strip nested bags — content now lives in sibling elements.
+    const {
+      title: _t,
+      notes: _n,
+      comments: _c,
+      ...rest
+    } = main;
+    main = applyComponentStyleToElement(
+      { ...rest, componentType: rest.componentType ?? 'main_text' },
+      rest.componentType ?? 'main_text',
+      rest.componentMeta,
+    );
+    // Preserve original geometry/style for main_text when already user-styled
+    if (!el.componentType) {
+      main = {
+        ...main,
+        fontSize: el.fontSize,
+        fontFamily: el.fontFamily,
+        fontWeight: el.fontWeight,
+        color: el.color,
+        backgroundColor: el.backgroundColor,
+        padding: el.padding,
+        cornerRadius: el.cornerRadius,
+        width: el.width,
+        height: el.height,
+        x: el.x,
+        y: el.y,
+      };
+    }
+    out.push(main);
+  }
+  return out;
 }
 
 function migrateShape(raw: Record<string, unknown>, z: number): ShapeElement {
@@ -396,6 +575,7 @@ export function migrateDocument(raw: unknown): CanvasDocument | null {
     version !== 2 &&
     version !== 3 &&
     version !== 4 &&
+    version !== 5 &&
     version !== DOCUMENT_VERSION
   ) {
     return null;
@@ -414,12 +594,14 @@ export function migrateDocument(raw: unknown): CanvasDocument | null {
     .map((el, i) => migrateElement(el, i))
     .filter((el): el is CanvasElement => el !== null);
 
+  const flattened = flattenLegacyTextFeatures(elements);
+
   const existingId = typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : null;
 
   return {
     version: DOCUMENT_VERSION,
     id: existingId ?? nanoid(12),
-    elements,
+    elements: flattened,
     camera: { x: camera.x, y: camera.y, zoom: camera.zoom },
   };
 }

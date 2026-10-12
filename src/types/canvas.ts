@@ -13,8 +13,14 @@ import type {
   TextNote,
   TextTitle,
 } from '../features/text/textFeatureTypes';
+import type {
+  TextComponentMeta,
+  TextComponentType,
+} from '../features/text/textComponents';
 
-export const DOCUMENT_VERSION = 5 as const;
+export type { TextComponentMeta, TextComponentType };
+
+export const DOCUMENT_VERSION = 6 as const;
 
 export type ShapeType =
   | 'rectangle'
@@ -80,11 +86,28 @@ export interface TextElement extends BaseElement {
    * and `text` is kept in sync as the plain extract.
    */
   richText?: RichTextDocument;
-  /** Optional title above the main text (single per element). */
+  /**
+   * Textbook component role. Defaults to main_text when omitted.
+   * Title / definition / example / warning / linked_comment / exercise are
+   * independent canvas TextElements — not nested chrome on main_text.
+   */
+  componentType?: TextComponentType;
+  /** Component relationships, placement mode, labels, comment anchors. */
+  componentMeta?: TextComponentMeta;
+  /**
+   * @deprecated Legacy nested title (DOCUMENT_VERSION ≤ 5). Migrated to a
+   * separate title TextElement on load.
+   */
   title?: TextTitle;
-  /** Supplementary notes below the main text. */
+  /**
+   * @deprecated Legacy nested notes (DOCUMENT_VERSION ≤ 5). Migrated to
+   * standalone text components on load.
+   */
   notes?: TextNote[];
-  /** Comments anchored to ranges inside richText / plain text. */
+  /**
+   * @deprecated Legacy nested comments (DOCUMENT_VERSION ≤ 5). Migrated to
+   * linked_comment TextElements on load.
+   */
   comments?: TextComment[];
   fontSize: number;
   fontFamily: string;

@@ -644,10 +644,16 @@ export function sortedNotes(el: TextElement): TextNote[] {
 
 /** True when the HTML overlay (not Konva Text) should paint this element. */
 export function textElementNeedsHtmlOverlay(el: TextElement): boolean {
+  const componentType = el.componentType;
+  const hasComponentChrome =
+    !!componentType &&
+    componentType !== 'main_text' &&
+    componentType !== 'title';
   return (
     !!(el.richText && el.richText.blocks.length > 0) ||
     !!el.title?.text.trim() ||
-    !!(el.notes && el.notes.length > 0)
+    !!(el.notes && el.notes.length > 0) ||
+    hasComponentChrome
   );
 }
 

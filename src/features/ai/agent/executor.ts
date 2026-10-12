@@ -47,46 +47,230 @@ import {
   type TextFeatureOperation,
 } from './textFeatureOperations';
 import {
-  addCommentToElement,
-  addNoteToElement,
-  setTitleOnElement,
-} from '../../text/textFeatures';
-import { measureTextElementWithFeatures } from '../../text/textAutoSizer';
+  executeAddLinkedComment,
+  executeCreateTextComponent,
+  executeUpdateTextComponent,
+  isTextComponentOperationType,
+  type AddLinkedCommentOperation,
+  type CreateTextComponentOperation,
+  type TextComponentOperation,
+  type UpdateTextComponentOperation,
+} from './textComponentOperations';
+import {
+  getComponentType,
+  type TextComponentType,
+} from '../../text/textComponents';
 import { isGridCreatableOp } from './layout/measure';
 import { resolveGridPlan, type ResolveGridPlanResult } from './layout/resolveGridPlan';
 import type { LayoutDebugInfo } from './layout/types';
 import type { CreateTextOperation } from './operations';
 import { CanvasAgentExecuteError } from './parseErrors';
 
-/** Attach optional create_text title/notes/comments and resize. */
-function applyCreateTextFeaturePayload(
-  el: TextElement,
+/** Legacy create_text title/notes/comments → sibling textbook components. */
+function spawnLegacyCreateTextComponents(
+  main: TextElement,
   op: CreateTextOperation,
-): TextElement {
-  let next = el;
-  if (op.title?.trim()) {
-    next = setTitleOnElement(next, op.title);
-  }
-  for (const note of op.notes ?? []) {
-    next = addNoteToElement(next, note.text, note.note_type).element;
-  }
-  for (const c of op.comments ?? []) {
-    next = addCommentToElement(next, {
-      anchor: c.anchor,
-      text: c.comment,
-      commentType: c.comment_type,
-    }).element;
-  }
-  if (!op.title && !(op.notes?.length) && !(op.comments?.length)) {
-    return next;
-  }
-  const measured = measureTextElementWithFeatures(next, {
-    availableWidth: next.width,
-  });
-  return {
-    ...next,
-    height: Math.max(next.height, measured.height),
+  target: AgentExecutorTarget,
+): string[] {
+  const created: string[] = [];
+  const ctxBase = {
+    getElements: () => target.getElements(),
+    getCamera: () => target.getCamera(),
+    getViewportSize: target.getViewportSize,
+    nextZIndex: () => target.nextZIndex(),
+    addElement: (el: CanvasElement, select?: boolean) =>
+      target.addElement(el, select),
+    updateElement: target.updateElement,
   };
+
+  if (op.title?.trim()) {
+    const { createdId } = executeCreateTextComponent(
+      {
+        type: 'create_text_component',
+        component: 'title',
+        content: op.title.trim(),
+        associated_element_id: main.id,
+      },
+      ctxBase,
+    );
+    created.push(createdId);
+  }
+
+  for (const note of op.notes ?? []) {
+    const component: TextComponentType =
+      note.note_type === 'caution'
+        ? 'warning'
+        : note.note_type === 'important'
+          ? 'definition'
+          : note.note_type === 'reference'
+            ? 'definition'
+            : 'example';
+    const { createdId } = executeCreateTextComponent(
+      {
+        type: 'create_text_component',
+        component,
+        content: note.text,
+        associated_element_id: main.id,
+        ...(note.note_type === 'caution'
+          ? { variant: 'important_caution' as const }
+          : {}),
+      },
+      ctxBase,
+    );
+    created.push(createdId);
+  }
+
+  for (const c of op.comments ?? []) {
+    const { createdId } = executeAddLinkedComment(
+      {
+        type: 'add_linked_comment',
+        target_element_id: main.id,
+        anchor: c.anchor,
+        comment: c.comment,
+        comment_type: c.comment_type,
+      },
+      ctxBase,
+    );
+    created.push(createdId);
+  }
+
+  return created;
+}
+
+/** Bridge legacy nested feature ops to textbook components where applicable. */
+function bridgeLegacyFeatureOp(
+  op: TextFeatureOperation,
+  target: AgentExecutorTarget,
+  resolveRef: (ref: string) => string | undefined,
+): { createdIds: string[]; updatedIds: string[] } {
+  const createdIds: string[] = [];
+  const updatedIds: string[] = [];
+  const ctx = {
+    getElements: () => target.getElements(),
+    getCamera: () => target.getCamera(),
+    getViewportSize: target.getViewportSize,
+    nextZIndex: () => target.nextZIndex(),
+    addElement: (el: CanvasElement, select?: boolean) =>
+      target.addElement(el, select),
+    updateElement: target.updateElement,
+    resolveRef,
+  };
+
+  if (op.type === 'set_text_title') {
+    const existing = target.getElements().find(
+      (e): e is TextElement =>
+        e.type === 'text' &&
+        getComponentType(e) === 'title' &&
+        e.componentMeta?.associatedElementId === op.target_element_id,
+    );
+    if (existing) {
+      executeUpdateTextComponent(
+        {
+          type: 'update_text_component',
+          target_element_id: existing.id,
+          content: op.text,
+        },
+        ctx,
+      );
+      updatedIds.push(existing.id);
+    } else {
+      const { createdId } = executeCreateTextComponent(
+        {
+          type: 'create_text_component',
+          component: 'title',
+          content: op.text,
+          associated_element_id: op.target_element_id,
+        },
+        ctx,
+      );
+      createdIds.push(createdId);
+    }
+    return { createdIds, updatedIds };
+  }
+
+  if (op.type === 'remove_text_title') {
+    const titles = target
+      .getElements()
+      .filter(
+        (e): e is TextElement =>
+          e.type === 'text' &&
+          getComponentType(e) === 'title' &&
+          e.componentMeta?.associatedElementId === op.target_element_id,
+      );
+    if (titles.length > 0) {
+      target.deleteElements?.(titles.map((t) => t.id));
+      updatedIds.push(...titles.map((t) => t.id));
+    }
+    return { createdIds, updatedIds };
+  }
+
+  if (op.type === 'add_text_comment') {
+    const { createdId, updatedTargetId } = executeAddLinkedComment(
+      {
+        type: 'add_linked_comment',
+        target_element_id: op.target_element_id,
+        anchor: op.anchor,
+        comment: op.comment,
+        comment_type: op.comment_type,
+      },
+      ctx,
+    );
+    createdIds.push(createdId);
+    updatedIds.push(updatedTargetId);
+    return { createdIds, updatedIds };
+  }
+
+  if (op.type === 'update_text_comment') {
+    // comment_id may be a linked_comment TextElement id (new) or nested id (legacy).
+    const hit = target.getElements().find((e) => e.id === op.comment_id);
+    if (hit && hit.type === 'text' && getComponentType(hit) === 'linked_comment') {
+      executeUpdateTextComponent(
+        {
+          type: 'update_text_component',
+          target_element_id: hit.id,
+          content: op.comment,
+        },
+        ctx,
+      );
+      updatedIds.push(hit.id);
+      return { createdIds, updatedIds };
+    }
+    // Fall through to nested apply
+  }
+
+  if (op.type === 'remove_text_comment') {
+    const hit = target.getElements().find((e) => e.id === op.comment_id);
+    if (hit && hit.type === 'text' && getComponentType(hit) === 'linked_comment') {
+      target.deleteElements?.([hit.id]);
+      updatedIds.push(hit.id);
+      return { createdIds, updatedIds };
+    }
+  }
+
+  if (op.type === 'add_text_note') {
+    const component: TextComponentType =
+      op.note_type === 'caution'
+        ? 'warning'
+        : op.note_type === 'important'
+          ? 'definition'
+          : 'example';
+    const { createdId } = executeCreateTextComponent(
+      {
+        type: 'create_text_component',
+        component,
+        content: op.text,
+        associated_element_id: op.target_element_id,
+        ...(op.note_type === 'caution'
+          ? { variant: 'important_caution' as const }
+          : {}),
+      },
+      ctx,
+    );
+    createdIds.push(createdId);
+    return { createdIds, updatedIds };
+  }
+
+  return { createdIds, updatedIds };
 }
 
 export interface AgentExecutorTarget {
@@ -101,6 +285,8 @@ export interface AgentExecutorTarget {
   rollbackInteraction: () => void;
   addElement: (element: CanvasElement, select?: boolean) => void;
   updateElement: (id: string, updater: (el: CanvasElement) => CanvasElement) => void;
+  /** Remove elements by id (used when deleting title/comment components). */
+  deleteElements?: (ids: string[]) => void;
   setSelection: (ids: string[]) => void;
   persist?: () => void;
   getViewportSize?: () => ViewportSize;
@@ -234,16 +420,22 @@ function createOne(
       },
     });
     element.height = height;
-    element = applyCreateTextFeaturePayload(element, op);
-    if (!forced) {
-      // Features may grow height; keep placement origin.
-      element.height = Math.max(height, element.height);
-    } else {
+    if (forced) {
       element.width = width;
-      element.height = Math.max(height, element.height);
+      element.height = height;
     }
+    // Mark as main_text textbook component when created by the agent.
+    element = {
+      ...element,
+      componentType: element.componentType ?? 'main_text',
+      componentMeta: element.componentMeta ?? { placementMode: 'auto' },
+    };
     target.addElement(element, false);
     createdIds.push(element.id);
+    // Legacy nested title/notes/comments → sibling components after main exists.
+    if (op.title || op.notes?.length || op.comments?.length) {
+      createdIds.push(...spawnLegacyCreateTextComponents(element, op, target));
+    }
   } else if (op.type === 'create_equation') {
     const camera = target.getCamera();
     const elements = target.getElements();
@@ -389,6 +581,11 @@ export function executeCanvasOperations(
     layoutDebug = gridResolved.debug;
   }
 
+  const planRefMap = new Map<string, string>();
+  let lastMainTextId: string | undefined;
+  const resolveRef = (ref: string): string | undefined =>
+    planRefMap.get(ref) ?? undefined;
+
   target.beginInteraction();
   let committed = false;
   try {
@@ -463,6 +660,109 @@ export function executeCanvasOperations(
           continue;
         }
 
+        if (isTextComponentOperationType(op.type)) {
+          const compOp = op as TextComponentOperation;
+          const ctx = {
+            getElements: () => target.getElements(),
+            getCamera: () => target.getCamera(),
+            getViewportSize: target.getViewportSize,
+            nextZIndex: () => target.nextZIndex(),
+            addElement: (el: CanvasElement, select?: boolean) =>
+              target.addElement(el, select),
+            updateElement: target.updateElement,
+            resolveRef,
+          };
+
+          if (compOp.type === 'create_text_component') {
+            let associated = compOp.associated_element_id;
+            if (!associated && compOp.component !== 'main_text') {
+              associated = lastMainTextId;
+            }
+            const enriched: CreateTextComponentOperation = {
+              ...compOp,
+              ...(associated ? { associated_element_id: associated } : {}),
+            };
+            // Title upsert: update existing associated title instead of duplicating.
+            if (enriched.component === 'title' && enriched.associated_element_id) {
+              const assocId =
+                resolveRef(enriched.associated_element_id) ??
+                enriched.associated_element_id;
+              const existingTitle = target.getElements().find(
+                (e): e is TextElement =>
+                  e.type === 'text' &&
+                  getComponentType(e) === 'title' &&
+                  e.componentMeta?.associatedElementId === assocId,
+              );
+              if (existingTitle) {
+                executeUpdateTextComponent(
+                  {
+                    type: 'update_text_component',
+                    target_element_id: existingTitle.id,
+                    content: enriched.content,
+                  },
+                  ctx,
+                );
+                updatedIds.push(existingTitle.id);
+                if (enriched.ref) planRefMap.set(enriched.ref, existingTitle.id);
+                continue;
+              }
+            }
+            const { createdId } = executeCreateTextComponent(enriched, ctx);
+            createdIds.push(createdId);
+            if (enriched.ref) planRefMap.set(enriched.ref, createdId);
+            if (enriched.component === 'main_text') {
+              lastMainTextId = createdId;
+              // Link orphan auto-titles from this batch to the new main text.
+              for (const el of target.getElements()) {
+                if (
+                  el.type === 'text' &&
+                  getComponentType(el) === 'title' &&
+                  el.componentMeta?.placementMode === 'auto' &&
+                  !el.componentMeta.associatedElementId &&
+                  createdIds.includes(el.id)
+                ) {
+                  target.updateElement(el.id, (prev) => {
+                    if (prev.type !== 'text') return prev;
+                    return {
+                      ...prev,
+                      componentMeta: {
+                        ...(prev.componentMeta ?? { placementMode: 'auto' }),
+                        associatedElementId: createdId,
+                        placementMode: 'auto',
+                      },
+                      x: (target.getElements().find((e) => e.id === createdId)
+                        ?.x ?? prev.x),
+                      y:
+                        (target.getElements().find((e) => e.id === createdId)
+                          ?.y ?? prev.y) -
+                        prev.height -
+                        14,
+                    };
+                  });
+                }
+              }
+            }
+            continue;
+          }
+
+          if (compOp.type === 'add_linked_comment') {
+            const { createdId, updatedTargetId } = executeAddLinkedComment(
+              compOp as AddLinkedCommentOperation,
+              ctx,
+            );
+            createdIds.push(createdId);
+            updatedIds.push(updatedTargetId);
+            continue;
+          }
+
+          executeUpdateTextComponent(
+            compOp as UpdateTextComponentOperation,
+            ctx,
+          );
+          updatedIds.push(compOp.target_element_id);
+          continue;
+        }
+
         if (isTextFeatureOperationType(op.type)) {
           const featureOp = op as TextFeatureOperation;
           const id = featureOp.target_element_id;
@@ -470,6 +770,23 @@ export function executeCanvasOperations(
           if (!before || before.type !== 'text') {
             throw new Error(`Target "${id}" is not a TextElement.`);
           }
+
+          // Bridge nested title/comment/note ops to textbook components.
+          const bridged = bridgeLegacyFeatureOp(featureOp, target, resolveRef);
+          if (
+            featureOp.type === 'set_text_title' ||
+            featureOp.type === 'remove_text_title' ||
+            featureOp.type === 'add_text_comment' ||
+            featureOp.type === 'add_text_note' ||
+            (featureOp.type === 'update_text_comment' && bridged.updatedIds.length > 0) ||
+            (featureOp.type === 'remove_text_comment' && bridged.updatedIds.length > 0)
+          ) {
+            createdIds.push(...bridged.createdIds);
+            updatedIds.push(...bridged.updatedIds);
+            continue;
+          }
+
+          // Headings + ordinary highlights remain in-document rich-text ops.
           target.updateElement(id, (el) => {
             if (el.type !== 'text') return el;
             return applyTextFeatureOperation(el, featureOp);
@@ -484,6 +801,10 @@ export function executeCanvasOperations(
           const result = createOne(op, target, style, viewport, forced);
           createdIds.push(...result.createdIds);
           structureInstanceIds.push(...result.structureInstanceIds);
+          if (op.type === 'create_text' && op.ref && result.createdIds[0]) {
+            planRefMap.set(op.ref, result.createdIds[0]);
+            lastMainTextId = result.createdIds[0];
+          }
         }
       } catch (cause) {
         if (cause instanceof CanvasAgentExecuteError) throw cause;
@@ -497,11 +818,13 @@ export function executeCanvasOperations(
           opIndex,
           opType: op.type,
           targetId: targetId || undefined,
-          stage: isTextFeatureOperationType(op.type)
-            ? 'text_feature'
-            : op.type.startsWith('create_')
-              ? 'create'
-              : 'apply',
+          stage: isTextComponentOperationType(op.type)
+            ? 'text_component'
+            : isTextFeatureOperationType(op.type)
+              ? 'text_feature'
+              : op.type.startsWith('create_')
+                ? 'create'
+                : 'apply',
           message: 'Canvas operation failed',
           cause,
         });

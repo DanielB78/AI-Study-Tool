@@ -2,6 +2,11 @@ import { useRef } from 'react';
 import { Group, Rect, Text } from 'react-konva';
 import type { TextElement } from '../../types/canvas';
 import { textElementNeedsHtmlOverlay } from '../../features/text/textFeatures';
+import {
+  getComponentType,
+  labelForComponent,
+  TEXT_COMPONENT_STYLES,
+} from '../../features/text/textComponents';
 
 interface Props {
   element: TextElement;
@@ -28,6 +33,17 @@ function konvaDecoration(el: TextElement): string {
   return parts.join(' ');
 }
 
+function metaNum(el: TextElement, key: string, fallback: number): number {
+  const v = el.metadata?.[key];
+  return typeof v === 'number' ? v : fallback;
+}
+
+function metaColor(el: TextElement, key: string): string | null {
+  const v = el.metadata?.[key];
+  if (typeof v === 'string') return v;
+  return null;
+}
+
 export function TextNode({
   element,
   listening,
@@ -51,6 +67,26 @@ export function TextNode({
     lastClickAt.current = now;
     onSelect(element.id, shiftKey);
   };
+
+  const componentType = getComponentType(element);
+  const preset = TEXT_COMPONENT_STYLES[componentType];
+  const borderColor =
+    metaColor(element, 'borderColor') ?? preset.borderColor;
+  const borderWidth = metaNum(element, 'borderWidth', preset.borderWidth);
+  const accentColor =
+    metaColor(element, 'accentBorderColor') ?? preset.accentBorderColor;
+  const accentWidth = metaNum(
+    element,
+    'accentBorderWidth',
+    preset.accentBorderWidth,
+  );
+  const label = labelForComponent(componentType, element.componentMeta);
+  const labelHeight = label
+    ? Math.round(element.fontSize * 0.85) + 6
+    : 0;
+  const useHtml = textElementNeedsHtmlOverlay(element);
+  const w = Math.max(element.width, 24);
+  const h = Math.max(element.height, element.fontSize * element.lineHeight);
 
   return (
     <Group
@@ -83,18 +119,56 @@ export function TextNode({
       onDragEnd={(e) => onDragEnd(element.id, e.target.x(), e.target.y())}
     >
       <Rect
-        width={Math.max(element.width, 24)}
-        height={Math.max(element.height, element.fontSize * element.lineHeight)}
+        width={w}
+        height={h}
         fill={element.backgroundColor ?? 'rgba(0,0,0,0.001)'}
         cornerRadius={element.cornerRadius}
+        stroke={borderColor ?? undefined}
+        strokeWidth={borderColor ? borderWidth : 0}
       />
-      {/* Rich-text / titled / noted elements render via TextHtmlLayer. */}
-      {!textElementNeedsHtmlOverlay(element) && (
+      {accentColor && accentWidth > 0 && (
+        <Rect
+          x={0}
+          y={0}
+          width={accentWidth}
+          height={h}
+          fill={accentColor}
+          cornerRadius={[
+            element.cornerRadius,
+            0,
+            0,
+            element.cornerRadius,
+          ]}
+          listening={false}
+        />
+      )}
+      {!useHtml && label && (
         <Text
-          x={element.padding}
+          x={element.padding + (accentColor ? accentWidth : 0)}
           y={element.padding}
-          width={Math.max(element.width - element.padding * 2, 1)}
-          height={Math.max(element.height - element.padding * 2, 1)}
+          width={Math.max(
+            w - element.padding * 2 - (accentColor ? accentWidth : 0),
+            1,
+          )}
+          text={label.toUpperCase()}
+          fontSize={Math.round(element.fontSize * 0.78)}
+          fontFamily={element.fontFamily}
+          fontStyle="bold"
+          fill={element.color}
+          opacity={isEditing ? 0 : 0.7}
+          listening={false}
+        />
+      )}
+      {/* Rich-text / titled / noted / labelled components render via TextHtmlLayer. */}
+      {!useHtml && (
+        <Text
+          x={element.padding + (accentColor ? accentWidth : 0)}
+          y={element.padding + labelHeight}
+          width={Math.max(
+            w - element.padding * 2 - (accentColor ? accentWidth : 0),
+            1,
+          )}
+          height={Math.max(h - element.padding * 2 - labelHeight, 1)}
           text={element.text}
           fontSize={element.fontSize}
           fontFamily={element.fontFamily}

@@ -2,13 +2,19 @@ import { useEffect, useRef, useState } from 'react';
 import type { TextElement } from '../../types/canvas';
 import {
   getSelectedTextQuote,
-  uiAddTextComment,
-  uiAddTextNote,
   uiHighlightSelectedQuote,
   uiInsertHeading,
-  uiRemoveTextTitle,
-  uiSetTextTitle,
 } from '../../features/text/textFeatureUi';
+import {
+  uiAddLinkedComment,
+  uiCreateDefinition,
+  uiCreateExample,
+  uiCreateExercise,
+  uiCreateTextComponent,
+  uiCreateWarning,
+  uiSetAssociatedTitle,
+} from '../../features/text/textComponentUi';
+import { getComponentType } from '../../features/text/textComponents';
 
 type Props = {
   element: TextElement;
@@ -27,16 +33,16 @@ export function TextFeaturesMenu({ element }: Props) {
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
 
-  const hasTitle = !!element.title?.text.trim();
-
   const close = () => setOpen(false);
+  const associateId =
+    getComponentType(element) === 'main_text' ? element.id : element.id;
 
   return (
     <div className="ctx-features" ref={rootRef}>
       <button
         type="button"
         className={open ? 'ctx-chip active' : 'ctx-chip'}
-        title="Add text features"
+        title="Add text component"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
@@ -49,31 +55,27 @@ export function TextFeaturesMenu({ element }: Props) {
             role="menuitem"
             className="ctx-features-item"
             onClick={() => {
-              const text = window.prompt(
-                hasTitle ? 'Edit title' : 'Add title',
-                element.title?.text ?? '',
-              );
-              if (text === null) return;
-              if (!text.trim()) uiRemoveTextTitle(element.id);
-              else uiSetTextTitle(text, element.id);
+              const text = window.prompt('Main text');
+              if (!text?.trim()) return;
+              uiCreateTextComponent('main_text', text);
               close();
             }}
           >
-            {hasTitle ? 'Edit title' : 'Add title'}
+            Main text
           </button>
-          {hasTitle && (
-            <button
-              type="button"
-              role="menuitem"
-              className="ctx-features-item"
-              onClick={() => {
-                uiRemoveTextTitle(element.id);
-                close();
-              }}
-            >
-              Remove title
-            </button>
-          )}
+          <button
+            type="button"
+            role="menuitem"
+            className="ctx-features-item"
+            onClick={() => {
+              const text = window.prompt('Title');
+              if (!text?.trim()) return;
+              uiSetAssociatedTitle(text, associateId);
+              close();
+            }}
+          >
+            Title
+          </button>
           <button
             type="button"
             role="menuitem"
@@ -105,15 +107,52 @@ export function TextFeaturesMenu({ element }: Props) {
             role="menuitem"
             className="ctx-features-item"
             onClick={() => {
-              const q =
-                getSelectedTextQuote() ||
-                window.prompt('Phrase to highlight');
-              if (!q?.trim()) return;
-              uiHighlightSelectedQuote(q, 'important', element.id);
+              const text = window.prompt('Definition');
+              if (!text?.trim()) return;
+              uiCreateDefinition(text, associateId);
               close();
             }}
           >
-            Highlight text
+            Definition
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="ctx-features-item"
+            onClick={() => {
+              const text = window.prompt('Example');
+              if (!text?.trim()) return;
+              uiCreateExample(text, associateId);
+              close();
+            }}
+          >
+            Example
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="ctx-features-item"
+            onClick={() => {
+              const text = window.prompt('Warning / common mistake');
+              if (!text?.trim()) return;
+              uiCreateWarning(text, associateId, 'common_mistake');
+              close();
+            }}
+          >
+            Warning
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="ctx-features-item"
+            onClick={() => {
+              const text = window.prompt('Exercise / question');
+              if (!text?.trim()) return;
+              uiCreateExercise(text, associateId);
+              close();
+            }}
+          >
+            Exercise
           </button>
           <button
             type="button"
@@ -126,29 +165,26 @@ export function TextFeaturesMenu({ element }: Props) {
               if (!q?.trim()) return;
               const comment = window.prompt('Comment text');
               if (!comment?.trim()) return;
-              uiAddTextComment(
-                { quote: q.trim() },
-                comment,
-                'explanation',
-                element.id,
-              );
+              uiAddLinkedComment({ quote: q.trim() }, comment, element.id);
               close();
             }}
           >
-            Add comment
+            Linked comment
           </button>
           <button
             type="button"
             role="menuitem"
             className="ctx-features-item"
             onClick={() => {
-              const text = window.prompt('Supplementary note');
-              if (!text?.trim()) return;
-              uiAddTextNote(text, 'extra_information', element.id);
+              const q =
+                getSelectedTextQuote() ||
+                window.prompt('Phrase to highlight');
+              if (!q?.trim()) return;
+              uiHighlightSelectedQuote(q, 'important', element.id);
               close();
             }}
           >
-            Add supplementary note
+            Highlight text
           </button>
         </div>
       )}

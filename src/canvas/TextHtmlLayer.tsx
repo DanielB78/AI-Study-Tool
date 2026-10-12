@@ -1,6 +1,6 @@
 /**
- * HTML overlays for TextElements that carry structured richText,
- * optional title, and supplementary notes.
+ * HTML overlays for TextElements that carry structured richText
+ * or textbook component chrome (definition / example / warning / etc.).
  *
  * Screen geometry = world geometry × camera.zoom. Rich HTML uses em sizes
  * relative to this host font-size so headings/spans scale with the box.
@@ -16,6 +16,10 @@ import {
   TEXT_FEATURE_LAYOUT,
   textElementNeedsHtmlOverlay,
 } from '../features/text/textFeatures';
+import {
+  getComponentType,
+  labelForComponent,
+} from '../features/text/textComponents';
 
 interface Props {
   texts: TextElement[];
@@ -33,11 +37,22 @@ function escapeHtml(s: string): string {
 
 function buildFeatureHtml(el: TextElement): string {
   const parts: string[] = [];
+  const componentType = getComponentType(el);
+  const label = labelForComponent(componentType, el.componentMeta);
+
+  if (label) {
+    parts.push(
+      `<div class="text-component-label" data-component="${escapeHtml(componentType)}">${escapeHtml(label)}</div>`,
+    );
+  }
+
+  // Legacy nested title (pre-migration documents mid-load only).
   if (el.title?.text.trim()) {
     parts.push(
       `<div class="text-feature-title" data-title-id="${escapeHtml(el.title.id)}">${escapeHtml(el.title.text)}</div>`,
     );
   }
+
   if (el.richText && el.richText.blocks.length > 0) {
     const doc = getRichTextDocument(el);
     parts.push(
@@ -47,9 +62,10 @@ function buildFeatureHtml(el: TextElement): string {
         fontFamily: el.fontFamily,
       }),
     );
-  } else if (el.title || (el.notes && el.notes.length > 0)) {
+  } else if (label || el.title || (el.notes && el.notes.length > 0)) {
     parts.push(`<div class="text-feature-body">${escapeHtml(el.text)}</div>`);
   }
+
   const notes = sortedNotes(el);
   if (notes.length > 0) {
     parts.push(`<div class="text-feature-notes">`);
@@ -82,10 +98,26 @@ export function TextHtmlLayer({ texts, camera, editingId }: Props) {
         const w = el.width * zoom;
         const h = el.height * zoom;
         const pad = el.padding * zoom;
+        const accent =
+          typeof el.metadata?.accentBorderWidth === 'number'
+            ? el.metadata.accentBorderWidth
+            : 0;
+        const accentColor =
+          typeof el.metadata?.accentBorderColor === 'string'
+            ? el.metadata.accentBorderColor
+            : null;
+        const borderColor =
+          typeof el.metadata?.borderColor === 'string'
+            ? el.metadata.borderColor
+            : null;
+        const borderWidth =
+          typeof el.metadata?.borderWidth === 'number'
+            ? el.metadata.borderWidth
+            : 0;
         return (
           <div
             key={el.id}
-            className="text-html-item"
+            className={`text-html-item text-component-${getComponentType(el)}`}
             style={{
               position: 'absolute',
               left: 0,
@@ -95,9 +127,17 @@ export function TextHtmlLayer({ texts, camera, editingId }: Props) {
               width: w,
               height: h,
               padding: pad,
+              paddingLeft: (pad + (accentColor ? accent : 0) * zoom),
               boxSizing: 'border-box',
               background: el.backgroundColor ?? 'transparent',
               borderRadius: el.cornerRadius * zoom,
+              border:
+                borderColor && borderWidth > 0
+                  ? `${borderWidth * zoom}px solid ${borderColor}`
+                  : undefined,
+              boxShadow: accentColor
+                ? `inset ${accent * zoom}px 0 0 ${accentColor}`
+                : undefined,
               opacity: el.opacity,
               overflow: 'hidden',
               pointerEvents: 'none',

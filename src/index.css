@@ -420,6 +420,17 @@ textarea {
   cursor: not-allowed;
 }
 
+.text-html-item .text-component-label {
+  font-weight: 650;
+  font-size: 0.78em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.2;
+  margin: 0 0 0.45em;
+  opacity: 0.72;
+  color: inherit;
+}
+
 .text-html-item .text-feature-title {
   font-weight: 700;
   font-size: 1.35em;

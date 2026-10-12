@@ -519,6 +519,67 @@ export function RagDebugPanel() {
                     ))}
                   </ul>
                 )}
+                {liveEditorSelectedIds.length > 0 && (
+                  <div className="rag-debug-section" style={{ marginTop: 12 }}>
+                    <div className="rag-debug-section-title">
+                      Textbook components (live selection)
+                    </div>
+                    <ul className="rag-debug-list">
+                      {useCanvasStore
+                        .getState()
+                        .document.elements.filter(
+                          (el) =>
+                            liveEditorSelectedIds.includes(el.id) &&
+                            el.type === 'text',
+                        )
+                        .map((el) => {
+                          if (el.type !== 'text') return null;
+                          const ctype = el.componentType ?? 'main_text';
+                          const meta = el.componentMeta;
+                          return (
+                            <li key={el.id} className="rag-debug-item">
+                              <p className="rag-debug-meta">
+                                Component type: <strong>{ctype}</strong>
+                              </p>
+                              <p className="rag-debug-meta">
+                                Created by:{' '}
+                                {String(el.metadata?.createdBy ?? 'user')}
+                              </p>
+                              <p className="rag-debug-meta">
+                                Style preset: {ctype}_default
+                              </p>
+                              <p className="rag-debug-meta">
+                                Placement mode: {meta?.placementMode ?? 'auto'}
+                              </p>
+                              {meta?.associatedElementId && (
+                                <p className="rag-debug-meta">
+                                  Associated: {meta.associatedElementId}
+                                </p>
+                              )}
+                              {meta?.anchor && (
+                                <p className="rag-debug-meta">
+                                  Anchor: &quot;{meta.anchor.quote}&quot; →{' '}
+                                  {meta.anchor.targetElementId}
+                                </p>
+                              )}
+                              {typeof el.metadata?.placementDecision ===
+                                'string' && (
+                                <p className="rag-debug-meta">
+                                  Placement decision:{' '}
+                                  {String(el.metadata.placementDecision)}
+                                </p>
+                              )}
+                              <p className="rag-debug-meta">
+                                Resolved position: ({Math.round(el.x)},{' '}
+                                {Math.round(el.y)}) · bounds {Math.round(el.width)}
+                                ×{Math.round(el.height)}
+                              </p>
+                            </li>
+                          );
+                        })}
+                    </ul>
+                  </div>
+                )}
               </section>
             )}
 

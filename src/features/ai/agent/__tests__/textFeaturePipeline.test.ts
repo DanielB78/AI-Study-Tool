@@ -97,7 +97,7 @@ describe('text feature pipeline — individual operations', () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it('set_text_title', () => {
+  it('set_text_title creates a sibling title component', () => {
     const plan = parseCanvasAgentResponse(
       JSON.stringify({
         operations: [
@@ -107,7 +107,16 @@ describe('text feature pipeline — individual operations', () => {
       ctx(),
     );
     executeCanvasOperations(plan, createLiveAgentExecutorTarget());
-    expect(getText().title?.text).toBe('Electric Fields');
+    const titles = useCanvasStore
+      .getState()
+      .document.elements.filter(
+        (e): e is TextElement =>
+          e.type === 'text' && e.componentType === 'title',
+      );
+    expect(titles).toHaveLength(1);
+    expect(titles[0]!.text).toBe('Electric Fields');
+    expect(titles[0]!.componentMeta?.associatedElementId).toBe('text_12');
+    expect(getText().title).toBeUndefined();
   });
 
   it('insert_text_heading with before_quote splits paragraph', () => {
@@ -166,7 +175,7 @@ describe('text feature pipeline — individual operations', () => {
     expect(spans.some((s) => s.style?.highlight_color === 'blue')).toBe(true);
   });
 
-  it('add_text_comment uses linked_comment_id and rejects ambiguous quotes', () => {
+  it('add_text_comment creates linked_comment component and rejects ambiguous quotes', () => {
     expect(() =>
       executeCanvasOperations(
         parseCanvasAgentResponse(
@@ -188,7 +197,11 @@ describe('text feature pipeline — individual operations', () => {
 
     // Document unchanged after failed transaction
     expect(getText().comments).toBeUndefined();
-    expect(getText().title).toBeUndefined();
+    expect(
+      useCanvasStore
+        .getState()
+        .document.elements.filter((e) => e.type === 'text' && e.componentType === 'linked_comment'),
+    ).toHaveLength(0);
 
     executeCanvasOperations(
       parseCanvasAgentResponse(
@@ -208,13 +221,22 @@ describe('text feature pipeline — individual operations', () => {
       createLiveAgentExecutorTarget(),
     );
     const el = getText();
-    expect(el.comments).toHaveLength(1);
-    expect(el.comments![0]!.anchor.occurrence ?? el.comments![0]!.anchor.start).toBeDefined();
+    expect(el.comments).toBeUndefined();
+    const comments = useCanvasStore
+      .getState()
+      .document.elements.filter(
+        (e): e is TextElement =>
+          e.type === 'text' && e.componentType === 'linked_comment',
+      );
+    expect(comments).toHaveLength(1);
+    expect(comments[0]!.text).toContain('conventional direction');
     const spans = el.richText!.blocks.flatMap((b) => b.spans);
-    expect(spans.some((s) => s.style?.linked_comment_id)).toBe(true);
+    expect(spans.some((s) => s.style?.linked_comment_id === comments[0]!.id)).toBe(
+      true,
+    );
   });
 
-  it('add_text_note', () => {
+  it('add_text_note creates a sibling textbook component', () => {
     executeCanvasOperations(
       parseCanvasAgentResponse(
         JSON.stringify({
@@ -231,7 +253,15 @@ describe('text feature pipeline — individual operations', () => {
       ),
       createLiveAgentExecutorTarget(),
     );
-    expect(getText().notes?.[0]?.text).toBe('Fields are vectors.');
+    expect(getText().notes).toBeUndefined();
+    const examples = useCanvasStore
+      .getState()
+      .document.elements.filter(
+        (e): e is TextElement =>
+          e.type === 'text' && e.componentType === 'example',
+      );
+    expect(examples).toHaveLength(1);
+    expect(examples[0]!.text).toBe('Fields are vectors.');
   });
 });
 
@@ -280,9 +310,14 @@ describe('text feature pipeline — mixed ops & atomicity', () => {
     );
     executeCanvasOperations(plan, createLiveAgentExecutorTarget());
     const el = getText();
-    expect(el.title?.text).toBe('Electric Fields');
-    expect(el.notes).toHaveLength(1);
-    expect(el.comments).toHaveLength(1);
+    const els = useCanvasStore.getState().document.elements.filter(
+      (e): e is TextElement => e.type === 'text',
+    );
+    expect(els.some((e) => e.componentType === 'title' && e.text === 'Electric Fields')).toBe(
+      true,
+    );
+    expect(els.some((e) => e.componentType === 'example')).toBe(true);
+    expect(els.some((e) => e.componentType === 'linked_comment')).toBe(true);
     expect(el.richText!.blocks.some((b) => b.type === 'heading')).toBe(true);
     const spans = el.richText!.blocks.flatMap((b) => b.spans);
     // Overlap coexistence: ordinary highlight and comment marks both present
@@ -357,10 +392,12 @@ describe('text feature pipeline — mixed ops & atomicity', () => {
     ).toThrow(/Operation 3 \(add_text_comment\)/);
 
     const after = getText();
-    expect(after.title).toEqual(before.title);
-    expect(after.notes).toEqual(before.notes);
-    expect(after.comments).toEqual(before.comments);
     expect(after.text).toBe(before.text);
+    expect(after.richText).toEqual(before.richText);
+    // Bridged sibling components must also roll back
+    expect(
+      useCanvasStore.getState().document.elements.filter((e) => e.type === 'text'),
+    ).toHaveLength(1);
   });
 
   it('execute error includes op index, type, target, and stage', () => {
@@ -411,13 +448,27 @@ describe('text feature pipeline — mixed ops & atomicity', () => {
       ),
       createLiveAgentExecutorTarget(),
     );
-    expect(getText().title).toBeTruthy();
+    expect(
+      useCanvasStore
+        .getState()
+        .document.elements.filter((e) => e.type === 'text'),
+    ).toHaveLength(3);
     useCanvasStore.getState().undo();
-    expect(getText().title).toBeUndefined();
-    expect(getText().notes).toBeUndefined();
+    expect(
+      useCanvasStore
+        .getState()
+        .document.elements.filter((e) => e.type === 'text'),
+    ).toHaveLength(1);
     useCanvasStore.getState().redo();
-    expect(getText().title?.text).toBe('T');
-    expect(getText().notes?.[0]?.text).toBe('N');
+    const texts = useCanvasStore
+      .getState()
+      .document.elements.filter((e): e is TextElement => e.type === 'text');
+    expect(texts.some((e) => e.componentType === 'title' && e.text === 'T')).toBe(
+      true,
+    );
+    expect(texts.some((e) => e.componentType === 'example' && e.text === 'N')).toBe(
+      true,
+    );
   });
 
   it('heading insertion then comment on later phrase still resolves', () => {
@@ -443,11 +494,17 @@ describe('text feature pipeline — mixed ops & atomicity', () => {
       ),
       createLiveAgentExecutorTarget(),
     );
-    expect(getText().comments).toHaveLength(1);
+    expect(
+      useCanvasStore
+        .getState()
+        .document.elements.some(
+          (e) => e.type === 'text' && e.componentType === 'linked_comment',
+        ),
+    ).toBe(true);
     expect(richTextToPlainText(getText().richText!)).toContain('Intro');
   });
 
-  it('persists features through document snapshot clone', () => {
+  it('persists components through document snapshot clone', () => {
     executeCanvasOperations(
       parseCanvasAgentResponse(
         JSON.stringify({
@@ -465,11 +522,12 @@ describe('text feature pipeline — mixed ops & atomicity', () => {
       createLiveAgentExecutorTarget(),
     );
     const snap = structuredClone(useCanvasStore.getState().document);
-    const el = snap.elements.find((e) => e.id === 'text_12');
-    expect(el?.type).toBe('text');
-    if (el?.type === 'text') {
-      expect(el.title?.text).toBe('Persist Me');
-      expect(el.notes?.[0]?.text).toBe('Note persists');
-    }
+    const texts = snap.elements.filter((e): e is TextElement => e.type === 'text');
+    expect(texts.some((e) => e.componentType === 'title' && e.text === 'Persist Me')).toBe(
+      true,
+    );
+    expect(texts.some((e) => e.componentType === 'example' && e.text === 'Note persists')).toBe(
+      true,
+    );
   });
 });

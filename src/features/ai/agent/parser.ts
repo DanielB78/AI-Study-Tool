@@ -62,6 +62,11 @@ import {
   type InsertTextHeadingOperation,
 } from './textFeatureOperations';
 import {
+  isTextComponentOperationType,
+  parseTextComponentOperation,
+  type TextComponentOperation,
+} from './textComponentOperations';
+import {
   TEXT_COMMENT_TYPES,
   TEXT_NOTE_TYPES,
   type TextCommentType,
@@ -620,6 +625,9 @@ function parseOperation(raw: unknown): CanvasOperation {
       throw err;
     }
   }
+  if (isTextComponentOperationType(raw.type)) {
+    return parseTextComponentOperation(raw);
+  }
   if (isTextFeatureOperationType(raw.type)) {
     return parseTextFeatureOperation(raw);
   }
@@ -970,6 +978,22 @@ function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
   if (op.type === 'update_text') {
     validateTextTarget(op.target_element_id, ctx);
   }
+  if (op.type === 'add_linked_comment' || op.type === 'update_text_component') {
+    validateTextTarget(op.target_element_id, ctx);
+  }
+  if (
+    op.type === 'create_text_component' &&
+    op.associated_element_id &&
+    !op.associated_element_id.startsWith('ref:') &&
+    ctx.allowedElementIds.size > 0 &&
+    ctx.allowedElementIds.has(op.associated_element_id) === false
+  ) {
+    // Plan refs are resolved at execute; only validate real context ids.
+    const looksLikePlanRef = !ctx.elementTypes?.has(op.associated_element_id);
+    if (!looksLikePlanRef) {
+      validateTextTarget(op.associated_element_id, ctx);
+    }
+  }
   if (isTextFeatureOperationType(op.type)) {
     validateTextTarget((op as TextFeatureOperation).target_element_id, ctx);
   }
@@ -1237,6 +1261,38 @@ export function describeOperationPlan(
       const refLine = op.ref ? `\n   Ref: ${op.ref}` : '';
       const richLine = op.rich_text ? `\n   Rich text: ${op.rich_text.blocks.length} block(s)` : '';
       return `${n}. CREATE TEXT${refLine}\n   Placement: ${placementLine}${richLine}\n   Text: ${preview}${op.text.length > 80 ? '…' : ''}`;
+    }
+    if (isTextComponentOperationType(op.type)) {
+      const c = op as TextComponentOperation;
+      if (c.type === 'create_text_component') {
+        const preview = c.content.replace(/\s+/g, ' ').slice(0, 80);
+        return [
+          `${n}. CREATE TEXT COMPONENT (${c.component})`,
+          c.ref ? `   Ref: ${c.ref}` : null,
+          c.associated_element_id
+            ? `   Associated: ${c.associated_element_id}`
+            : null,
+          c.variant ? `   Variant: ${c.variant}` : null,
+          `   Content: ${preview}${c.content.length > 80 ? '…' : ''}`,
+          '   Placement: (application auto)',
+        ]
+          .filter(Boolean)
+          .join('\n');
+      }
+      if (c.type === 'add_linked_comment') {
+        return [
+          `${n}. ADD LINKED COMMENT`,
+          `   Target: ${c.target_element_id}`,
+          `   Anchor: "${c.anchor.quote}"`,
+          `   Comment: ${c.comment.slice(0, 80)}${c.comment.length > 80 ? '…' : ''}`,
+          '   Placement: (application auto)',
+        ].join('\n');
+      }
+      return [
+        `${n}. UPDATE TEXT COMPONENT`,
+        `   Target: ${c.target_element_id}`,
+        `   Content: ${c.content.slice(0, 80)}${c.content.length > 80 ? '…' : ''}`,
+      ].join('\n');
     }
     if (isTextFeatureOperationType(op.type)) {
       const f = op as TextFeatureOperation;
