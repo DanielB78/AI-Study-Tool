@@ -8,6 +8,7 @@ import {
   type RichTextSpan,
   type RichTextSpanStyle,
 } from './richText';
+import { ensureBlockIds } from './textFeatures';
 
 export class RichTextParseError extends Error {
   readonly detail?: string;
@@ -114,10 +115,16 @@ function parseBlock(raw: unknown, path: string): RichTextBlock {
     );
   }
   const spans = raw.spans.map((s, i) => parseSpan(s, `${path}.spans[${i}]`));
-  return { type: type as RichTextBlockType, spans };
+  const id =
+    typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : undefined;
+  return {
+    type: type as RichTextBlockType,
+    spans,
+    ...(id ? { id } : {}),
+  };
 }
 
-/** Parse + validate LLM rich_text payload. */
+/** Parse + validate LLM rich_text payload. Assigns stable block ids when missing. */
 export function parseRichTextDocument(raw: unknown): RichTextDocument {
   if (!isRecord(raw)) {
     throw new RichTextParseError('rich_text must be an object with blocks.');
@@ -143,5 +150,5 @@ export function parseRichTextDocument(raw: unknown): RichTextDocument {
   if (total === 0) {
     throw new RichTextParseError('rich_text must contain non-empty text.');
   }
-  return { blocks };
+  return ensureBlockIds({ blocks });
 }

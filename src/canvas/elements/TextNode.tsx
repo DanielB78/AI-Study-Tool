@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { Group, Rect, Text } from 'react-konva';
 import type { TextElement } from '../../types/canvas';
+import { textElementNeedsHtmlOverlay } from '../../features/text/textFeatures';
 
 interface Props {
   element: TextElement;
@@ -87,8 +88,8 @@ export function TextNode({
         fill={element.backgroundColor ?? 'rgba(0,0,0,0.001)'}
         cornerRadius={element.cornerRadius}
       />
-      {/* Rich-text elements render via TextHtmlLayer; keep Konva text for plain/legacy. */}
-      {!(element.richText && element.richText.blocks.length > 0) && (
+      {/* Rich-text / titled / noted elements render via TextHtmlLayer. */}
+      {!textElementNeedsHtmlOverlay(element) && (
         <Text
           x={element.padding}
           y={element.padding}

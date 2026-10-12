@@ -1,4 +1,5 @@
 import type { TextElement } from '../../types/canvas';
+import { composeTextElementIndexText } from '../text/textFeatures';
 import { RAG_API_BASE_URL } from './config';
 
 export interface TextIndexPayload {
@@ -34,7 +35,8 @@ function toPayload(boardId: string, el: TextElement): TextIndexPayload {
     board_id: boardId,
     element_id: el.id,
     element_type: 'text',
-    text: el.text,
+    // Title, body, notes, and comments — not formatting metadata.
+    text: composeTextElementIndexText(el),
     x: el.x,
     y: el.y,
     width: el.width,

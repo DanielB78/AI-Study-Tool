@@ -3,6 +3,11 @@
  * Backend Pydantic models mirror this for future Structured Outputs.
  */
 
+import type { TextFeatureOperation } from './textFeatureOperations';
+import type { TextCommentType, TextNoteType } from '../../text/textFeatureTypes';
+
+export type { TextFeatureOperation } from './textFeatureOperations';
+
 export type PlacementRelation = 'left_of' | 'right_of' | 'above' | 'below' | 'near';
 
 export type ViewportDefaultPlacement = {
@@ -120,6 +125,8 @@ export type AgentRichTextSpan = {
 };
 
 export type AgentRichTextBlock = {
+  /** Optional temporary local id for comment anchors within the same create plan. */
+  id?: string;
   type: 'paragraph' | 'heading' | 'bullet' | 'numbered';
   role?: 'heading' | 'body';
   spans: AgentRichTextSpan[];
@@ -127,6 +134,24 @@ export type AgentRichTextBlock = {
 
 export type AgentRichTextDocument = {
   blocks: AgentRichTextBlock[];
+};
+
+/** Optional note attached at create_text time (IDs assigned by the app). */
+export type CreateTextNoteSpec = {
+  text: string;
+  note_type?: TextNoteType;
+};
+
+/** Optional linked comment attached at create_text time. */
+export type CreateTextCommentSpec = {
+  anchor: {
+    quote: string;
+    block_id?: string;
+    block_ref?: string;
+    occurrence?: number;
+  };
+  comment: string;
+  comment_type?: TextCommentType;
 };
 
 export type CreateTextOperation = {
@@ -138,6 +163,12 @@ export type CreateTextOperation = {
   text: string;
   /** Structured rich text — preferred for formatted notes. */
   rich_text?: AgentRichTextDocument;
+  /** Optional title above the main text. */
+  title?: string;
+  /** Optional supplementary notes below the main text. */
+  notes?: CreateTextNoteSpec[];
+  /** Optional comments anchored to phrases in the new text. */
+  comments?: CreateTextCommentSpec[];
   /** Omitted when assigned via layout — parser defaults to viewport_default. */
   placement: Placement;
 } & CreationLayoutFields;
@@ -327,7 +358,8 @@ export type CanvasOperation =
   | UpdateGraphSettingsOperation
   | AddGraphPointOperation
   | UpdateGraphPointOperation
-  | RemoveGraphPointOperation;
+  | RemoveGraphPointOperation
+  | TextFeatureOperation;
 
 export type CanvasAgentResponse = {
   operations: CanvasOperation[];
@@ -384,6 +416,58 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               type: { const: 'create_text' },
               text: { type: 'string', minLength: 1 },
               rich_text: { $ref: '#/$defs/richText' },
+              title: { type: 'string', minLength: 1 },
+              notes: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['text'],
+                  properties: {
+                    text: { type: 'string', minLength: 1 },
+                    note_type: {
+                      type: 'string',
+                      enum: [
+                        'extra_information',
+                        'important',
+                        'caution',
+                        'reference',
+                      ],
+                    },
+                  },
+                },
+              },
+              comments: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['anchor'],
+                  properties: {
+                    anchor: { $ref: '#/$defs/textAnchor' },
+                    comment: { type: 'string', minLength: 1 },
+                    text: { type: 'string', minLength: 1 },
+                    comment_type: {
+                      type: 'string',
+                      enum: [
+                        'explanation',
+                        'correction',
+                        'suggestion',
+                        'question',
+                      ],
+                    },
+                    type: {
+                      type: 'string',
+                      enum: [
+                        'explanation',
+                        'correction',
+                        'suggestion',
+                        'question',
+                      ],
+                    },
+                  },
+                },
+              },
               ref: { type: 'string', minLength: 1 },
               layout_cell: { type: 'string', minLength: 1 },
               layout_role: { $ref: '#/$defs/layoutRole' },
@@ -596,11 +680,155 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               point_id: { type: 'string', minLength: 1 },
             },
           },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'text'],
+            properties: {
+              type: { const: 'set_text_title' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id'],
+            properties: {
+              type: { const: 'remove_text_title' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'text'],
+            properties: {
+              type: { const: 'insert_text_heading' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
+              level: { type: 'integer', enum: [1, 2] },
+              after_block_id: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'anchor'],
+            properties: {
+              type: { const: 'highlight_text' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              anchor: { $ref: '#/$defs/textAnchor' },
+              style: {
+                type: 'string',
+                enum: ['important', 'definition', 'warning', 'emphasis'],
+              },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'anchor'],
+            properties: {
+              type: { const: 'add_text_comment' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              anchor: { $ref: '#/$defs/textAnchor' },
+              comment: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
+              comment_type: {
+                type: 'string',
+                enum: ['explanation', 'correction', 'suggestion', 'question'],
+              },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'comment_id'],
+            properties: {
+              type: { const: 'update_text_comment' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              comment_id: { type: 'string', minLength: 1 },
+              comment: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'comment_id'],
+            properties: {
+              type: { const: 'remove_text_comment' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              comment_id: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'text'],
+            properties: {
+              type: { const: 'add_text_note' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
+              note_type: {
+                type: 'string',
+                enum: [
+                  'extra_information',
+                  'important',
+                  'caution',
+                  'reference',
+                ],
+              },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'note_id', 'text'],
+            properties: {
+              type: { const: 'update_text_note' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              note_id: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'note_id'],
+            properties: {
+              type: { const: 'remove_text_note' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              note_id: { type: 'string', minLength: 1 },
+            },
+          },
         ],
       },
     },
   },
   $defs: {
+    textAnchor: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['quote'],
+      properties: {
+        quote: { type: 'string', minLength: 1 },
+        block_id: { type: 'string', minLength: 1 },
+        block_ref: { type: 'string', minLength: 1 },
+        occurrence: { type: 'integer', minimum: 0 },
+      },
+    },
     graphExpression: {
       type: 'object',
       additionalProperties: false,
@@ -751,6 +979,7 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
             additionalProperties: false,
             required: ['type', 'spans'],
             properties: {
+              id: { type: 'string', minLength: 1 },
               type: {
                 type: 'string',
                 enum: ['paragraph', 'heading', 'bullet', 'numbered'],
@@ -827,6 +1056,13 @@ create_text:
   "column_span": 1|2|3|4,  /* optional; lesson grid only */
   "text": "<plain string — optional if rich_text provided>",
   "rich_text": { /* optional structured formatting — see RICH TEXT */ },
+  "title": "<optional title above main text>",
+  "notes": [{ "text": "<supplementary note>", "note_type": "extra_information"|"important"|"caution"|"reference" }],
+  "comments": [{
+    "anchor": { "quote": "<phrase in text>", "block_id": "<optional>", "occurrence": 0 },
+    "comment": "<linked comment text>",
+    "comment_type": "explanation"|"correction"|"suggestion"|"question"
+  }],
   "placement":  /* omit when using response-level layout */
     { "mode": "viewport_default" }
     | { "mode": "relative_to_element", "anchor_element_id": "<id from context>", "relation": "left_of"|"right_of"|"above"|"below"|"near" }
@@ -850,6 +1086,18 @@ update_text:
   "text": "<complete plain replacement — optional if rich_text>",
   "rich_text": { /* optional complete rich-text replacement */ }
 }
+
+TEXT FEATURES (optional built-in TextElement features — prefer these over new standalone textboxes):
+- set_text_title: { "type":"set_text_title", "target_element_id":"<id>", "text":"Electric Fields" }
+- remove_text_title: { "type":"remove_text_title", "target_element_id":"<id>" }
+- insert_text_heading: { "type":"insert_text_heading", "target_element_id":"<id>", "text":"Field Direction", "level":1, "after_block_id":"<optional>" }
+- highlight_text: { "type":"highlight_text", "target_element_id":"<id>", "anchor":{ "quote":"vector quantity", "block_id":"<optional>" }, "style":"important"|"definition"|"warning"|"emphasis" }
+- add_text_comment: { "type":"add_text_comment", "target_element_id":"<id>", "anchor":{ "quote":"positive test charge" }, "comment":"…", "comment_type":"explanation"|"correction"|"suggestion"|"question" }
+- update_text_comment / remove_text_comment: require comment_id from context
+- add_text_note: { "type":"add_text_note", "target_element_id":"<id>", "text":"…", "note_type":"extra_information"|"important"|"caution"|"reference" }
+- update_text_note / remove_text_note: require note_id from context
+Never invent comment_id / note_id / block_id. Prefer native features when the user asks to comment / highlight / title / note / organise existing text.
+Do NOT simulate comments with extra textboxes, arrows, or floating shapes.
 
 RICH TEXT (optional on create_text / update_text):
 {

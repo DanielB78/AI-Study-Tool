@@ -41,9 +41,52 @@ import {
   isGraphEditOperationType,
   type GraphEditOperation,
 } from './graphOperations';
+import {
+  applyTextFeatureOperation,
+  isTextFeatureOperationType,
+  type TextFeatureOperation,
+} from './textFeatureOperations';
+import {
+  addCommentToElement,
+  addNoteToElement,
+  setTitleOnElement,
+} from '../../text/textFeatures';
+import { measureTextElementWithFeatures } from '../../text/textAutoSizer';
 import { isGridCreatableOp } from './layout/measure';
 import { resolveGridPlan, type ResolveGridPlanResult } from './layout/resolveGridPlan';
 import type { LayoutDebugInfo } from './layout/types';
+import type { CreateTextOperation } from './operations';
+
+/** Attach optional create_text title/notes/comments and resize. */
+function applyCreateTextFeaturePayload(
+  el: TextElement,
+  op: CreateTextOperation,
+): TextElement {
+  let next = el;
+  if (op.title?.trim()) {
+    next = setTitleOnElement(next, op.title);
+  }
+  for (const note of op.notes ?? []) {
+    next = addNoteToElement(next, note.text, note.note_type).element;
+  }
+  for (const c of op.comments ?? []) {
+    next = addCommentToElement(next, {
+      anchor: c.anchor,
+      text: c.comment,
+      commentType: c.comment_type,
+    }).element;
+  }
+  if (!op.title && !(op.notes?.length) && !(op.comments?.length)) {
+    return next;
+  }
+  const measured = measureTextElementWithFeatures(next, {
+    availableWidth: next.width,
+  });
+  return {
+    ...next,
+    height: Math.max(next.height, measured.height),
+  };
+}
 
 export interface AgentExecutorTarget {
   getCamera: () => Camera;
@@ -173,7 +216,7 @@ function createOne(
           viewport,
         });
     const zIndex = target.nextZIndex();
-    const element = createAiTextElement(op.text, { x: placed.x, y: placed.y }, {
+    let element = createAiTextElement(op.text, { x: placed.x, y: placed.y }, {
       zIndex,
       style,
       width,
@@ -188,6 +231,14 @@ function createOne(
       },
     });
     element.height = height;
+    element = applyCreateTextFeaturePayload(element, op);
+    if (!forced) {
+      // Features may grow height; keep placement origin.
+      element.height = Math.max(height, element.height);
+    } else {
+      element.width = width;
+      element.height = Math.max(height, element.height);
+    }
     target.addElement(element, false);
     createdIds.push(element.id);
   } else if (op.type === 'create_equation') {
@@ -405,6 +456,17 @@ export function executeCanvasOperations(
           };
         });
         updatedIds.push(graphId);
+        continue;
+      }
+
+      if (isTextFeatureOperationType(op.type)) {
+        const featureOp = op as TextFeatureOperation;
+        const id = featureOp.target_element_id;
+        target.updateElement(id, (el) => {
+          if (el.type !== 'text') return el;
+          return applyTextFeatureOperation(el, featureOp);
+        });
+        updatedIds.push(id);
         continue;
       }
 

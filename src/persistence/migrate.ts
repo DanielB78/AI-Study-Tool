@@ -20,6 +20,16 @@ import {
 } from '../features/graphs/types';
 import { migrateToCanonicalSource } from '../features/graphs/expressionCodec';
 import { parseRichTextDocument } from '../features/text/richTextValidate';
+import { ensureBlockIds, newFeatureId } from '../features/text/textFeatures';
+import type {
+  TextComment,
+  TextNote,
+  TextTitle,
+} from '../features/text/textFeatureTypes';
+import {
+  TEXT_COMMENT_TYPES,
+  TEXT_NOTE_TYPES,
+} from '../features/text/textFeatureTypes';
 
 /**
  * Convert legacy parser-native sources (x^2, 2x, …) to canonical GraphMathSyntax.
@@ -73,6 +83,73 @@ function migrateBase(raw: Record<string, unknown>, zFallback: number): BaseEleme
   };
 }
 
+function migrateTitle(raw: unknown): TextTitle | undefined {
+  if (typeof raw === 'string' && raw.trim()) {
+    return { id: newFeatureId('title'), text: raw.trim() };
+  }
+  if (!isObject(raw)) return undefined;
+  const text = str(raw.text, '').trim();
+  if (!text) return undefined;
+  return { id: str(raw.id, newFeatureId('title')), text };
+}
+
+function migrateNotes(raw: unknown): TextNote[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const notes: TextNote[] = [];
+  raw.forEach((item, i) => {
+    if (!isObject(item)) return;
+    const text = str(item.text, '').trim();
+    if (!text) return;
+    const noteType = TEXT_NOTE_TYPES.includes(item.noteType as never)
+      ? (item.noteType as TextNote['noteType'])
+      : 'extra_information';
+    notes.push({
+      id: str(item.id, newFeatureId('note')),
+      text,
+      noteType,
+      layoutMode: item.layoutMode === 'manual' ? 'manual' : 'auto',
+      offsetX: typeof item.offsetX === 'number' ? item.offsetX : undefined,
+      offsetY: typeof item.offsetY === 'number' ? item.offsetY : undefined,
+      order: num(item.order, i),
+    });
+  });
+  return notes.length ? notes : undefined;
+}
+
+function migrateComments(raw: unknown): TextComment[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const comments: TextComment[] = [];
+  for (const item of raw) {
+    if (!isObject(item) || !isObject(item.anchor)) continue;
+    const text = str(item.text, '').trim();
+    if (!text) continue;
+    const quote = str(item.anchor.quote, '').trim();
+    const blockId = str(item.anchor.blockId, '').trim();
+    if (!quote || !blockId) continue;
+    const commentType = TEXT_COMMENT_TYPES.includes(item.commentType as never)
+      ? (item.commentType as TextComment['commentType'])
+      : 'explanation';
+    comments.push({
+      id: str(item.id, newFeatureId('comment')),
+      text,
+      commentType,
+      displayState: item.displayState === 'open' ? 'open' : 'collapsed',
+      panelOffsetX:
+        typeof item.panelOffsetX === 'number' ? item.panelOffsetX : undefined,
+      panelOffsetY:
+        typeof item.panelOffsetY === 'number' ? item.panelOffsetY : undefined,
+      anchor: {
+        blockId,
+        start: Math.max(0, num(item.anchor.start, 0)),
+        end: Math.max(0, num(item.anchor.end, quote.length)),
+        quote,
+        status: item.anchor.status === 'unresolved' ? 'unresolved' : 'resolved',
+      },
+    });
+  }
+  return comments.length ? comments : undefined;
+}
+
 function migrateText(raw: Record<string, unknown>, z: number): TextElement {
   const legacyBold =
     raw.fontStyle === 'bold' || raw.fontWeight === 'bold';
@@ -84,11 +161,18 @@ function migrateText(raw: Record<string, unknown>, z: number): TextElement {
       richText = undefined;
     }
   }
+  if (richText) richText = ensureBlockIds(richText);
+  const title = migrateTitle(raw.title);
+  const notes = migrateNotes(raw.notes);
+  const comments = migrateComments(raw.comments);
   return {
     ...migrateBase(raw, z),
     type: 'text',
     text: str(raw.text, ''),
     ...(richText ? { richText } : {}),
+    ...(title ? { title } : {}),
+    ...(notes ? { notes } : {}),
+    ...(comments ? { comments } : {}),
     fontSize: num(raw.fontSize, DEFAULT_STYLE.fontSize),
     fontFamily: str(raw.fontFamily, DEFAULT_STYLE.fontFamily),
     fontWeight: legacyBold ? 'bold' : 'normal',

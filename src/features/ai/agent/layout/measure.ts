@@ -7,8 +7,15 @@ import type { RichTextDocument } from '../../../text/richText';
 import {
   TextElementAutoSizer,
   TEXT_AUTO_SIZE_WIDTH_DEFAULTS,
+  measureTextElementWithFeatures,
   type TextMeasureResult,
 } from '../../../text/textAutoSizer';
+import type { TextElement } from '../../../../types/canvas';
+import {
+  addCommentToElement,
+  addNoteToElement,
+  setTitleOnElement,
+} from '../../../text/textFeatures';
 import { measureEquationSize } from '../../../equations/latex';
 import { EQUATION_DEFAULT_FONT_SIZE } from '../../../equations/latex';
 import {
@@ -51,6 +58,52 @@ function textStyle(style: StyleDefaults, padding: number) {
   };
 }
 
+/** Build a throwaway TextElement so feature measurement matches runtime. */
+function probeTextElementForFeatures(
+  op: CreateTextOperation,
+  style: StyleDefaults,
+  width: number,
+  height: number,
+): TextElement {
+  const padding = Math.max(style.textPadding, 12);
+  let el = {
+    id: 'probe',
+    type: 'text' as const,
+    text: op.text,
+    richText: op.rich_text as RichTextDocument | undefined,
+    x: 0,
+    y: 0,
+    width,
+    height,
+    rotation: 0,
+    opacity: 1,
+    locked: false,
+    zIndex: 0,
+    createdAt: 0,
+    updatedAt: 0,
+    metadata: {},
+    fontSize: style.fontSize,
+    fontFamily: style.fontFamily,
+    fontWeight: style.fontWeight,
+    fontItalic: style.fontItalic,
+    underline: style.underline,
+    strikethrough: style.strikethrough,
+    color: style.textColor,
+    alignment: style.textAlignment,
+    lineHeight: style.lineHeight,
+    backgroundColor: null,
+    padding,
+    cornerRadius: 0,
+  } satisfies TextElement;
+  if (op.title?.trim()) el = setTitleOnElement(el, op.title);
+  for (const note of op.notes ?? []) {
+    el = addNoteToElement(el, note.text, note.note_type).element;
+  }
+  // Comments are overlays — skip for preferred height (highlights don't grow much).
+  void op.comments;
+  return el;
+}
+
 function measureTextItem(op: CreateTextOperation, style: StyleDefaults): MeasuredTextLayoutItem {
   const cfg = GRID_LAYOUT_CONFIG;
   const padding = Math.max(style.textPadding, 12);
@@ -71,24 +124,38 @@ function measureTextItem(op: CreateTextOperation, style: StyleDefaults): Measure
     autoSized: true,
   });
 
-  const measureHeightAtWidth = (contentWidth: number) =>
-    TextElementAutoSizer.measureHeightAtWidth(content, contentWidth, styleCfg);
+  const withFeatures = measureTextElementWithFeatures(
+    probeTextElementForFeatures(op, style, initial.width, initial.height),
+    { availableWidth: initial.width },
+  );
+
+  const measureHeightAtWidth = (contentWidth: number) => {
+    const bodyH = TextElementAutoSizer.measureHeightAtWidth(
+      content,
+      contentWidth,
+      styleCfg,
+    );
+    const probe = probeTextElementForFeatures(op, style, contentWidth + padding * 2, bodyH);
+    return measureTextElementWithFeatures(probe, {
+      availableWidth: contentWidth + padding * 2,
+    }).height;
+  };
 
   return {
     ref: op.ref!,
     kind: 'text',
     preferredWidth: initial.preferredWidth,
-    preferredHeight: initial.height,
+    preferredHeight: withFeatures.height,
     minWidth: cfg.minTextWidth,
     minHeight: 56,
     measureHeightAtWidth,
-    initialMeasure: initial,
+    initialMeasure: { ...initial, height: withFeatures.height },
     textAutoSize: {
       preferredWidth: initial.preferredWidth,
       contentWidth: initial.contentWidth,
-      contentHeight: initial.contentHeight,
+      contentHeight: withFeatures.contentHeight,
       finalWidth: initial.width,
-      finalHeight: initial.height,
+      finalHeight: withFeatures.height,
       wrappedLines: initial.wrappedLines,
       padding: initial.padding,
       autoSized: true,

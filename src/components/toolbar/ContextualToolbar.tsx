@@ -7,9 +7,11 @@ import {
   StrokeFormattingControls,
 } from './FormattingControls';
 import { OpacityControl } from './CtxPopover';
+import { TextFeaturesMenu } from './TextFeaturesMenu';
 import { useGraphUiStore } from '../../features/graphs/graphUiStore';
 import { DEFAULT_GRAPH_VIEWPORT } from '../../features/graphs/types';
 import { touch } from '../../utils/ids';
+import type { TextElement } from '../../types/canvas';
 
 type ContextMode = 'text' | 'shape' | 'stroke' | 'image' | 'graph' | 'multi' | null;
 
@@ -146,13 +148,20 @@ export function ContextualToolbar() {
     <div className="ctx-bar" role="toolbar" aria-label="Formatting options">
       <div className="ctx-pill">
         {mode === 'text' && (
-          <TextFormattingControls
-            style={style}
-            onLive={onLive}
-            onCommit={onCommit}
-            showEdit={selected.some((el) => el.type === 'text')}
-            onEdit={onEditText}
-          />
+          <>
+            <TextFormattingControls
+              style={style}
+              onLive={onLive}
+              onCommit={onCommit}
+              showEdit={selected.some((el) => el.type === 'text')}
+              onEdit={onEditText}
+            />
+            {selected.length === 1 &&
+              selected[0]?.type === 'text' &&
+              !selected[0].locked && (
+                <TextFeaturesMenu element={selected[0] as TextElement} />
+              )}
+          </>
         )}
         {mode === 'shape' && (
           <ShapeFormattingControls

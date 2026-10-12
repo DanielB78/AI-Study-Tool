@@ -55,6 +55,17 @@ import {
   prettyCurve,
   type GraphEditOperation,
 } from './graphOperations';
+import {
+  isTextFeatureOperationType,
+  parseTextFeatureOperation,
+  type TextFeatureOperation,
+} from './textFeatureOperations';
+import {
+  TEXT_COMMENT_TYPES,
+  TEXT_NOTE_TYPES,
+  type TextCommentType,
+  type TextNoteType,
+} from '../../text/textFeatureTypes';
 
 export type { ParseErrorCode };
 export { CanvasAgentParseError };
@@ -535,11 +546,13 @@ function parseOperation(raw: unknown): CanvasOperation {
         'create_text needs non-empty text or rich_text.',
       );
     }
+    const featureExtras = parseCreateTextFeatures(raw);
     return {
       type: 'create_text',
       text,
       placement,
       ...(rich_text ? { rich_text } : {}),
+      ...featureExtras,
       ...creationLayoutExtras(raw),
     } satisfies CreateTextOperation;
   }
@@ -606,11 +619,133 @@ function parseOperation(raw: unknown): CanvasOperation {
       throw err;
     }
   }
+  if (isTextFeatureOperationType(raw.type)) {
+    return parseTextFeatureOperation(raw);
+  }
   throw new CanvasAgentParseError(
     'unknown_operation',
     `Unsupported operation type "${raw.type}".`,
     String(raw.type),
   );
+}
+
+function parseCreateTextFeatures(raw: Record<string, unknown>): {
+  title?: string;
+  notes?: CreateTextOperation['notes'];
+  comments?: CreateTextOperation['comments'];
+} {
+  const out: {
+    title?: string;
+    notes?: CreateTextOperation['notes'];
+    comments?: CreateTextOperation['comments'];
+  } = {};
+
+  if (raw.title !== undefined && raw.title !== null) {
+    if (typeof raw.title !== 'string' || !raw.title.trim()) {
+      throw new CanvasAgentParseError('empty_text', 'create_text.title must be a non-empty string.');
+    }
+    out.title = raw.title.trim();
+  }
+
+  if (raw.notes !== undefined && raw.notes !== null) {
+    if (!Array.isArray(raw.notes)) {
+      throw new CanvasAgentParseError('schema', 'create_text.notes must be an array.');
+    }
+    const notes: NonNullable<CreateTextOperation['notes']> = [];
+    for (const item of raw.notes) {
+      if (!isRecord(item) || typeof item.text !== 'string' || !item.text.trim()) {
+        throw new CanvasAgentParseError('empty_text', 'Each create_text note needs non-empty text.');
+      }
+      let note_type: TextNoteType | undefined;
+      if (item.note_type !== undefined) {
+        if (
+          typeof item.note_type !== 'string' ||
+          !(TEXT_NOTE_TYPES as readonly string[]).includes(item.note_type)
+        ) {
+          throw new CanvasAgentParseError(
+            'schema',
+            `note_type must be one of: ${TEXT_NOTE_TYPES.join(', ')}.`,
+          );
+        }
+        note_type = item.note_type as TextNoteType;
+      }
+      notes.push({
+        text: item.text.trim(),
+        ...(note_type ? { note_type } : {}),
+      });
+    }
+    if (notes.length) out.notes = notes;
+  }
+
+  if (raw.comments !== undefined && raw.comments !== null) {
+    if (!Array.isArray(raw.comments)) {
+      throw new CanvasAgentParseError('schema', 'create_text.comments must be an array.');
+    }
+    const comments: NonNullable<CreateTextOperation['comments']> = [];
+    for (const item of raw.comments) {
+      if (!isRecord(item) || !isRecord(item.anchor)) {
+        throw new CanvasAgentParseError('schema', 'Each create_text comment needs an anchor.');
+      }
+      const quote =
+        typeof item.anchor.quote === 'string' ? item.anchor.quote.trim() : '';
+      if (!quote) {
+        throw new CanvasAgentParseError('schema', 'Comment anchor.quote must be non-empty.');
+      }
+      const commentText =
+        typeof item.comment === 'string'
+          ? item.comment
+          : typeof item.text === 'string'
+            ? item.text
+            : '';
+      if (!commentText.trim()) {
+        throw new CanvasAgentParseError('empty_text', 'Each create_text comment needs text.');
+      }
+      let comment_type: TextCommentType | undefined;
+      if (item.comment_type !== undefined || item.type !== undefined) {
+        const ct = item.comment_type ?? item.type;
+        if (
+          typeof ct !== 'string' ||
+          !(TEXT_COMMENT_TYPES as readonly string[]).includes(ct)
+        ) {
+          throw new CanvasAgentParseError(
+            'schema',
+            `comment_type must be one of: ${TEXT_COMMENT_TYPES.join(', ')}.`,
+          );
+        }
+        comment_type = ct as TextCommentType;
+      }
+      const anchor: NonNullable<CreateTextOperation['comments']>[number]['anchor'] = {
+        quote,
+      };
+      if (typeof item.anchor.block_id === 'string' && item.anchor.block_id.trim()) {
+        anchor.block_id = item.anchor.block_id.trim();
+      }
+      if (typeof item.anchor.block_ref === 'string' && item.anchor.block_ref.trim()) {
+        anchor.block_ref = item.anchor.block_ref.trim();
+      }
+      if (item.anchor.occurrence !== undefined) {
+        if (
+          typeof item.anchor.occurrence !== 'number' ||
+          !Number.isInteger(item.anchor.occurrence) ||
+          item.anchor.occurrence < 0
+        ) {
+          throw new CanvasAgentParseError(
+            'schema',
+            'anchor.occurrence must be a non-negative integer.',
+          );
+        }
+        anchor.occurrence = item.anchor.occurrence;
+      }
+      comments.push({
+        anchor,
+        comment: commentText.trim(),
+        ...(comment_type ? { comment_type } : {}),
+      });
+    }
+    if (comments.length) out.comments = comments;
+  }
+
+  return out;
 }
 
 function validateStructuredNote(
@@ -812,23 +947,30 @@ function validateGraphEdit(op: GraphEditOperation, ctx: ParseContext): void {
   // Final viewport validity for PATCH is checked at execute against live graph.
 }
 
+function validateTextTarget(targetId: string, ctx: ParseContext): void {
+  if (!ctx.allowedElementIds.has(targetId)) {
+    throw new CanvasAgentParseError(
+      'target_not_in_context',
+      `target_element_id "${targetId}" was not in the supplied canvas context.`,
+      targetId,
+    );
+  }
+  const t = ctx.elementTypes?.get(targetId);
+  if (t !== undefined && t !== 'text') {
+    throw new CanvasAgentParseError(
+      'target_not_text',
+      `target_element_id "${targetId}" is not a TextElement.`,
+      targetId,
+    );
+  }
+}
+
 function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
   if (op.type === 'update_text') {
-    if (!ctx.allowedElementIds.has(op.target_element_id)) {
-      throw new CanvasAgentParseError(
-        'target_not_in_context',
-        `target_element_id "${op.target_element_id}" was not in the supplied canvas context.`,
-        op.target_element_id,
-      );
-    }
-    const t = ctx.elementTypes?.get(op.target_element_id);
-    if (t !== undefined && t !== 'text') {
-      throw new CanvasAgentParseError(
-        'target_not_text',
-        `target_element_id "${op.target_element_id}" is not a TextElement.`,
-        op.target_element_id,
-      );
-    }
+    validateTextTarget(op.target_element_id, ctx);
+  }
+  if (isTextFeatureOperationType(op.type)) {
+    validateTextTarget((op as TextFeatureOperation).target_element_id, ctx);
   }
   if (op.type === 'create_text' || op.type === 'create_equation' || op.type === 'create_graph') {
     validateRelativePlacement(op.placement, ctx);

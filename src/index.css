@@ -375,6 +375,176 @@ textarea {
   outline: none;
 }
 
+/* TextElement optional features (title / notes / comments) */
+
+.ctx-features {
+  position: relative;
+  display: inline-flex;
+}
+
+.ctx-features-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 60;
+  min-width: 11.5rem;
+  padding: 0.35rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 96%, white);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ctx-features-item {
+  appearance: none;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 0.4rem 0.65rem;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.ctx-features-item:hover:not(:disabled) {
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.ctx-features-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.text-html-item .text-feature-title {
+  font-weight: 700;
+  font-size: 1.35em;
+  line-height: 1.25;
+  margin: 0 0 var(--text-title-gap, 10px);
+  color: inherit;
+}
+
+.text-html-item .text-feature-body {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.text-html-item .text-feature-notes {
+  margin-top: var(--text-note-sep, 14px);
+  padding-top: var(--text-note-gap, 12px);
+  border-top: 1px solid rgba(100, 116, 139, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: var(--text-note-gap, 12px);
+}
+
+.text-html-item .text-feature-note {
+  font-size: 0.85em;
+  line-height: 1.35;
+  color: #64748b;
+  white-space: pre-wrap;
+}
+
+.text-html-item .text-feature-note[data-note-type='important'] {
+  color: #b45309;
+}
+
+.text-html-item .text-feature-note[data-note-type='caution'] {
+  color: #b91c1c;
+}
+
+.text-html-item .text-feature-note[data-note-type='reference'] {
+  color: #475569;
+  font-style: italic;
+}
+
+.text-comment-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 35;
+}
+
+.text-comment-indicator {
+  appearance: none;
+  width: 1.4em;
+  height: 1.4em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.95);
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+
+.text-comment-popover {
+  background: #fff;
+  border: 1.5px solid;
+  border-radius: 10px;
+  padding: 0.55rem 0.65rem;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 12px;
+  color: #0f172a;
+}
+
+.text-comment-popover__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.text-comment-popover__close {
+  appearance: none;
+  border: none;
+  background: transparent;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  color: #64748b;
+}
+
+.text-comment-popover__quote {
+  font-size: 0.85em;
+  color: #64748b;
+  font-style: italic;
+}
+
+.text-comment-popover__body {
+  width: 100%;
+  resize: vertical;
+  min-height: 3.5rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 0.35rem 0.45rem;
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.text-comment-popover__delete {
+  appearance: none;
+  align-self: flex-start;
+  border: none;
+  background: transparent;
+  color: #b91c1c;
+  font-size: 0.85em;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
 @keyframes pop-in {
   from {
     opacity: 0;

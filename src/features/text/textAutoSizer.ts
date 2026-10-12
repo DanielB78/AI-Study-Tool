@@ -4,12 +4,14 @@
  * when DOM is available; never mutates CanvasDocument.
  */
 
+import type { TextElement } from '../../types/canvas';
 import {
   resolveRichTextFontSize,
   richTextToPlainText,
   type RichTextDocument,
 } from './richText';
 import { measureRichTextHeight, richTextToHtml } from './richTextHtml';
+import { TEXT_FEATURE_LAYOUT, sortedNotes } from './textFeatures';
 
 export type TextStyleConfig = {
   fontSize: number;
@@ -450,4 +452,66 @@ export function textElementAllowsAiAutoWidth(
   meta: Record<string, unknown> | undefined,
 ): boolean {
   return textElementIsAiManaged(meta) && !textElementIsUserResized(meta);
+}
+
+/**
+ * Measure a TextElement including optional title + supplementary notes.
+ * Comment popovers are overlays and do not expand persistent bounds.
+ */
+export function measureTextElementWithFeatures(
+  el: Pick<
+    TextElement,
+    'text' | 'richText' | 'title' | 'notes' | 'fontSize' | 'fontFamily' | 'fontWeight' | 'fontItalic' | 'underline' | 'lineHeight' | 'color' | 'padding' | 'width'
+  >,
+  opts?: { availableWidth?: number },
+): TextMeasureResult {
+  const style: TextStyleConfig = {
+    fontSize: el.fontSize,
+    fontFamily: el.fontFamily,
+    fontWeight: el.fontWeight,
+    fontItalic: el.fontItalic,
+    underline: el.underline,
+    lineHeight: el.lineHeight,
+    color: el.color,
+    padding: el.padding,
+  };
+  const body = TextElementAutoSizer.measure({
+    content: { text: el.text, richText: el.richText },
+    availableWidth: opts?.availableWidth ?? el.width,
+    style,
+  });
+
+  let extra = 0;
+  if (el.title?.text.trim()) {
+    const titleSize = Math.round(el.fontSize * 1.35);
+    const titleMeasure = measurePlainTextHeight(el.title.text, body.width, {
+      ...style,
+      fontSize: titleSize,
+      fontWeight: 'bold',
+      padding: 0,
+    });
+    extra += titleMeasure.contentHeight + TEXT_FEATURE_LAYOUT.titleGap;
+  }
+
+  const notes = sortedNotes(el as TextElement).filter((n) => n.layoutMode !== 'manual');
+  if (notes.length > 0) {
+    extra += TEXT_FEATURE_LAYOUT.noteSeparatorGap;
+    const noteSize = Math.max(11, Math.round(el.fontSize * TEXT_FEATURE_LAYOUT.noteFontScale));
+    for (const note of notes) {
+      const nm = measurePlainTextHeight(note.text, body.width, {
+        ...style,
+        fontSize: noteSize,
+        color: '#64748B',
+        padding: 0,
+      });
+      extra += nm.contentHeight + TEXT_FEATURE_LAYOUT.noteGap;
+    }
+  }
+
+  const height = Math.min(body.height + extra, TEXT_AUTO_SIZE_MAX_HEIGHT);
+  return {
+    ...body,
+    height,
+    contentHeight: Math.max(0, height - body.padding * 2),
+  };
 }

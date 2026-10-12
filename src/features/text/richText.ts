@@ -39,6 +39,11 @@ export type RichTextSpan = {
 export type RichTextBlockType = 'paragraph' | 'heading' | 'bullet' | 'numbered';
 
 export type RichTextBlock = {
+  /**
+   * Stable block id for headings / comment anchors.
+   * Assigned on parse/normalize when missing (backward compatible).
+   */
+  id?: string;
   type: RichTextBlockType;
   /** Optional role hint for paragraphs (e.g. heading) — normalized into type. */
   role?: 'heading' | 'body';

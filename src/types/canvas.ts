@@ -8,8 +8,13 @@ import type {
   GraphViewport,
 } from '../features/graphs/types';
 import type { RichTextDocument } from '../features/text/richText';
+import type {
+  TextComment,
+  TextNote,
+  TextTitle,
+} from '../features/text/textFeatureTypes';
 
-export const DOCUMENT_VERSION = 4 as const;
+export const DOCUMENT_VERSION = 5 as const;
 
 export type ShapeType =
   | 'rectangle'
@@ -68,13 +73,19 @@ export interface BaseElement {
 
 export interface TextElement extends BaseElement {
   type: 'text';
-  /** Plain-text extract (always set). Source of truth for RAG indexing. */
+  /** Plain-text extract (always set). Base body for RAG; features augment indexing. */
   text: string;
   /**
    * Optional structured rich text. When set, rendering/editing use this document
    * and `text` is kept in sync as the plain extract.
    */
   richText?: RichTextDocument;
+  /** Optional title above the main text (single per element). */
+  title?: TextTitle;
+  /** Supplementary notes below the main text. */
+  notes?: TextNote[];
+  /** Comments anchored to ranges inside richText / plain text. */
+  comments?: TextComment[];
   fontSize: number;
   fontFamily: string;
   fontWeight: FontWeight;

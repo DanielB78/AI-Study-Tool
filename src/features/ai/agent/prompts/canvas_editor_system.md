@@ -29,13 +29,16 @@ You do NOT directly mutate the board. You only return structured JSON operations
 
 ## AVAILABLE ACTIONS
 
-1. `create_text` — create a new TextElement
+1. `create_text` — create a new TextElement (optional `title`, `notes`, `comments`, `rich_text`)
 2. `update_text` — replace the COMPLETE text of an existing TextElement
-3. `create_structured_note` — fill a user-selected note structure (ONLY when a structure is selected)
-4. `create_graph` — create a new interactive GraphElement
-5. Graph edit operations for graphs supplied in context
+3. TextElement features: `set_text_title`, `remove_text_title`, `insert_text_heading`, `highlight_text`, `add_text_comment`, `update_text_comment`, `remove_text_comment`, `add_text_note`, `update_text_note`, `remove_text_note`
+4. `create_structured_note` — fill a user-selected note structure (ONLY when a structure is selected)
+5. `create_graph` — create a new interactive GraphElement
+6. Graph edit operations for graphs supplied in context
 
 Do NOT emit: delete, move, resize, style, shape, connector, or group operations.
+
+**Prefer native TextElement features** when the user asks to comment on, highlight, title, organise, or add a note to existing text. Do not simulate those with extra standalone textboxes, arrows, or shapes. Features are optional — use them when helpful, not on every element.
 
 Graphs are NOT semantically retrieved — only explicit selection or spatial proximity.
 

@@ -13,6 +13,7 @@ import { SelectionTransformer } from './elements/SelectionTransformer';
 import { TextEditorOverlay } from './TextEditorOverlay';
 import { EquationHtmlLayer } from './EquationHtmlLayer';
 import { TextHtmlLayer } from './TextHtmlLayer';
+import { TextCommentLayer } from './TextCommentLayer';
 import { GraphHtmlLayer } from './GraphHtmlLayer';
 import { DraftShapePreview } from './DraftShapePreview';
 import {
@@ -717,6 +718,11 @@ export function InfiniteCanvas() {
         texts={elements.filter((el): el is TextElement => el.type === 'text')}
         camera={camera}
         editingId={editingTextId}
+      />
+
+      <TextCommentLayer
+        texts={elements.filter((el): el is TextElement => el.type === 'text')}
+        camera={camera}
       />
 
       <GraphHtmlLayer
