@@ -14,7 +14,9 @@ export {
   maxColumnsForObjectCount,
   reflowGridToMaxColumns,
   reduceColumnsForWidth,
+  normalizeGridLayout,
   type ReflowResult,
+  type WrapReason,
 } from './gridReflow';
 export {
   measureLayoutItems,

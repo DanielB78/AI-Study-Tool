@@ -330,6 +330,11 @@ function measureRichAtWidth(
       'visibility:hidden',
       `width:${contentWidth}px`,
       'box-sizing:border-box',
+      // World-space base font — rich HTML uses em relative to this (never zoom).
+      `font-size:${style.fontSize}px`,
+      `font-family:${style.fontFamily}`,
+      `color:${style.color}`,
+      `line-height:${style.lineHeight}`,
     ].join(';');
     host.innerHTML = richTextToHtml(richText, {
       color: style.color,

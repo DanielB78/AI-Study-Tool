@@ -11,17 +11,38 @@ export function maxColumnsForObjectCount(n: number): number {
   return Math.min(GRID_LAYOUT_CONFIG.maxColumns, Math.ceil(Math.sqrt(n)));
 }
 
+export type WrapReason =
+  | 'none'
+  | 'exceeded_max_columns'
+  | 'item_overflows_max_columns'
+  | 'physical_width'
+  | 'cell_conflict';
+
 export type ReflowResult = {
   layout: GridLayoutSpec;
   requestedColumns: number;
   maxColumns: number;
   finalColumns: number;
   wrapped: boolean;
+  wrapReason: WrapReason;
   diagnostics: string[];
 };
 
 function sortReadingOrder(items: readonly GridLayoutItemSpec[]): GridLayoutItemSpec[] {
   return [...items].sort((a, b) => a.row - b.row || a.column - b.column);
+}
+
+function hasCellConflicts(items: readonly GridLayoutItemSpec[]): boolean {
+  const occupied = new Set<string>();
+  for (const item of items) {
+    const span = item.column_span ?? 1;
+    for (let c = item.column; c < item.column + span; c++) {
+      const key = `${item.row}:${c}`;
+      if (occupied.has(key)) return true;
+      occupied.add(key);
+    }
+  }
+  return false;
 }
 
 /**
@@ -37,25 +58,37 @@ export function reflowGridToMaxColumns(
   const n = layout.items.length;
   const cappedMax = Math.max(1, Math.min(maxColumns, GRID_LAYOUT_CONFIG.maxColumns));
 
-  let needsReflow =
-    requestedColumns > cappedMax ||
-    layout.items.some(
-      (it) => it.column + (it.column_span ?? 1) > cappedMax,
-    );
+  const itemOverflows = layout.items.some(
+    (it) => it.column + (it.column_span ?? 1) > cappedMax,
+  );
+  const columnsExceed = requestedColumns > cappedMax;
+  const conflicts = hasCellConflicts(layout.items);
+
+  let wrapReason: WrapReason = 'none';
+  if (columnsExceed) wrapReason = 'exceeded_max_columns';
+  else if (itemOverflows) wrapReason = 'item_overflows_max_columns';
+  else if (conflicts) wrapReason = 'cell_conflict';
+
+  const needsReflow = wrapReason !== 'none';
 
   if (!needsReflow) {
     return {
-      layout,
+      layout: {
+        ...layout,
+        // Clamp columns field even when structure is already valid.
+        columns: Math.min(requestedColumns, cappedMax),
+      },
       requestedColumns,
       maxColumns: cappedMax,
-      finalColumns: requestedColumns,
+      finalColumns: Math.min(requestedColumns, cappedMax),
       wrapped: false,
+      wrapReason: 'none',
       diagnostics,
     };
   }
 
   diagnostics.push(
-    `Reflow: requested ${requestedColumns} columns with ${n} objects; max allowed ${cappedMax}.`,
+    `Reflow: requested ${requestedColumns} columns with ${n} objects; max allowed ${cappedMax} (${wrapReason}).`,
   );
 
   const ordered = sortReadingOrder(layout.items);
@@ -111,8 +144,18 @@ export function reflowGridToMaxColumns(
     maxColumns: cappedMax,
     finalColumns,
     wrapped: true,
+    wrapReason,
     diagnostics,
   };
+}
+
+/**
+ * Normalize a requested layout against object-count column limits.
+ * Always returns finalColumns <= maxColumnsForObjectCount(N).
+ */
+export function normalizeGridLayout(layout: GridLayoutSpec): ReflowResult {
+  const maxColumns = maxColumnsForObjectCount(layout.items.length);
+  return reflowGridToMaxColumns(layout, maxColumns);
 }
 
 /**
@@ -129,30 +172,44 @@ export function reduceColumnsForWidth(input: {
   let layout = input.layout;
   let columns = layout.columns;
   let wrapped = false;
+  let wrapReason: WrapReason = 'none';
   const maxColumns = input.maxColumns;
 
   // Allow grids modestly wider than viewport; only reflow when clearly excessive.
   const limit = Math.max(input.usableWorldWidth * 1.15, 480);
-  let guard = 0;
-  while (columns > 1 && input.measuredWidth > limit && guard < 4) {
-    guard += 1;
-    const nextMax = columns - 1;
-    if (nextMax < 1 || nextMax > maxColumns && columns <= maxColumns) {
-      // still try reducing below requested if physically too wide
-    }
-    const target = Math.min(nextMax, maxColumns);
-    if (target >= columns) break;
-    diagnostics.push(
-      `Width ${input.measuredWidth.toFixed(0)} exceeds usable ${limit.toFixed(0)}; reducing columns ${columns} → ${target}.`,
-    );
-    const reflowed = reflowGridToMaxColumns({ ...layout, columns }, target);
-    layout = reflowed.layout;
-    columns = reflowed.finalColumns;
-    wrapped = true;
-    diagnostics.push(...reflowed.diagnostics);
-    // Caller must remeasure; we only adjust structure once per step.
-    break;
+  if (!(columns > 1 && input.measuredWidth > limit)) {
+    return {
+      layout,
+      requestedColumns: input.layout.columns,
+      maxColumns,
+      finalColumns: layout.columns,
+      wrapped: false,
+      wrapReason: 'none',
+      diagnostics,
+    };
   }
+
+  const target = Math.max(1, columns - 1);
+  if (target >= columns) {
+    return {
+      layout,
+      requestedColumns: input.layout.columns,
+      maxColumns,
+      finalColumns: layout.columns,
+      wrapped: false,
+      wrapReason: 'none',
+      diagnostics,
+    };
+  }
+
+  diagnostics.push(
+    `Width ${input.measuredWidth.toFixed(0)} exceeds usable ${limit.toFixed(0)}; reducing columns ${columns} → ${target}.`,
+  );
+  const reflowed = reflowGridToMaxColumns({ ...layout, columns }, target);
+  layout = reflowed.layout;
+  wrapped = true;
+  wrapReason = 'physical_width';
+  diagnostics.push(...reflowed.diagnostics);
 
   return {
     layout,
@@ -160,6 +217,7 @@ export function reduceColumnsForWidth(input: {
     maxColumns,
     finalColumns: layout.columns,
     wrapped,
+    wrapReason,
     diagnostics,
   };
 }

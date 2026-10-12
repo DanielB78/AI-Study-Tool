@@ -1,5 +1,9 @@
 /**
  * Render / parse helpers for rich-text HTML used by the overlay editor.
+ *
+ * Font sizes in generated HTML use `em` relative to the host's CSS font-size so
+ * a single camera zoom scale on the host scales headings, body, and mixed spans
+ * together (world coordinates stay fixed on the TextElement).
  */
 
 import {
@@ -18,6 +22,14 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/** World font size → em relative to the document base (defaults.fontSize). */
+function fontSizeToEm(worldPx: number, baseFontSize: number): string {
+  const base = Math.max(baseFontSize, 1);
+  const em = worldPx / base;
+  // Keep short CSS; avoid floating noise.
+  return `${Math.round(em * 1000) / 1000}em`;
+}
+
 function spanToHtml(
   span: RichTextSpan,
   defaults: { color: string; fontSize: number },
@@ -34,7 +46,10 @@ function spanToHtml(
   if (style.italic) parts.push('font-style:italic');
   if (style.underline) parts.push('text-decoration:underline');
   if (color !== defaults.color) parts.push(`color:${color}`);
-  if (fontSize !== defaults.fontSize) parts.push(`font-size:${fontSize}px`);
+  // Relative em so zooming the host scales all spans uniformly.
+  if (fontSize !== defaults.fontSize) {
+    parts.push(`font-size:${fontSizeToEm(fontSize, defaults.fontSize)}`);
+  }
   if (highlight) parts.push(`background-color:${highlight}`);
 
   const text = escapeHtml(span.text).replace(/\n/g, '<br/>');
@@ -51,7 +66,7 @@ function blockToHtml(
   if (block.type === 'heading') {
     const size = resolveRichTextFontSize('heading', defaults.fontSize);
     return {
-      html: `<div data-rt-type="heading" style="font-weight:700;font-size:${size}px;margin:0 0 0.35em 0;line-height:1.25">${inner}</div>`,
+      html: `<div data-rt-type="heading" style="font-weight:700;font-size:${fontSizeToEm(size, defaults.fontSize)};margin:0 0 0.35em 0;line-height:1.25">${inner}</div>`,
       nextNumbered: 0,
     };
   }
@@ -74,6 +89,10 @@ function blockToHtml(
   };
 }
 
+/**
+ * Build HTML for a rich-text document.
+ * The root uses `font-size: 1em` so the host element controls the world→screen scale.
+ */
 export function richTextToHtml(
   doc: RichTextDocument,
   defaults: { color: string; fontSize: number; fontFamily: string },
@@ -89,16 +108,22 @@ export function richTextToHtml(
     numbered = block.type === 'numbered' ? nextNumbered : 0;
     parts.push(html);
   }
-  return `<div data-rt-root="1" style="font-family:${defaults.fontFamily};font-size:${defaults.fontSize}px;color:${defaults.color};line-height:1.35;word-wrap:break-word;overflow-wrap:anywhere">${parts.join('')}</div>`;
+  // font-size:1em — inherit from host (which applies camera.zoom for overlays).
+  return `<div data-rt-root="1" style="font-family:${defaults.fontFamily};font-size:1em;color:${defaults.color};line-height:1.35;word-wrap:break-word;overflow-wrap:anywhere">${parts.join('')}</div>`;
 }
 
-function styleFromElement(el: HTMLElement): RichTextSpan['style'] {
+function styleFromElement(
+  el: HTMLElement,
+  baseFontSize: number,
+  rootFontPx: number,
+): RichTextSpan['style'] {
   const cs = el.style;
+  const computed = getComputedStyle(el);
   const style: NonNullable<RichTextSpan['style']> = {};
-  const weight = cs.fontWeight || getComputedStyle(el).fontWeight;
+  const weight = cs.fontWeight || computed.fontWeight;
   if (weight === 'bold' || Number(weight) >= 600) style.bold = true;
-  if ((cs.fontStyle || getComputedStyle(el).fontStyle) === 'italic') style.italic = true;
-  const deco = cs.textDecoration || getComputedStyle(el).textDecorationLine || '';
+  if ((cs.fontStyle || computed.fontStyle) === 'italic') style.italic = true;
+  const deco = cs.textDecoration || computed.textDecorationLine || '';
   if (deco.includes('underline')) style.underline = true;
   if (cs.color) style.color = cs.color.startsWith('rgb') ? rgbToHex(cs.color) : cs.color;
   if (cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent') {
@@ -106,9 +131,13 @@ function styleFromElement(el: HTMLElement): RichTextSpan['style'] {
       ? rgbToHex(cs.backgroundColor)
       : cs.backgroundColor;
   }
-  if (cs.fontSize) {
-    const px = parseFloat(cs.fontSize);
-    if (Number.isFinite(px)) style.font_size = px;
+  // Convert computed screen px back to world font size via root ratio.
+  const computedPx = parseFloat(computed.fontSize);
+  if (Number.isFinite(computedPx) && rootFontPx > 0) {
+    const world = Math.round((computedPx / rootFontPx) * baseFontSize);
+    if (world !== baseFontSize && world >= 10 && world <= 48) {
+      style.font_size = world;
+    }
   }
   return Object.keys(style).length ? style : undefined;
 }
@@ -120,7 +149,12 @@ function rgbToHex(rgb: string): string {
   return `#${h(m[1]!)}${h(m[2]!)}${h(m[3]!)}`.toUpperCase();
 }
 
-function spansFromNode(node: Node, inherited?: RichTextSpan['style']): RichTextSpan[] {
+function spansFromNode(
+  node: Node,
+  baseFontSize: number,
+  rootFontPx: number,
+  inherited?: RichTextSpan['style'],
+): RichTextSpan[] {
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent ?? '';
     if (!text) return [];
@@ -129,12 +163,15 @@ function spansFromNode(node: Node, inherited?: RichTextSpan['style']): RichTextS
   if (node.nodeType !== Node.ELEMENT_NODE) return [];
   const el = node as HTMLElement;
   if (el.getAttribute('contenteditable') === 'false') return [];
-  const merged = { ...(inherited ?? {}), ...(styleFromElement(el) ?? {}) };
+  const merged = {
+    ...(inherited ?? {}),
+    ...(styleFromElement(el, baseFontSize, rootFontPx) ?? {}),
+  };
   const style = Object.keys(merged).length ? merged : undefined;
   if (el.tagName === 'BR') return [{ text: '\n', style }];
   const out: RichTextSpan[] = [];
   el.childNodes.forEach((child) => {
-    out.push(...spansFromNode(child, style));
+    out.push(...spansFromNode(child, baseFontSize, rootFontPx, style));
   });
   return out.length ? mergeAdjacentSpans(out) : [{ text: '', style }];
 }
@@ -153,13 +190,20 @@ function mergeAdjacentSpans(spans: RichTextSpan[]): RichTextSpan[] {
 }
 
 /** Best-effort HTML → rich text (from contenteditable). */
-export function htmlToRichText(root: HTMLElement): RichTextDocument {
+export function htmlToRichText(
+  root: HTMLElement,
+  options?: { baseFontSize?: number },
+): RichTextDocument {
+  const baseFontSize = options?.baseFontSize ?? 16;
+  const rootFontPx =
+    parseFloat(getComputedStyle(root).fontSize) || baseFontSize;
+
   const blocks: RichTextBlock[] = [];
   const children = Array.from(root.querySelectorAll(':scope > [data-rt-type], :scope > div'));
   const nodes = children.length > 0 ? children : Array.from(root.children);
 
   if (nodes.length === 0) {
-    const spans = spansFromNode(root);
+    const spans = spansFromNode(root, baseFontSize, rootFontPx);
     return { blocks: [{ type: 'paragraph', spans: spans.length ? spans : [{ text: '' }] }] };
   }
 
@@ -170,7 +214,7 @@ export function htmlToRichText(root: HTMLElement): RichTextDocument {
     if (typeAttr === 'bullet' || typeAttr === 'numbered') {
       contentRoot = (el.querySelector(':scope > div') as HTMLElement) ?? el;
     }
-    const spans = spansFromNode(contentRoot);
+    const spans = spansFromNode(contentRoot, baseFontSize, rootFontPx);
     const type: RichTextBlock['type'] =
       typeAttr === 'heading' || typeAttr === 'bullet' || typeAttr === 'numbered'
         ? typeAttr
@@ -187,6 +231,7 @@ export function htmlToRichText(root: HTMLElement): RichTextDocument {
 /**
  * Measure rendered rich-text height at a given width using an offscreen host.
  * Falls back to a heuristic when DOM is unavailable.
+ * Measurement is always in world units (host font-size = defaults.fontSize) — never zoom.
  */
 export function measureRichTextHeight(
   doc: RichTextDocument,
@@ -226,6 +271,11 @@ export function measureRichTextHeight(
     'visibility:hidden',
     `width:${contentWidth}px`,
     'box-sizing:border-box',
+    // World-space font size — zoom must not affect measurement.
+    `font-size:${defaults.fontSize}px`,
+    `font-family:${defaults.fontFamily}`,
+    `color:${defaults.color}`,
+    `line-height:${defaults.lineHeight ?? 1.35}`,
   ].join(';');
   host.innerHTML = richTextToHtml(doc, {
     color: defaults.color,

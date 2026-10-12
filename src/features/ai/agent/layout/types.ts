@@ -97,9 +97,14 @@ export type LayoutDebugInfo = {
   objectCount: number;
   maxColumns: number;
   requestedColumns: number;
+  requestedRows: number;
   columns: number;
   rows: number;
   wrapped: boolean;
+  /** Why automatic wrapping ran (if it did). */
+  wrapReason: string;
+  /** True when physical viewport width forced fewer columns. */
+  widthWrapped: boolean;
   columnWidths: number[];
   rowHeights: number[];
   items: Array<{

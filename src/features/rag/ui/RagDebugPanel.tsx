@@ -1830,9 +1830,15 @@ export function RagDebugPanel() {
                     <div className="rag-debug-section-title">Grid placement debug</div>
                     <pre className="rag-debug-plan">
                       {[
-                        `Objects: ${layoutDebug.objectCount ?? '—'}  Max columns: ${layoutDebug.maxColumns ?? '—'}`,
-                        `Requested columns: ${layoutDebug.requestedColumns ?? layoutDebug.columns}  Final: ${layoutDebug.columns}`,
-                        `Wrapped: ${layoutDebug.wrapped ?? false}  Rows: ${layoutDebug.rows}`,
+                        `Generated objects: ${layoutDebug.objectCount ?? '—'}`,
+                        `Requested columns: ${layoutDebug.requestedColumns ?? layoutDebug.columns}`,
+                        `Calculated max columns: ${layoutDebug.maxColumns ?? '—'}`,
+                        `Final columns: ${layoutDebug.columns}`,
+                        `Requested rows: ${layoutDebug.requestedRows ?? '—'}`,
+                        `Final rows: ${layoutDebug.rows}`,
+                        `Automatic wrapping: ${layoutDebug.wrapped ? 'YES' : 'NO'}`,
+                        `Wrapping reason: ${layoutDebug.wrapReason ?? 'none'}`,
+                        `Physical width wrapping: ${layoutDebug.widthWrapped ? 'YES' : 'NO'}`,
                         `Column widths: ${layoutDebug.columnWidths.map((w) => w.toFixed(0)).join(', ')}`,
                         `Row heights: ${layoutDebug.rowHeights.map((h) => h.toFixed(0)).join(', ')}`,
                         `Local bounds: ${layoutDebug.localBounds.width.toFixed(0)}×${layoutDebug.localBounds.height.toFixed(0)}`,
@@ -1844,7 +1850,7 @@ export function RagDebugPanel() {
                         }`,
                         `Candidates tested: ${layoutDebug.candidatesTested}`,
                         `Collided at preferred: ${layoutDebug.collidedAtPreferred}`,
-                        `Collision-free: ${layoutDebug.collisionFree}`,
+                        `Collision validation: ${layoutDebug.collisionFree ? 'PASSED' : 'FAILED'}`,
                         `Obstacles: ${layoutDebug.obstacleCount}`,
                         ...layoutDebug.items.map((it) => {
                           const base = `  ${it.ref}: r${it.row}c${it.column} span${it.columnSpan} → ${it.width.toFixed(0)}×${it.height.toFixed(0)} @ (${it.localX.toFixed(0)}, ${it.localY.toFixed(0)})`;
