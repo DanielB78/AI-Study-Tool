@@ -14,6 +14,11 @@ export const GRID_LAYOUT_CONFIG = {
   collisionMargin: 12,
   /** Cell inset so content is not flush against cell edges. */
   cellPadding: 0,
+  /**
+   * Vertical gap between stacked objects inside a multi-object cell.
+   * Must exceed 2×collisionMargin so expanded collision rects do not overlap.
+   */
+  cellStackGap: 28,
 
   minTextWidth: 200,
   maxTextWidth: 520,

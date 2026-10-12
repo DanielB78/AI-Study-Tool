@@ -46,61 +46,44 @@ export type GridLayoutSpec = {
   items: GridLayoutItemSpec[];
 };
 
-/** Weighted semantic link between two created objects (layout preference). */
-export type SemanticRelationSpec = {
-  ref: OperationRef;
-  /** 0–1 approximate attraction weight. */
-  strength: number;
-};
-
-/** Ordered topic band for relationship-grid layouts. */
-export type TopicSectionSpec = {
-  id: string;
-  order: number;
-  title?: string;
-};
-
 /**
- * Relationship-grid item — LLM supplies semantics; the app derives row/column.
+ * Chronological multi-object cell layout (High-mode default).
+ * Creation-operation order is authoritative. Optional `layout_cell` on create
+ * ops groups consecutive objects into the same grid cell (1–4 per cell).
+ * The application assigns rows/columns and stacks members vertically.
  */
-export type RelationshipGridItemSpec = {
-  ref: OperationRef;
-  /** Topic section id (must match layout.sections). */
-  section: string;
-  /** Soft educational sequence hint (lower = earlier). */
-  preferred_order?: number;
-  /** Hard prerequisites — other creation refs that must appear earlier. */
-  requires?: OperationRef[];
-  /** Up to 3 strongest semantic relationships to other created refs. */
-  relations?: SemanticRelationSpec[];
-  column_span?: number;
-};
-
-/**
- * High-mode preferred layout: sections + relations + prerequisites.
- * The application optimises grid cells; the LLM does not assign rows/columns.
- */
-export type RelationshipGridLayoutSpec = {
-  type: 'relationship_grid';
+export type ChronologicalGridLayoutSpec = {
+  type: 'chronological_grid';
   placement: Placement;
-  sections: TopicSectionSpec[];
-  items: RelationshipGridItemSpec[];
   /** Optional column hint; clamped by dynamic max_columns(N). */
   columns?: number;
 };
 
-/** Explicit grid or relationship-optimised grid. */
-export type AnyLayoutSpec = GridLayoutSpec | RelationshipGridLayoutSpec;
+/** Explicit grid or chronological cell grid. */
+export type AnyLayoutSpec = GridLayoutSpec | ChronologicalGridLayoutSpec;
 
-export function isRelationshipGridLayout(
+export function isChronologicalGridLayout(
   layout: AnyLayoutSpec,
-): layout is RelationshipGridLayoutSpec {
-  return layout.type === 'relationship_grid';
+): layout is ChronologicalGridLayoutSpec {
+  return layout.type === 'chronological_grid';
 }
 
 export function isExplicitGridLayout(layout: AnyLayoutSpec): layout is GridLayoutSpec {
   return layout.type === 'grid';
 }
+
+/** Optional layout grouping fields shared by creatable operations. */
+export type CreationLayoutFields = {
+  /** Temporary ref for layout / chronological ordering. */
+  ref?: OperationRef;
+  /**
+   * Optional cell id — consecutive creates with the same id share one grid cell
+   * (max 4; oversized groups are auto-split). Non-contiguous reuse is rejected.
+   */
+  layout_cell?: string;
+  /** Optional column span for the containing cell (defaults to 1). */
+  column_span?: number;
+};
 
 /** Structured rich-text document (mirrors features/text/richText). */
 export type AgentRichTextSpanStyle = {
@@ -136,18 +119,15 @@ export type CreateTextOperation = {
   text: string;
   /** Structured rich text — preferred for formatted notes. */
   rich_text?: AgentRichTextDocument;
-  /** Omitted when assigned via layout.items — parser defaults to viewport_default. */
+  /** Omitted when assigned via layout — parser defaults to viewport_default. */
   placement: Placement;
-  /** Temporary ref for layout.items */
-  ref?: OperationRef;
-};
+} & CreationLayoutFields;
 
 export type CreateEquationOperation = {
   type: 'create_equation';
   latex: string;
   placement: Placement;
-  ref?: OperationRef;
-};
+} & CreationLayoutFields;
 
 export type UpdateTextOperation = {
   type: 'update_text';
@@ -190,8 +170,7 @@ export type CreateStructuredNoteOperation = {
   /** field_id → payload; optional fields may be omitted or null */
   fields: Record<string, StructuredFieldPayload>;
   placement: Placement;
-  ref?: OperationRef;
-};
+} & CreationLayoutFields;
 
 /** One curve on a newly created GraphElement (canonical GraphMathSyntax). */
 export type CreateGraphExpressionSpec = {
@@ -236,8 +215,7 @@ export type CreateGraphOperation = {
   viewport: CreateGraphViewportSpec;
   settings: CreateGraphSettingsSpec;
   placement: Placement;
-  ref?: OperationRef;
-};
+} & CreationLayoutFields;
 
 export type AddGraphExpressionOperation = {
   type: 'add_graph_expression';
@@ -336,8 +314,8 @@ export type CanvasAgentResponse = {
   operations: CanvasOperation[];
   /**
    * Required when creating multiple related objects with viewport_default.
-   * Prefer `relationship_grid` for High-mode educational multi-element plans;
-   * use `grid` when the user demands an explicit arrangement.
+   * Prefer `chronological_grid` (operation order + optional layout_cell);
+   * use explicit `grid` only when the user demands a specific arrangement.
    */
   layout?: AnyLayoutSpec;
 };
@@ -360,8 +338,8 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
   properties: {
     layout: {
       oneOf: [
+        { $ref: '#/$defs/chronologicalGridLayout' },
         { $ref: '#/$defs/gridLayout' },
-        { $ref: '#/$defs/relationshipGridLayout' },
       ],
     },
     operations: {
@@ -378,6 +356,8 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               text: { type: 'string', minLength: 1 },
               rich_text: { $ref: '#/$defs/richText' },
               ref: { type: 'string', minLength: 1 },
+              layout_cell: { type: 'string', minLength: 1 },
+              column_span: { type: 'integer', minimum: 1, maximum: 4 },
               placement: { $ref: '#/$defs/placement' },
             },
           },
@@ -389,6 +369,8 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               type: { const: 'create_equation' },
               latex: { type: 'string', minLength: 1 },
               ref: { type: 'string', minLength: 1 },
+              layout_cell: { type: 'string', minLength: 1 },
+              column_span: { type: 'integer', minimum: 1, maximum: 4 },
               placement: { $ref: '#/$defs/placement' },
             },
           },
@@ -411,6 +393,8 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               type: { const: 'create_structured_note' },
               structure_id: { type: 'string', minLength: 1 },
               ref: { type: 'string', minLength: 1 },
+              layout_cell: { type: 'string', minLength: 1 },
+              column_span: { type: 'integer', minimum: 1, maximum: 4 },
               fields: {
                 type: 'object',
                 additionalProperties: {
@@ -465,6 +449,8 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               viewport: { $ref: '#/$defs/graphViewport' },
               settings: { $ref: '#/$defs/graphSettings' },
               ref: { type: 'string', minLength: 1 },
+              layout_cell: { type: 'string', minLength: 1 },
+              column_span: { type: 'integer', minimum: 1, maximum: 4 },
               placement: { $ref: '#/$defs/placement' },
             },
           },
@@ -672,6 +658,16 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
         },
       ],
     },
+    chronologicalGridLayout: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['type', 'placement'],
+      properties: {
+        type: { const: 'chronological_grid' },
+        columns: { type: 'integer', minimum: 1, maximum: 4 },
+        placement: { $ref: '#/$defs/placement' },
+      },
+    },
     gridLayout: {
       type: 'object',
       additionalProperties: false,
@@ -692,62 +688,6 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               row: { type: 'integer', minimum: 0 },
               column: { type: 'integer', minimum: 0 },
               column_span: { type: 'integer', minimum: 1, maximum: 48 },
-            },
-          },
-        },
-      },
-    },
-    relationshipGridLayout: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['type', 'placement', 'sections', 'items'],
-      properties: {
-        type: { const: 'relationship_grid' },
-        columns: { type: 'integer', minimum: 1, maximum: 4 },
-        placement: { $ref: '#/$defs/placement' },
-        sections: {
-          type: 'array',
-          minItems: 1,
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['id', 'order'],
-            properties: {
-              id: { type: 'string', minLength: 1 },
-              order: { type: 'integer', minimum: 0 },
-              title: { type: 'string' },
-            },
-          },
-        },
-        items: {
-          type: 'array',
-          minItems: 1,
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['ref', 'section'],
-            properties: {
-              ref: { type: 'string', minLength: 1 },
-              section: { type: 'string', minLength: 1 },
-              preferred_order: { type: 'integer' },
-              requires: {
-                type: 'array',
-                items: { type: 'string', minLength: 1 },
-              },
-              relations: {
-                type: 'array',
-                maxItems: 3,
-                items: {
-                  type: 'object',
-                  additionalProperties: false,
-                  required: ['ref', 'strength'],
-                  properties: {
-                    ref: { type: 'string', minLength: 1 },
-                    strength: { type: 'number', minimum: 0, maximum: 1 },
-                  },
-                },
-              },
-              column_span: { type: 'integer', minimum: 1, maximum: 4 },
             },
           },
         },
@@ -830,10 +770,12 @@ Shape:
 create_text:
 {
   "type": "create_text",
-  "ref": "<temp id for layout — required when using layout>",
+  "ref": "<temp id — required for multi-create layout>",
+  "layout_cell": "<optional shared cell id — consecutive ops only>",
+  "column_span": 1|2|3|4,  /* optional; applies to the containing cell */
   "text": "<plain string — optional if rich_text provided>",
   "rich_text": { /* optional structured formatting — see RICH TEXT */ },
-  "placement":  /* omit when item is in layout.items */
+  "placement":  /* omit when using response-level layout */
     { "mode": "viewport_default" }
     | { "mode": "relative_to_element", "anchor_element_id": "<id from context>", "relation": "left_of"|"right_of"|"above"|"below"|"near" }
     | { "mode": "absolute", "x": <number>, "y": <number> }
@@ -843,8 +785,9 @@ create_equation:
 {
   "type": "create_equation",
   "ref": "<temp id for layout>",
+  "layout_cell": "<optional shared cell id>",
   "latex": "<LaTeX body without surrounding $$>",
-  "placement": /* omit when in layout.items */
+  "placement": /* omit when using response-level layout */
 }
 
 update_text:
@@ -882,6 +825,7 @@ create_structured_note (ONLY when a note structure is selected):
 {
   "type": "create_structured_note",
   "ref": "<temp id for layout>",
+  "layout_cell": "<optional shared cell id>",
   "structure_id": "<exact selected structure id>",
   "fields": {
     "<field_id>": { "content": "<text for TEXT fields>" }
@@ -889,13 +833,14 @@ create_structured_note (ONLY when a note structure is selected):
       | { "root": { "content": "...", "children": [ /* recursive */ ] } }
       | null
   },
-  "placement": /* omit when in layout.items */
+  "placement": /* omit when using response-level layout */
 }
 
 create_graph (new interactive GraphElement):
 {
   "type": "create_graph",
   "ref": "<temp id for layout>",
+  "layout_cell": "<optional shared cell id>",
   "expressions": [
     { "expression": "x**2", "visible": true, "domain_min": null, "domain_max": null }
   ],
@@ -905,45 +850,33 @@ create_graph (new interactive GraphElement):
     "title": null, "x_axis_label": null, "y_axis_label": null,
     "show_grid": true, "show_x_axis": true, "show_y_axis": true
   },
-  "placement": /* omit when in layout.items */
+  "placement": /* omit when using response-level layout */
 }
 
 LAYOUT (mandatory for 2+ related creates that would otherwise all use viewport_default):
 
-PREFERRED — relationship_grid (High-mode educational plans; app assigns rows/columns):
+PREFERRED — chronological_grid (High-mode default; operation order is reading order):
 {
   "layout": {
-    "type": "relationship_grid",
-    "placement": { "mode": "viewport_default" },
-    "sections": [
-      { "id": "fundamentals", "order": 0, "title": "Fundamentals" },
-      { "id": "maths", "order": 1, "title": "Mathematics" }
-    ],
-    "items": [
-      {
-        "ref": "intro",
-        "section": "fundamentals",
-        "preferred_order": 0,
-        "requires": [],
-        "relations": [{ "ref": "equation", "strength": 0.95 }]
-      },
-      {
-        "ref": "equation",
-        "section": "fundamentals",
-        "preferred_order": 1,
-        "requires": ["intro"],
-        "relations": [{ "ref": "graph", "strength": 0.85 }],
-        "column_span": 2
-      }
-    ]
-  }
+    "type": "chronological_grid",
+    "placement": { "mode": "viewport_default" }
+  },
+  "operations": [
+    { "type": "create_text", "ref": "intro", "layout_cell": "cell_1", "text": "…" },
+    { "type": "create_equation", "ref": "eq", "layout_cell": "cell_1", "latex": "E=F/q" },
+    { "type": "create_graph", "ref": "graph", "layout_cell": "cell_2", … },
+    { "type": "create_text", "ref": "example", "layout_cell": "cell_3", "text": "…" }
+  ]
 }
-Rules for relationship_grid:
-- Assign every created item via ref. No row/column — the app optimises placement.
-- At most 3 outgoing relations per item; strengths in [0,1]; no self-links; targets must be created refs.
-- requires[] = hard prerequisites (must appear earlier in reading order). No cycles.
-- Sections are contiguous topic bands in order; do not invent permanent section rectangles.
-- Relations are layout preferences only — do not emit ConnectorElements for them.
+Rules for chronological_grid:
+- Emit creation operations in the order the learner should read them (left→right, then top→bottom).
+- Optional layout_cell groups consecutive creates into one grid cell (vertical stack, max 4).
+- Objects sharing a layout_cell MUST be contiguous in the operations array — non-contiguous reuse is rejected.
+- Omit layout_cell to give each object its own cell.
+- Do NOT assign row/column. Do NOT emit relations, preferred_order, requires, or topic sections for layout.
+- Optional column_span on a create (1–4) widens that object's cell.
+- The app measures sizes, stacks cell members, wraps rows, and places the WHOLE group collision-free.
+- relationship_grid is no longer supported and will be rejected.
 
 EXPLICIT grid (only when the user demands a specific arrangement):
 {
@@ -998,7 +931,7 @@ NODE_SECTION fields:
 Rules:
 - Never invent element IDs, node IDs, connector IDs, structure IDs, graph expression IDs, or point IDs.
 - Prefer relative_to_element over absolute for "next to / below / above / left / right" of ONE object.
-- Prefer relationship_grid for educational multi-element plans; use explicit grid only for user-specified arrangements.
+- Prefer chronological_grid for educational multi-element plans; use explicit grid only for user-specified arrangements.
 - Never invent world coordinates to avoid overlaps — the application guarantees geometric validity.
 - When a structure is selected and the user asks for new structured content, use create_structured_note — do NOT recreate the layout with create_text/create_equation/create_connector.
 - Omit or null optional structure fields when there is no meaningful content.

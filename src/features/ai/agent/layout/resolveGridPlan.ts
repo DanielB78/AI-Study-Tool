@@ -4,8 +4,13 @@
 
 import type { Camera, CanvasElement, StyleDefaults } from '../../../../types/canvas';
 import type { NoteStructure } from '../../../structures/types';
-import type { AnyLayoutSpec, CanvasOperation, GridLayoutSpec } from '../operations';
-import { isRelationshipGridLayout } from '../operations';
+import type {
+  AnyLayoutSpec,
+  CanvasOperation,
+  ChronologicalGridLayoutSpec,
+  GridLayoutSpec,
+} from '../operations';
+import { isChronologicalGridLayout } from '../operations';
 import {
   getDefaultViewportSize,
   getVisibleWorldBounds,
@@ -22,7 +27,11 @@ import {
   normalizeGridLayout,
   reduceColumnsForWidth,
 } from './gridReflow';
-import { optimiseRelationshipGrid } from './relationshipOptimiser';
+import {
+  calculateChronologicalCellGrid,
+  ChronologicalCellLayoutError,
+  groupCreationOpsIntoCells,
+} from './chronologicalCellLayout';
 import type { CanvasPlacementResult, GridLayoutResult, LayoutDebugInfo } from './types';
 
 export type ResolveGridPlanInput = {
@@ -41,7 +50,7 @@ export type ResolveGridPlanResult = {
   placement: CanvasPlacementResult;
   debug: LayoutDebugInfo;
   /** Effective layout after reflow (may differ from LLM request). */
-  effectiveLayout: GridLayoutSpec;
+  effectiveLayout: GridLayoutSpec | ChronologicalGridLayoutSpec;
   /** ref → world position + size for element creation */
   byRef: Map<
     string,
@@ -54,40 +63,230 @@ function countRows(layout: GridLayoutSpec): number {
   return Math.max(0, ...layout.items.map((i) => i.row)) + 1;
 }
 
-export function resolveGridPlan(input: ResolveGridPlanInput): ResolveGridPlanResult {
-  const diagnostics: string[] = [];
-  let relationshipDebug: LayoutDebugInfo['relationshipOptimiser'];
+function finalizePlacement(input: {
+  grid: GridLayoutResult;
+  placementSpec: GridLayoutSpec['placement'];
+  camera: Camera;
+  elements: CanvasElement[];
+  viewport: ViewportSize;
+  includeHandwriting?: boolean;
+  diagnostics: string[];
+  objectCount: number;
+  maxColumns: number;
+  requestedColumns: number;
+  requestedRows: number;
+  columns: number;
+  rows: number;
+  wrapped: boolean;
+  wrapReason: string;
+  widthWrapped: boolean;
+  chronologicalCells?: LayoutDebugInfo['chronologicalCells'];
+  effectiveLayout: GridLayoutSpec | ChronologicalGridLayoutSpec;
+}): ResolveGridPlanResult {
+  const obstacles = collectCanvasObstacles(input.elements, {
+    includeHandwriting: input.includeHandwriting,
+    margin: GRID_LAYOUT_CONFIG.collisionMargin,
+  });
 
-  // Relationship-grid → explicit grid via semantic optimiser.
-  let workingLayout: GridLayoutSpec;
-  if (isRelationshipGridLayout(input.layout)) {
-    const optimised = optimiseRelationshipGrid(input.layout);
-    diagnostics.push(...optimised.diagnostics);
-    workingLayout = optimised.grid;
-    relationshipDebug = {
-      initialCost: optimised.initialCost,
-      finalCost: optimised.finalCost,
-      semanticCostInitial: optimised.semanticCostInitial,
-      semanticCostFinal: optimised.semanticCostFinal,
-      orderingCostInitial: optimised.orderingCostInitial,
-      orderingCostFinal: optimised.orderingCostFinal,
-      compactnessCostInitial: optimised.compactnessCostInitial,
-      compactnessCostFinal: optimised.compactnessCostFinal,
-      iterations: optimised.iterations,
-      acceptedMoves: optimised.acceptedMoves,
-      edges: optimised.undirectedEdges,
-      sections: optimised.sectionOrder,
-      itemMeta: input.layout.items.map((it) => ({
-        ref: it.ref,
-        section: it.section,
-        preferredOrder: it.preferred_order ?? 0,
-        requires: [...(it.requires ?? [])],
-        relations: [...(it.relations ?? [])],
-      })),
-    };
-  } else {
-    workingLayout = input.layout;
+  const placement = placeGridOnCanvas({
+    grid: input.grid,
+    placement: input.placementSpec,
+    camera: input.camera,
+    elements: input.elements,
+    obstacles,
+    viewport: input.viewport,
+  });
+
+  const worldRects = placement.worldItems.map((i) => i.worldCollision);
+  for (let i = 0; i < worldRects.length; i++) {
+    for (let j = i + 1; j < worldRects.length; j++) {
+      if (collidesAny(worldRects[i]!, [worldRects[j]!], 0)) {
+        throw new Error(
+          `Final validation failed: generated items "${placement.worldItems[i]!.ref}" and "${placement.worldItems[j]!.ref}" overlap.`,
+        );
+      }
+    }
+    if (collidesAny(worldRects[i]!, obstacles, 0)) {
+      throw new Error(
+        `Final validation failed: "${placement.worldItems[i]!.ref}" overlaps existing canvas content.`,
+      );
+    }
   }
+
+  const byRef = new Map(
+    placement.worldItems.map((i) => [
+      i.ref,
+      { x: i.worldX, y: i.worldY, width: i.width, height: i.height },
+    ]),
+  );
+
+  const debug: LayoutDebugInfo = {
+    objectCount: input.objectCount,
+    maxColumns: input.maxColumns,
+    requestedColumns: input.requestedColumns,
+    requestedRows: input.requestedRows,
+    columns: input.columns,
+    rows: input.rows,
+    wrapped: input.wrapped,
+    wrapReason: input.wrapReason,
+    widthWrapped: input.widthWrapped,
+    columnWidths: input.grid.columnWidths,
+    rowHeights: input.grid.rowHeights,
+    items: placement.worldItems.map((i) => ({
+      ref: i.ref,
+      row: i.row,
+      column: i.column,
+      columnSpan: i.columnSpan,
+      width: i.width,
+      height: i.height,
+      localX: i.localX,
+      localY: i.localY,
+      textAutoSize: i.textAutoSize,
+    })),
+    localBounds: input.grid.bounds,
+    preferredOrigin: placement.preferredOrigin,
+    finalOrigin: placement.origin,
+    candidatesTested: placement.candidatesTested,
+    collidedAtPreferred: placement.collidedAtPreferred,
+    collisionFree: true,
+    obstacleCount: obstacles.length,
+    diagnostics: input.diagnostics,
+    ...(input.chronologicalCells
+      ? { chronologicalCells: input.chronologicalCells }
+      : {}),
+  };
+
+  return {
+    grid: input.grid,
+    placement,
+    debug,
+    effectiveLayout: input.effectiveLayout,
+    byRef,
+  };
+}
+
+function resolveChronologicalGrid(
+  input: ResolveGridPlanInput,
+  layout: ChronologicalGridLayoutSpec,
+): ResolveGridPlanResult {
+  const diagnostics: string[] = [];
+  let grouped;
+  try {
+    grouped = groupCreationOpsIntoCells(input.operations);
+  } catch (err) {
+    if (err instanceof ChronologicalCellLayoutError) {
+      throw new Error(err.message);
+    }
+    throw err;
+  }
+  diagnostics.push(...grouped.diagnostics);
+
+  const objectCount = grouped.objectCount;
+  const maxColumns = maxColumnsForObjectCount(objectCount);
+  const requestedColumns = layout.columns ?? maxColumns;
+  const refs = new Set(grouped.objectOrder);
+
+  const measured = measureLayoutItems(input.operations, refs, {
+    style: input.style,
+    getStructureById: input.getStructureById,
+  });
+
+  if (measured.length !== objectCount) {
+    const have = new Set(measured.map((m) => m.ref));
+    const missing = grouped.objectOrder.filter((r) => !have.has(r));
+    throw new Error(
+      `Could not measure layout items: missing refs ${missing.join(', ')}.`,
+    );
+  }
+
+  let calc = calculateChronologicalCellGrid({
+    layout,
+    operations: input.operations,
+    measured,
+    objectCount,
+  });
+  diagnostics.push(...calc.grid.diagnostics);
+
+  const viewport = input.viewport ?? getDefaultViewportSize();
+  const visible = getVisibleWorldBounds(input.camera, viewport);
+  const usableWidth = visible.width * 0.92;
+
+  let columns = calc.effectiveCellLayout.columns;
+  let wrapped = calc.cellDebug.wrapped || columns < requestedColumns;
+  let wrapReason = calc.cellDebug.wrapReason;
+  let widthWrapped = false;
+  let guard = 0;
+
+  while (
+    calc.grid.bounds.width > Math.max(usableWidth * 1.15, 480) &&
+    columns > 1 &&
+    guard < 4
+  ) {
+    guard += 1;
+    const nextColumns = columns - 1;
+    calc = calculateChronologicalCellGrid({
+      layout: { ...layout, columns: nextColumns },
+      operations: input.operations,
+      measured,
+      objectCount,
+    });
+    diagnostics.push(
+      `Physical width wrap: reduced chronological columns ${columns} → ${nextColumns}.`,
+    );
+    diagnostics.push(...calc.grid.diagnostics);
+    columns = nextColumns;
+    wrapped = true;
+    widthWrapped = true;
+    wrapReason = 'physical_width';
+  }
+
+  if (columns > maxColumns) {
+    calc = calculateChronologicalCellGrid({
+      layout: { ...layout, columns: maxColumns },
+      operations: input.operations,
+      measured,
+      objectCount,
+    });
+    diagnostics.push(...calc.grid.diagnostics);
+    columns = maxColumns;
+    wrapped = true;
+    wrapReason = 'exceeded_max_columns';
+  }
+
+  const rows =
+    calc.cellDebug.cells.length === 0
+      ? 0
+      : Math.max(...calc.cellDebug.cells.map((c) => c.row)) + 1;
+
+  return finalizePlacement({
+    grid: calc.grid,
+    placementSpec: layout.placement,
+    camera: input.camera,
+    elements: input.elements,
+    viewport,
+    includeHandwriting: input.includeHandwriting,
+    diagnostics,
+    objectCount,
+    maxColumns,
+    requestedColumns,
+    requestedRows: 0,
+    columns,
+    rows,
+    wrapped,
+    wrapReason,
+    widthWrapped,
+    chronologicalCells: calc.cellDebug,
+    effectiveLayout: { type: 'chronological_grid', placement: layout.placement, columns },
+  });
+}
+
+export function resolveGridPlan(input: ResolveGridPlanInput): ResolveGridPlanResult {
+  if (isChronologicalGridLayout(input.layout)) {
+    return resolveChronologicalGrid(input, input.layout);
+  }
+
+  const diagnostics: string[] = [];
+  const workingLayout: GridLayoutSpec = input.layout;
 
   const objectCount = workingLayout.items.length;
   const maxColumns = maxColumnsForObjectCount(objectCount);
@@ -160,45 +359,15 @@ export function resolveGridPlan(input: ResolveGridPlanInput): ResolveGridPlanRes
     diagnostics.push(...grid.diagnostics);
   }
 
-  const obstacles = collectCanvasObstacles(input.elements, {
-    includeHandwriting: input.includeHandwriting,
-    margin: GRID_LAYOUT_CONFIG.collisionMargin,
-  });
-
-  const placement = placeGridOnCanvas({
+  const finalRows = countRows(layout);
+  return finalizePlacement({
     grid,
-    placement: layout.placement,
+    placementSpec: layout.placement,
     camera: input.camera,
     elements: input.elements,
-    obstacles,
     viewport,
-  });
-
-  const worldRects = placement.worldItems.map((i) => i.worldCollision);
-  for (let i = 0; i < worldRects.length; i++) {
-    for (let j = i + 1; j < worldRects.length; j++) {
-      if (collidesAny(worldRects[i]!, [worldRects[j]!], 0)) {
-        throw new Error(
-          `Final validation failed: generated items "${placement.worldItems[i]!.ref}" and "${placement.worldItems[j]!.ref}" overlap.`,
-        );
-      }
-    }
-    if (collidesAny(worldRects[i]!, obstacles, 0)) {
-      throw new Error(
-        `Final validation failed: "${placement.worldItems[i]!.ref}" overlaps existing canvas content.`,
-      );
-    }
-  }
-
-  const byRef = new Map(
-    placement.worldItems.map((i) => [
-      i.ref,
-      { x: i.worldX, y: i.worldY, width: i.width, height: i.height },
-    ]),
-  );
-
-  const finalRows = countRows(layout);
-  const debug: LayoutDebugInfo = {
+    includeHandwriting: input.includeHandwriting,
+    diagnostics,
     objectCount,
     maxColumns,
     requestedColumns,
@@ -208,31 +377,8 @@ export function resolveGridPlan(input: ResolveGridPlanInput): ResolveGridPlanRes
     wrapped,
     wrapReason,
     widthWrapped,
-    columnWidths: grid.columnWidths,
-    rowHeights: grid.rowHeights,
-    items: placement.worldItems.map((i) => ({
-      ref: i.ref,
-      row: i.row,
-      column: i.column,
-      columnSpan: i.columnSpan,
-      width: i.width,
-      height: i.height,
-      localX: i.localX,
-      localY: i.localY,
-      textAutoSize: i.textAutoSize,
-    })),
-    localBounds: grid.bounds,
-    preferredOrigin: placement.preferredOrigin,
-    finalOrigin: placement.origin,
-    candidatesTested: placement.candidatesTested,
-    collidedAtPreferred: placement.collidedAtPreferred,
-    collisionFree: true,
-    obstacleCount: obstacles.length,
-    diagnostics,
-    ...(relationshipDebug ? { relationshipOptimiser: relationshipDebug } : {}),
-  };
-
-  return { grid, placement, debug, effectiveLayout: layout, byRef };
+    effectiveLayout: layout,
+  });
 }
 
 /** Preview-only resolve for debug UI. */
@@ -240,15 +386,21 @@ export function previewGridPlan(input: ResolveGridPlanInput): LayoutDebugInfo {
   try {
     return resolveGridPlan(input).debug;
   } catch (err) {
-    const n = input.layout.items.length;
-    const requestedColumns = isRelationshipGridLayout(input.layout)
+    const n = isChronologicalGridLayout(input.layout)
+      ? input.operations.filter((op) =>
+          ['create_text', 'create_equation', 'create_graph', 'create_structured_note'].includes(
+            op.type,
+          ),
+        ).length
+      : input.layout.items.length;
+    const requestedColumns = isChronologicalGridLayout(input.layout)
       ? (input.layout.columns ?? maxColumnsForObjectCount(n))
       : input.layout.columns;
     return {
       objectCount: n,
       maxColumns: maxColumnsForObjectCount(n),
       requestedColumns,
-      requestedRows: isRelationshipGridLayout(input.layout) ? 0 : countRows(input.layout),
+      requestedRows: isChronologicalGridLayout(input.layout) ? 0 : countRows(input.layout),
       columns: requestedColumns,
       rows: 0,
       wrapped: false,

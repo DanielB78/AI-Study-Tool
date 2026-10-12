@@ -9,8 +9,36 @@ export type {
   GridLayoutItemSpec,
   GridLayoutSpec,
   AnyLayoutSpec,
-  RelationshipGridLayoutSpec,
+  ChronologicalGridLayoutSpec,
 } from '../operations';
+
+/** Debug snapshot for chronological multi-object cell layout. */
+export type ChronologicalCellDebug = {
+  cellCount: number;
+  objectCount: number;
+  maxObjectsPerCell: number;
+  chronologicalOrderingValid: boolean;
+  cells: Array<{
+    cellId: string;
+    originalCellId: string;
+    refs: string[];
+    row: number;
+    column: number;
+    columnSpan: number;
+    width: number;
+    height: number;
+    autoSplit: boolean;
+  }>;
+  objectOrder: string[];
+  splits: Array<{
+    originalCellId: string;
+    memberRefs: string[];
+    partCellIds: string[];
+    partSizes: number[];
+  }>;
+  wrapped: boolean;
+  wrapReason: string;
+};
 
 /** Per-textbox auto-size diagnostics for layout debug. */
 export type TextAutoSizeDebug = {
@@ -129,26 +157,6 @@ export type LayoutDebugInfo = {
   obstacleCount: number;
   diagnostics: string[];
   error?: string;
-  /** Present when the plan used relationship_grid. */
-  relationshipOptimiser?: {
-    initialCost: number;
-    finalCost: number;
-    semanticCostInitial: number;
-    semanticCostFinal: number;
-    orderingCostInitial: number;
-    orderingCostFinal: number;
-    compactnessCostInitial: number;
-    compactnessCostFinal: number;
-    iterations: number;
-    acceptedMoves: number;
-    edges: Array<{ a: string; b: string; strength: number }>;
-    sections: Array<{ id: string; order: number; title?: string }>;
-    itemMeta: Array<{
-      ref: string;
-      section: string;
-      preferredOrder: number;
-      requires: string[];
-      relations: Array<{ ref: string; strength: number }>;
-    }>;
-  };
+  /** Present when the plan used chronological_grid. */
+  chronologicalCells?: ChronologicalCellDebug;
 };

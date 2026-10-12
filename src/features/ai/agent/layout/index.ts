@@ -19,12 +19,14 @@ export {
   type WrapReason,
 } from './gridReflow';
 export {
-  optimiseRelationshipGrid,
-  normalizeUndirectedRelations,
-  topologicalOrder,
-  RELATIONSHIP_OPTIMISER_CONFIG,
-  type RelationshipOptimiserResult,
-} from './relationshipOptimiser';
+  groupCreationOpsIntoCells,
+  calculateChronologicalCellGrid,
+  assignCellsToGrid,
+  MAX_OBJECTS_PER_CELL,
+  ChronologicalCellLayoutError,
+  type LayoutCell,
+  type GroupCellsResult,
+} from './chronologicalCellLayout';
 export {
   measureLayoutItems,
   isGridCreatableOp,
@@ -46,4 +48,5 @@ export type {
   CanvasPlacementResult,
   LayoutDebugInfo,
   TextAutoSizeDebug,
+  ChronologicalCellDebug,
 } from './types';

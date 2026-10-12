@@ -1852,35 +1852,28 @@ export function RagDebugPanel() {
                         `Collided at preferred: ${layoutDebug.collidedAtPreferred}`,
                         `Collision validation: ${layoutDebug.collisionFree ? 'PASSED' : 'FAILED'}`,
                         `Obstacles: ${layoutDebug.obstacleCount}`,
-                        ...(layoutDebug.relationshipOptimiser
+                        ...(layoutDebug.chronologicalCells
                           ? [
-                              'Relationship optimiser:',
-                              `  Cost: ${layoutDebug.relationshipOptimiser.initialCost.toFixed(3)} → ${layoutDebug.relationshipOptimiser.finalCost.toFixed(3)}`,
-                              `  Semantic: ${layoutDebug.relationshipOptimiser.semanticCostInitial.toFixed(3)} → ${layoutDebug.relationshipOptimiser.semanticCostFinal.toFixed(3)}`,
-                              `  Ordering: ${layoutDebug.relationshipOptimiser.orderingCostInitial.toFixed(3)} → ${layoutDebug.relationshipOptimiser.orderingCostFinal.toFixed(3)}`,
-                              `  Compactness: ${layoutDebug.relationshipOptimiser.compactnessCostInitial.toFixed(3)} → ${layoutDebug.relationshipOptimiser.compactnessCostFinal.toFixed(3)}`,
-                              `  Iterations: ${layoutDebug.relationshipOptimiser.iterations}  Accepted moves: ${layoutDebug.relationshipOptimiser.acceptedMoves}`,
-                              '  Sections:',
-                              ...layoutDebug.relationshipOptimiser.sections.map(
-                                (s) =>
-                                  `    [${s.order}] ${s.id}${s.title ? ` — ${s.title}` : ''}`,
-                              ),
-                              '  Edges:',
-                              ...layoutDebug.relationshipOptimiser.edges.map(
-                                (e) =>
-                                  `    ${e.a} ↔ ${e.b} (${e.strength.toFixed(2)})`,
-                              ),
-                              '  Item meta:',
-                              ...layoutDebug.relationshipOptimiser.itemMeta.map((m) =>
-                                [
-                                  `    ${m.ref}  section=${m.section}  order=${m.preferredOrder}`,
-                                  m.requires.length
-                                    ? `      requires: ${m.requires.join(', ')}`
-                                    : '      requires: (none)',
-                                  m.relations.length
-                                    ? `      relations: ${m.relations.map((r) => `${r.ref}:${r.strength.toFixed(2)}`).join(', ')}`
-                                    : '      relations: (none)',
-                                ].join('\n'),
+                              `Generated cells: ${layoutDebug.chronologicalCells.cellCount}`,
+                              `Chronological ordering: ${layoutDebug.chronologicalCells.chronologicalOrderingValid ? 'VALID' : 'INVALID'}`,
+                              `Maximum objects per cell: ${layoutDebug.chronologicalCells.maxObjectsPerCell}`,
+                              `Object creation order: ${layoutDebug.chronologicalCells.objectOrder.join(' → ')}`,
+                              ...(layoutDebug.chronologicalCells.splits.length
+                                ? [
+                                    'Automatic cell splitting:',
+                                    ...layoutDebug.chronologicalCells.splits.map(
+                                      (s) =>
+                                        `  ${s.originalCellId}: [${s.memberRefs.join(', ')}] → ${s.partCellIds.map((id, i) => `${id}(${s.partSizes[i]})`).join(' + ')}`,
+                                    ),
+                                  ]
+                                : ['Automatic cell splitting: none']),
+                              'Cell sequence:',
+                              ...layoutDebug.chronologicalCells.cells.map(
+                                (c, idx) =>
+                                  [
+                                    `  Cell ${idx + 1} (${c.cellId})${c.autoSplit ? ' [auto-split]' : ''}: r${c.row}c${c.column} span${c.columnSpan} ${c.width.toFixed(0)}×${c.height.toFixed(0)}`,
+                                    ...c.refs.map((r) => `    - ${r}`),
+                                  ].join('\n'),
                               ),
                             ]
                           : []),
