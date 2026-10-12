@@ -42,6 +42,10 @@ export {
   type ParseContext,
   type DescribePlanOptions,
 } from './parser';
+export {
+  CanvasAgentExecuteError,
+  type ExecuteErrorStage,
+} from './parseErrors';
 export { executeCanvasOperations, type ExecuteAgentOpsResult } from './executor';
 export { executeAgentOperationsLive, createLiveAgentExecutorTarget } from './liveExecutor';
 export { resolvePlacement, DEFAULT_ELEMENT_GAP } from './placementService';
