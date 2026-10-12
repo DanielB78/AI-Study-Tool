@@ -72,17 +72,36 @@ export function isExplicitGridLayout(layout: AnyLayoutSpec): layout is GridLayou
   return layout.type === 'grid';
 }
 
+/** Lightweight semantic role for presentation / debug (does not reorder). */
+export const LAYOUT_ROLES = [
+  'introduction',
+  'explanation',
+  'mathematical_step',
+  'visualisation',
+  'given_information',
+  'final_result',
+  'verification',
+] as const;
+
+export type LayoutRole = (typeof LAYOUT_ROLES)[number];
+
+/** LLM-selected output preset; app maps it to OutputLayoutConfig. */
+export type AgentOutputType = 'lesson' | 'step_by_step';
+
 /** Optional layout grouping fields shared by creatable operations. */
 export type CreationLayoutFields = {
   /** Temporary ref for layout / chronological ordering. */
   ref?: OperationRef;
   /**
    * Optional cell id — consecutive creates with the same id share one grid cell
-   * (max 4; oversized groups are auto-split). Non-contiguous reuse is rejected.
+   * (max depends on output_type; oversized groups are auto-split).
+   * Non-contiguous reuse is rejected.
    */
   layout_cell?: string;
-  /** Optional column span for the containing cell (defaults to 1). */
+  /** Optional column span for the containing cell (defaults to 1; lesson grid). */
   column_span?: number;
+  /** Optional presentation role — does not change operation order. */
+  layout_role?: LayoutRole;
 };
 
 /** Structured rich-text document (mirrors features/text/richText). */
@@ -313,6 +332,12 @@ export type CanvasOperation =
 export type CanvasAgentResponse = {
   operations: CanvasOperation[];
   /**
+   * Output preset selected by the LLM from the user request.
+   * Defaults to `lesson` when omitted. Controls max objects/cell and
+   * in-cell arrangement (lesson vertical stack vs step_by_step horizontal pair).
+   */
+  output_type?: AgentOutputType;
+  /**
    * Required when creating multiple related objects with viewport_default.
    * Prefer `chronological_grid` (operation order + optional layout_cell);
    * use explicit `grid` only when the user demands a specific arrangement.
@@ -336,6 +361,10 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
   additionalProperties: false,
   required: ['operations'],
   properties: {
+    output_type: {
+      type: 'string',
+      enum: ['lesson', 'step_by_step'],
+    },
     layout: {
       oneOf: [
         { $ref: '#/$defs/chronologicalGridLayout' },
@@ -357,6 +386,7 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               rich_text: { $ref: '#/$defs/richText' },
               ref: { type: 'string', minLength: 1 },
               layout_cell: { type: 'string', minLength: 1 },
+              layout_role: { $ref: '#/$defs/layoutRole' },
               column_span: { type: 'integer', minimum: 1, maximum: 4 },
               placement: { $ref: '#/$defs/placement' },
             },
@@ -370,6 +400,7 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               latex: { type: 'string', minLength: 1 },
               ref: { type: 'string', minLength: 1 },
               layout_cell: { type: 'string', minLength: 1 },
+              layout_role: { $ref: '#/$defs/layoutRole' },
               column_span: { type: 'integer', minimum: 1, maximum: 4 },
               placement: { $ref: '#/$defs/placement' },
             },
@@ -394,6 +425,7 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               structure_id: { type: 'string', minLength: 1 },
               ref: { type: 'string', minLength: 1 },
               layout_cell: { type: 'string', minLength: 1 },
+              layout_role: { $ref: '#/$defs/layoutRole' },
               column_span: { type: 'integer', minimum: 1, maximum: 4 },
               fields: {
                 type: 'object',
@@ -450,6 +482,7 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               settings: { $ref: '#/$defs/graphSettings' },
               ref: { type: 'string', minLength: 1 },
               layout_cell: { type: 'string', minLength: 1 },
+              layout_role: { $ref: '#/$defs/layoutRole' },
               column_span: { type: 'integer', minimum: 1, maximum: 4 },
               placement: { $ref: '#/$defs/placement' },
             },
@@ -658,6 +691,18 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
         },
       ],
     },
+    layoutRole: {
+      type: 'string',
+      enum: [
+        'introduction',
+        'explanation',
+        'mathematical_step',
+        'visualisation',
+        'given_information',
+        'final_result',
+        'verification',
+      ],
+    },
     chronologicalGridLayout: {
       type: 'object',
       additionalProperties: false,
@@ -763,16 +808,23 @@ Return ONLY valid JSON (no Markdown, no code fences, no prose).
 
 Shape:
 {
+  "output_type": "lesson" | "step_by_step",  /* REQUIRED for multi-create educational plans; default lesson */
   "operations": [ /* one or more */ ],
-  "layout": { /* REQUIRED when creating 2+ related objects — see GRID LAYOUT */ }
+  "layout": { /* REQUIRED when creating 2+ related objects — see LAYOUT */ }
 }
+
+OUTPUT TYPE:
+- "lesson" — comprehensive topic coverage; chronological multi-column grid; up to 4 objects per layout_cell (vertical stack).
+- "step_by_step" — derivations / worked solutions; ONE vertical column of cells; up to 2 objects per layout_cell (horizontal: explanation left, math/graph right).
+Select from the user request (derive/solve/work through → step_by_step; explain/teach topic → lesson). Ambiguous → lesson. Respect explicit user requests.
 
 create_text:
 {
   "type": "create_text",
   "ref": "<temp id — required for multi-create layout>",
   "layout_cell": "<optional shared cell id — consecutive ops only>",
-  "column_span": 1|2|3|4,  /* optional; applies to the containing cell */
+  "layout_role": "introduction"|"explanation"|"mathematical_step"|"visualisation"|"given_information"|"final_result"|"verification",
+  "column_span": 1|2|3|4,  /* optional; lesson grid only */
   "text": "<plain string — optional if rich_text provided>",
   "rich_text": { /* optional structured formatting — see RICH TEXT */ },
   "placement":  /* omit when using response-level layout */
@@ -786,6 +838,7 @@ create_equation:
   "type": "create_equation",
   "ref": "<temp id for layout>",
   "layout_cell": "<optional shared cell id>",
+  "layout_role": "mathematical_step"|"final_result"|…,
   "latex": "<LaTeX body without surrounding $$>",
   "placement": /* omit when using response-level layout */
 }
@@ -855,28 +908,39 @@ create_graph (new interactive GraphElement):
 
 LAYOUT (mandatory for 2+ related creates that would otherwise all use viewport_default):
 
-PREFERRED — chronological_grid (High-mode default; operation order is reading order):
+PREFERRED — chronological_grid (operation order is reading order; geometry depends on output_type):
+
+LESSON example:
 {
-  "layout": {
-    "type": "chronological_grid",
-    "placement": { "mode": "viewport_default" }
-  },
+  "output_type": "lesson",
+  "layout": { "type": "chronological_grid", "placement": { "mode": "viewport_default" } },
   "operations": [
-    { "type": "create_text", "ref": "intro", "layout_cell": "cell_1", "text": "…" },
-    { "type": "create_equation", "ref": "eq", "layout_cell": "cell_1", "latex": "E=F/q" },
-    { "type": "create_graph", "ref": "graph", "layout_cell": "cell_2", … },
-    { "type": "create_text", "ref": "example", "layout_cell": "cell_3", "text": "…" }
+    { "type": "create_text", "ref": "intro", "layout_cell": "cell_1", "layout_role": "introduction", "text": "…" },
+    { "type": "create_equation", "ref": "eq", "layout_cell": "cell_1", "layout_role": "mathematical_step", "latex": "E=F/q" },
+    { "type": "create_graph", "ref": "graph", "layout_cell": "cell_2", "layout_role": "visualisation", … }
   ]
 }
-Rules for chronological_grid:
-- Emit creation operations in the order the learner should read them (left→right, then top→bottom).
-- Optional layout_cell groups consecutive creates into one grid cell (vertical stack, max 4).
-- Objects sharing a layout_cell MUST be contiguous in the operations array — non-contiguous reuse is rejected.
-- Omit layout_cell to give each object its own cell.
-- Do NOT assign row/column. Do NOT emit relations, preferred_order, requires, or topic sections for layout.
-- Optional column_span on a create (1–4) widens that object's cell.
-- The app measures sizes, stacks cell members, wraps rows, and places the WHOLE group collision-free.
-- relationship_grid is no longer supported and will be rejected.
+
+STEP BY STEP example (explanation left, math/graph right; cells stack top→bottom):
+{
+  "output_type": "step_by_step",
+  "layout": { "type": "chronological_grid", "placement": { "mode": "viewport_default" } },
+  "operations": [
+    { "type": "create_text", "ref": "s1e", "layout_cell": "step_1", "layout_role": "explanation", "text": "Restoring force obeys Hooke's law." },
+    { "type": "create_equation", "ref": "s1m", "layout_cell": "step_1", "layout_role": "mathematical_step", "latex": "F=-kx" },
+    { "type": "create_text", "ref": "s2e", "layout_cell": "step_2", "layout_role": "explanation", "text": "Apply Newton's second law." },
+    { "type": "create_equation", "ref": "s2m", "layout_cell": "step_2", "layout_role": "mathematical_step", "latex": "m\\\\frac{d^2x}{dt^2}=-kx" },
+    { "type": "create_equation", "ref": "final", "layout_cell": "result", "layout_role": "final_result", "latex": "x(t)=A\\\\cos(\\\\omega t+\\\\phi)" }
+  ]
+}
+Rules:
+- Emit creation operations in the order the learner should read them.
+- Optional layout_cell groups consecutive creates into one cell (lesson max 4 vertical; step_by_step max 2 horizontal).
+- Contiguous layout_cell members only — non-contiguous reuse is rejected.
+- Omit layout_cell for a solo cell. Single-object step_by_step cells may be full-width (e.g. final_result).
+- Prefer explanation + equation / explanation + graph pairs in step_by_step; do not invent filler objects.
+- Optional layout_role is presentation metadata only — never reorder by role.
+- Do NOT assign row/column or world coordinates. relationship_grid is rejected.
 
 EXPLICIT grid (only when the user demands a specific arrangement):
 {
