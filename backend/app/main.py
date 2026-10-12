@@ -4,27 +4,34 @@ from fastapi.middleware.cors import CORSMiddleware
 from .api import chat, health
 from .config import get_settings
 from .errors import AiServiceError, ai_service_error_handler
+from .rag import routes as rag_routes
+from .rag import embedding_routes
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
         title="AI Study Tool Backend",
-        version="0.1.0",
-        description="Thin LLM proxy for the StudyBoard editor. No board context in v1.",
+        version="0.3.0",
+        description="LLM proxy + RAG indexing + EmbeddingGemma semantic retrieval.",
     )
 
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
         allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "Authorization"],
     )
 
     app.add_exception_handler(AiServiceError, ai_service_error_handler)
     app.include_router(health.router)
     app.include_router(chat.router)
+    app.include_router(rag_routes.router)
+    app.include_router(embedding_routes.router)
+    from .rag.handwriting import routes as handwriting_routes
+
+    app.include_router(handwriting_routes.router)
     return app
 
 

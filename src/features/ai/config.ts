@@ -8,9 +8,15 @@
  */
 const DEFAULT_BASE_URL = 'http://127.0.0.1:8000';
 
+/**
+ * Empty string = same-origin (useful behind a Vite proxy / public tunnel).
+ * Unset env falls back to local backend.
+ */
+const envBaseUrl = import.meta.env.VITE_AI_API_BASE_URL as string | undefined;
 export const AI_API_BASE_URL =
-  (import.meta.env.VITE_AI_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ||
-  DEFAULT_BASE_URL;
+  envBaseUrl !== undefined
+    ? envBaseUrl.replace(/\/$/, '')
+    : DEFAULT_BASE_URL;
 
 /** Request timeout for a full (non-streaming) chat round-trip. */
 export const AI_REQUEST_TIMEOUT_MS = 60_000;

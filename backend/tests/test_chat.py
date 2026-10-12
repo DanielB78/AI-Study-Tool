@@ -9,13 +9,38 @@ from app.main import create_app
 
 
 class FakeProvider(LLMProvider):
-    def __init__(self, text: str = "hello", *, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        text: str = "hello",
+        *,
+        error: Exception | None = None,
+        supports_image_input: bool = True,
+    ) -> None:
         self.text = text
         self.error = error
-        self.calls: list[str] = []
+        self._supports_image_input = supports_image_input
+        self.calls: list[dict] = []
 
-    async def generate(self, prompt: str) -> str:
-        self.calls.append(prompt)
+    @property
+    def supports_image_input(self) -> bool:
+        return self._supports_image_input
+
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        system_instruction: str | None = None,
+        canvas_context: str | None = None,
+        image_attachments=None,
+    ) -> str:
+        self.calls.append(
+            {
+                "prompt": prompt,
+                "system_instruction": system_instruction,
+                "canvas_context": canvas_context,
+                "image_attachments": list(image_attachments or []),
+            }
+        )
         if self.error is not None:
             raise self.error
         return self.text
@@ -73,7 +98,14 @@ def test_chat_success_mocked_provider() -> None:
     assert res.json() == {
         "text": "Faraday's law relates induced EMF to changing flux.",
     }
-    assert provider.calls == ["Explain Faraday's law simply"]
+    assert provider.calls == [
+        {
+            "prompt": "Explain Faraday's law simply",
+            "system_instruction": None,
+            "canvas_context": None,
+            "image_attachments": [],
+        }
+    ]
 
 
 def test_chat_trims_prompt() -> None:
@@ -81,7 +113,42 @@ def test_chat_trims_prompt() -> None:
     client = make_client(provider)
     res = client.post("/api/chat", json={"prompt": "  hello  "})
     assert res.status_code == 200
-    assert provider.calls == ["hello"]
+    assert provider.calls[0]["prompt"] == "hello"
+
+
+def test_chat_with_canvas_context_applies_default_system() -> None:
+    provider = FakeProvider("answered")
+    client = make_client(provider)
+    res = client.post(
+        "/api/chat",
+        json={
+            "prompt": "Explain Gauss",
+            "canvas_context": "CANVAS CONTEXT\n\nID: textbox_18\nTEXT:\nflux",
+        },
+    )
+    assert res.status_code == 200
+    call = provider.calls[0]
+    assert call["prompt"] == "Explain Gauss"
+    assert call["canvas_context"] is not None
+    assert "textbox_18" in (call["canvas_context"] or "")
+    assert call["system_instruction"] is not None
+    assert "study canvas" in (call["system_instruction"] or "").lower()
+
+
+def test_chat_with_explicit_system_instruction() -> None:
+    provider = FakeProvider("ok")
+    client = make_client(provider)
+    res = client.post(
+        "/api/chat",
+        json={
+            "prompt": "hi",
+            "system_instruction": "Custom system",
+            "canvas_context": "CTX",
+        },
+    )
+    assert res.status_code == 200
+    assert provider.calls[0]["system_instruction"] == "Custom system"
+    assert provider.calls[0]["canvas_context"] == "CTX"
 
 
 def test_chat_provider_error_safe_message() -> None:
@@ -137,3 +204,54 @@ def test_chat_missing_api_key_via_real_provider(settings_no_key: Settings) -> No
     assert res.status_code == 503
     assert res.json()["error"]["code"] == "missing_api_key"
     assert "OPENAI_API_KEY" in res.json()["error"]["message"]
+
+
+def test_chat_with_image_attachments_mock() -> None:
+    settings = Settings(llm_provider="mock", openai_api_key="", llm_supports_image_input=True)
+    service = build_llm_service(settings)
+    app = create_app()
+
+    def override() -> LLMService:
+        return service
+
+    from app.llm import service as service_module
+
+    app.dependency_overrides[service_module.get_llm_service] = override
+    client = TestClient(app)
+    res = client.post(
+        "/api/chat",
+        json={
+            "prompt": "Explain the diagram",
+            "image_attachments": [
+                {
+                    "element_id": "image_27",
+                    "data_url": "data:image/png;base64,aaa",
+                }
+            ],
+        },
+    )
+    assert res.status_code == 200
+    text = res.json()["text"]
+    assert "image_attachments received: 1" in text
+    assert "image_27" in text
+
+
+def test_chat_vision_unsupported() -> None:
+    provider = FakeProvider(supports_image_input=False)
+    client = make_client(provider)
+    res = client.post(
+        "/api/chat",
+        json={
+            "prompt": "Explain the diagram",
+            "image_attachments": [
+                {
+                    "element_id": "image_27",
+                    "data_url": "data:image/png;base64,aaa",
+                }
+            ],
+        },
+    )
+    assert res.status_code == 422
+    body = res.json()
+    assert body["error"]["code"] == "vision_unsupported"
+    assert "image_27" in body["error"]["message"]

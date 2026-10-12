@@ -1,89 +1,90 @@
 # AI Study Tool — StudyBoard
 
-Infinite-canvas study/note editor with a first-pass AI chat overlay.
+Infinite-canvas study/note editor with AI chat, RAG text indexing, and semantic retrieval.
 
 ## Stack
 
-- React + TypeScript + Vite
-- react-konva / Konva for rendering
-- Zustand for canvas + AI UI state
-- FastAPI backend that proxies prompts to an LLM (OpenAI by default)
+- React + TypeScript + Vite + Zustand + Konva
+- FastAPI + PostgreSQL + pgvector (`vector(768)` for EmbeddingGemma)
 
 ## Quick start
 
-### 1. Backend (required for AI)
-
 ```bash
+# Backend
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
-# Edit .env and set OPENAI_API_KEY=sk-...
-# Or for key-free local UI testing: LLM_PROVIDER=mock
+# Set DATABASE_URL and EmbeddingGemma:
+#   EMBEDDING_PROVIDER=sentence_transformers
+#   EMBEDDING_MODEL=google/embeddinggemma-300m
+#   EMBEDDING_DIMENSION=768
+#   EMBEDDING_SIMILARITY=cosine
+#   HF_TOKEN=<your Hugging Face token after accepting Gemma terms>
+# Leave RAG_MIN_SIMILARITY unset.
+alembic upgrade head
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+
+# Frontend
+npm install && npm run dev
 ```
 
-- API key: `backend/.env` → `OPENAI_API_KEY`
-- Model: `backend/.env` → `OPENAI_MODEL` (default `gpt-4o-mini`)
-- Provider: `backend/.env` → `LLM_PROVIDER` (`openai` or `mock`)
-- Health check: `GET http://127.0.0.1:8000/health`
-- Chat: `POST http://127.0.0.1:8000/api/chat` with `{ "prompt": "..." }` → `{ "text": "..." }`
+### EmbeddingGemma (local SentenceTransformers)
 
-The backend starts even without an API key; chat requests then return a clear configuration error (unless `LLM_PROVIDER=mock`).
+1. Accept terms on [`google/embeddinggemma-300m`](https://huggingface.co/google/embeddinggemma-300m)
+2. Set `HF_TOKEN` in `backend/.env`
+3. First request downloads/caches the model (CPU works; optional CUDA/MPS)
+4. `GET /api/rag/embedding/status` · `POST /api/rag/embedding/smoke`
+5. Rebuild existing chunks: `POST /api/rag/boards/{id}/embeddings/rebuild`
 
-### 2. Frontend
+Queries use `encode_query`; textbox chunks use `encode_document`. See `backend/README.md`.
+
+## Semantic retrieval + Canvas Agent (structured ops)
+
+```
+prompt → encode_query → cosine → ranked TextElements
+      → pick semantic anchors → spatial radius → context budget
+      → Canvas Editor Agent prompt + JSON schema → Copy LLM Prompt
+      → (you) paste into ChatGPT → Paste LLM Response
+      → Preview AI plan → Apply
+      → validate operations → editor commands (one undo transaction)
+```
+
+**Default: Manual LLM Mode** (`VITE_LLM_EXECUTION_MODE=manual`) — **zero paid LLM API calls**.
+
+The LLM is a **planner**. It returns JSON operations only:
+
+- `create_text` — new TextElement (`viewport_default` | `relative_to_element` | `absolute`)
+- `update_text` — full-text replace of an existing TextElement by ID from context
+
+The app owns IDs, coordinates, collision avoidance, history, and RAG reindex.
+
+- Semantic ranking and spatial expansion are **separate** from edit-target choice
+- Relative placement uses **world-space** coordinates
+- Leave `RAG_MIN_SIMILARITY` unset
+
+Agent docs: `src/features/ai/agent/prompts/canvas_editor_system.md` (mirrored under `backend/app/agent/prompts/`).
+
+### RAG Debug panel (dev)
+
+1. `npm run dev` → click **RAG** (top-right)
+2. Confirm **Manual** under LLM execution
+3. Prompt → **Retrieve** → select anchors (Top 1/3/5)
+4. Adjust spatial radius
+5. **Preview context** / **Preview LLM prompt**
+6. **Copy LLM prompt** → paste into ChatGPT (expect JSON `operations` only)
+7. **Paste LLM response** → **Preview AI plan** → **Apply** (atomic undo)
+
+Automatic mode (`VITE_LLM_EXECUTION_MODE=automatic` or panel toggle) restores **Send with context (API)** and still expects structured JSON.
+
+```js
+window.__RAG_DEBUG__.openPanel()
+```
+
+## Tests
 
 ```bash
-npm install
-npm run dev
-```
-
-Open the Vite URL (usually http://localhost:5173). The floating **Ask AI** control sits at the bottom centre of the canvas.
-
-Optional: set the backend URL in `.env.local` (gitignored):
-
-```
-VITE_AI_API_BASE_URL=http://127.0.0.1:8000
-```
-
-## Scripts
-
-- `npm run dev` — local development server
-- `npm run build` — typecheck + production build
-- `npm run typecheck` — TypeScript only
-- `npm run lint` — oxlint
-- `npm run test` — frontend unit tests (mocked AI)
-- `npm run preview` — preview production build
-
-Backend tests:
-
-```bash
-cd backend && pytest
-```
-
-## AI feature (v1)
-
-This phase is intentionally minimal:
-
-1. User types a prompt in the floating bar
-2. React app calls `POST /api/chat` on our backend
-3. Backend calls the configured LLM via an `LLMService` abstraction
-4. Plain text is shown in a floating response panel above the prompt
-
-**Not included yet:** RAG, embeddings, board context, canvas editing, agents, conversation history, streaming.
-
-Secrets never live in the client — only the backend URL does.
-
-## Architecture notes
-
-Board state is a structured `CanvasDocument` (elements + camera). Konva is a view layer only — never the source of truth. AI prompt state lives in `src/features/ai` (separate Zustand store) and does not mutate the canvas document.
-
-```
-React (Ask AI UI)
-  → AiService.sendPrompt
-  → POST /api/chat
-  → LLMService.generate
-  → OpenAIProvider
-  → LLM
+npm test
+cd backend && DATABASE_URL='...' pytest
+# Optional real model:
+# RUN_EMBEDDINGGEMMA_TESTS=1 HF_TOKEN=… pytest -m embeddinggemma
 ```

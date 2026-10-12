@@ -4,12 +4,43 @@ import type {
   CanvasElement,
   ConnectorElement,
   DrawingElement,
+  EquationElement,
+  GraphElement,
   ImageElement,
   ShapeElement,
   StyleDefaults,
   TextElement,
 } from '../types/canvas';
 import { DOCUMENT_VERSION, DEFAULT_STYLE, createEmptyDocument } from '../types/canvas';
+import { nanoid } from 'nanoid';
+import {
+  DEFAULT_GRAPH_SETTINGS,
+  DEFAULT_GRAPH_VIEWPORT,
+  nextExpressionColor,
+} from '../features/graphs/types';
+import { migrateToCanonicalSource } from '../features/graphs/expressionCodec';
+import { parseRichTextDocument } from '../features/text/richTextValidate';
+import { ensureBlockIds, newFeatureId } from '../features/text/textFeatures';
+import type {
+  TextComment,
+  TextNote,
+  TextTitle,
+} from '../features/text/textFeatureTypes';
+import {
+  TEXT_COMMENT_TYPES,
+  TEXT_NOTE_TYPES,
+} from '../features/text/textFeatureTypes';
+
+/**
+ * Convert legacy parser-native sources (x^2, 2x, …) to canonical GraphMathSyntax.
+ * On failure, keep the original string — never silently corrupt graphs.
+ */
+function migrateGraphSourceText(raw: string): string {
+  if (!raw.trim()) return '';
+  const result = migrateToCanonicalSource(raw);
+  if (result.ok) return result.canonical;
+  return raw;
+}
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -52,13 +83,96 @@ function migrateBase(raw: Record<string, unknown>, zFallback: number): BaseEleme
   };
 }
 
+function migrateTitle(raw: unknown): TextTitle | undefined {
+  if (typeof raw === 'string' && raw.trim()) {
+    return { id: newFeatureId('title'), text: raw.trim() };
+  }
+  if (!isObject(raw)) return undefined;
+  const text = str(raw.text, '').trim();
+  if (!text) return undefined;
+  return { id: str(raw.id, newFeatureId('title')), text };
+}
+
+function migrateNotes(raw: unknown): TextNote[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const notes: TextNote[] = [];
+  raw.forEach((item, i) => {
+    if (!isObject(item)) return;
+    const text = str(item.text, '').trim();
+    if (!text) return;
+    const noteType = TEXT_NOTE_TYPES.includes(item.noteType as never)
+      ? (item.noteType as TextNote['noteType'])
+      : 'extra_information';
+    notes.push({
+      id: str(item.id, newFeatureId('note')),
+      text,
+      noteType,
+      layoutMode: item.layoutMode === 'manual' ? 'manual' : 'auto',
+      offsetX: typeof item.offsetX === 'number' ? item.offsetX : undefined,
+      offsetY: typeof item.offsetY === 'number' ? item.offsetY : undefined,
+      order: num(item.order, i),
+    });
+  });
+  return notes.length ? notes : undefined;
+}
+
+function migrateComments(raw: unknown): TextComment[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const comments: TextComment[] = [];
+  for (const item of raw) {
+    if (!isObject(item) || !isObject(item.anchor)) continue;
+    const text = str(item.text, '').trim();
+    if (!text) continue;
+    const quote = str(item.anchor.quote, '').trim();
+    const blockId = str(item.anchor.blockId, '').trim();
+    if (!quote || !blockId) continue;
+    const commentType = TEXT_COMMENT_TYPES.includes(item.commentType as never)
+      ? (item.commentType as TextComment['commentType'])
+      : 'explanation';
+    comments.push({
+      id: str(item.id, newFeatureId('comment')),
+      text,
+      commentType,
+      displayState: item.displayState === 'open' ? 'open' : 'collapsed',
+      panelOffsetX:
+        typeof item.panelOffsetX === 'number' ? item.panelOffsetX : undefined,
+      panelOffsetY:
+        typeof item.panelOffsetY === 'number' ? item.panelOffsetY : undefined,
+      anchor: {
+        blockId,
+        start: Math.max(0, num(item.anchor.start, 0)),
+        end: Math.max(0, num(item.anchor.end, quote.length)),
+        quote,
+        status: item.anchor.status === 'unresolved' ? 'unresolved' : 'resolved',
+      },
+    });
+  }
+  return comments.length ? comments : undefined;
+}
+
 function migrateText(raw: Record<string, unknown>, z: number): TextElement {
   const legacyBold =
     raw.fontStyle === 'bold' || raw.fontWeight === 'bold';
+  let richText: TextElement['richText'];
+  if (raw.richText != null) {
+    try {
+      richText = parseRichTextDocument(raw.richText);
+    } catch {
+      richText = undefined;
+    }
+  }
+  if (richText) richText = ensureBlockIds(richText);
+  const title = migrateTitle(raw.title);
+  const notes = migrateNotes(raw.notes);
+  const comments = migrateComments(raw.comments);
   return {
     ...migrateBase(raw, z),
     type: 'text',
     text: str(raw.text, ''),
+    ...(richText ? { richText } : {}),
+    ...(title ? { title } : {}),
+    ...(notes ? { notes } : {}),
+    ...(comments ? { comments } : {}),
     fontSize: num(raw.fontSize, DEFAULT_STYLE.fontSize),
     fontFamily: str(raw.fontFamily, DEFAULT_STYLE.fontFamily),
     fontWeight: legacyBold ? 'bold' : 'normal',
@@ -139,6 +253,77 @@ function migrateImage(raw: Record<string, unknown>, z: number): ImageElement {
   };
 }
 
+function migrateEquation(raw: Record<string, unknown>, z: number): EquationElement {
+  return {
+    ...migrateBase(raw, z),
+    type: 'equation',
+    latex: str(raw.latex, ''),
+    fontSize: num(raw.fontSize, 28),
+    color: str(raw.color, DEFAULT_STYLE.textColor),
+    displayMode: raw.displayMode === 'inline' ? 'inline' : 'display',
+  };
+}
+
+function migrateGraph(raw: Record<string, unknown>, z: number): GraphElement {
+  const viewportRaw = isObject(raw.viewport) ? raw.viewport : {};
+  const settingsRaw = isObject(raw.settings) ? raw.settings : {};
+  const expressionsRaw = Array.isArray(raw.expressions) ? raw.expressions : [];
+  const pointsRaw = Array.isArray(raw.points) ? raw.points : [];
+
+  const expressions = expressionsRaw
+    .filter(isObject)
+    .map((expr, index) => {
+      const styleRaw = isObject(expr.style) ? expr.style : {};
+      return {
+        id: str(expr.id, `expr-${index}`),
+        sourceText: migrateGraphSourceText(str(expr.sourceText, '')),
+        visible: bool(expr.visible, true),
+        domainMin:
+          typeof expr.domainMin === 'number' && Number.isFinite(expr.domainMin)
+            ? expr.domainMin
+            : null,
+        domainMax:
+          typeof expr.domainMax === 'number' && Number.isFinite(expr.domainMax)
+            ? expr.domainMax
+            : null,
+        style: {
+          color: str(styleRaw.color, nextExpressionColor(index)),
+          strokeWidth: num(styleRaw.strokeWidth, 2),
+        },
+      };
+    });
+
+  const points = pointsRaw.filter(isObject).map((p, index) => ({
+    id: str(p.id, `pt-${index}`),
+    x: num(p.x, 0),
+    y: num(p.y, 0),
+    visible: bool(p.visible, true),
+    label: str(p.label, ''),
+    color: str(p.color, '#111827'),
+  }));
+
+  return {
+    ...migrateBase(raw, z),
+    type: 'graph',
+    expressions,
+    points,
+    viewport: {
+      xMin: num(viewportRaw.xMin, DEFAULT_GRAPH_VIEWPORT.xMin),
+      xMax: num(viewportRaw.xMax, DEFAULT_GRAPH_VIEWPORT.xMax),
+      yMin: num(viewportRaw.yMin, DEFAULT_GRAPH_VIEWPORT.yMin),
+      yMax: num(viewportRaw.yMax, DEFAULT_GRAPH_VIEWPORT.yMax),
+    },
+    settings: {
+      showGrid: bool(settingsRaw.showGrid, DEFAULT_GRAPH_SETTINGS.showGrid),
+      showXAxis: bool(settingsRaw.showXAxis, DEFAULT_GRAPH_SETTINGS.showXAxis),
+      showYAxis: bool(settingsRaw.showYAxis, DEFAULT_GRAPH_SETTINGS.showYAxis),
+      xAxisLabel: str(settingsRaw.xAxisLabel, ''),
+      yAxisLabel: str(settingsRaw.yAxisLabel, ''),
+      title: str(settingsRaw.title, ''),
+    },
+  };
+}
+
 function migrateConnector(raw: Record<string, unknown>, z: number): ConnectorElement {
   const pts = Array.isArray(raw.points) ? raw.points : [0, 0, 1, 1];
   const points: [number, number, number, number] = [
@@ -183,12 +368,16 @@ export function migrateElement(raw: unknown, index: number): CanvasElement | nul
   switch (raw.type) {
     case 'text':
       return migrateText(raw, index + 1);
+    case 'equation':
+      return migrateEquation(raw, index + 1);
     case 'shape':
       return migrateShape(raw, index + 1);
     case 'drawing':
       return migrateDrawing(raw, index + 1);
     case 'image':
       return migrateImage(raw, index + 1);
+    case 'graph':
+      return migrateGraph(raw, index + 1);
     case 'connector':
       return migrateConnector(raw, index + 1);
     default:
@@ -202,7 +391,13 @@ export function migrateDocument(raw: unknown): CanvasDocument | null {
   if (!Array.isArray(raw.elements) || !isObject(raw.camera)) return null;
 
   const version = raw.version;
-  if (version !== 1 && version !== 2 && version !== DOCUMENT_VERSION) {
+  if (
+    version !== 1 &&
+    version !== 2 &&
+    version !== 3 &&
+    version !== 4 &&
+    version !== DOCUMENT_VERSION
+  ) {
     return null;
   }
 
@@ -219,8 +414,11 @@ export function migrateDocument(raw: unknown): CanvasDocument | null {
     .map((el, i) => migrateElement(el, i))
     .filter((el): el is CanvasElement => el !== null);
 
+  const existingId = typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : null;
+
   return {
     version: DOCUMENT_VERSION,
+    id: existingId ?? nanoid(12),
     elements,
     camera: { x: camera.x, y: camera.y, zoom: camera.zoom },
   };
@@ -243,6 +441,13 @@ export function styleFromElement(el: CanvasElement, style: StyleDefaults): Style
         textBackgroundColor: el.backgroundColor,
         textPadding: el.padding,
         textCornerRadius: el.cornerRadius,
+        opacity: el.opacity,
+      };
+    case 'equation':
+      return {
+        ...style,
+        textColor: el.color,
+        fontSize: el.fontSize,
         opacity: el.opacity,
       };
     case 'shape':
@@ -278,6 +483,8 @@ export function styleFromElement(el: CanvasElement, style: StyleDefaults): Style
         arrowHeads: el.arrowHeads,
       };
     case 'image':
+      return { ...style, opacity: el.opacity };
+    case 'graph':
       return { ...style, opacity: el.opacity };
     default:
       return style;

@@ -1,6 +1,20 @@
 /** Canonical canvas document model — source of truth for the board. */
 
-export const DOCUMENT_VERSION = 2 as const;
+import { nanoid } from 'nanoid';
+import type {
+  GraphExpression,
+  GraphPoint,
+  GraphSettings,
+  GraphViewport,
+} from '../features/graphs/types';
+import type { RichTextDocument } from '../features/text/richText';
+import type {
+  TextComment,
+  TextNote,
+  TextTitle,
+} from '../features/text/textFeatureTypes';
+
+export const DOCUMENT_VERSION = 5 as const;
 
 export type ShapeType =
   | 'rectangle'
@@ -18,11 +32,15 @@ export type ToolType =
   | 'select'
   | 'pan'
   | 'text'
+  | 'equation'
+  | 'graph'
   | 'pen'
   | 'line'
   | 'arrow'
   | 'image'
   | ShapeType;
+
+export type EquationDisplayMode = 'display' | 'inline';
 
 export type ConnectorType = 'line' | 'arrow';
 export type ArrowHeads = 'none' | 'end' | 'both';
@@ -55,7 +73,19 @@ export interface BaseElement {
 
 export interface TextElement extends BaseElement {
   type: 'text';
+  /** Plain-text extract (always set). Base body for RAG; features augment indexing. */
   text: string;
+  /**
+   * Optional structured rich text. When set, rendering/editing use this document
+   * and `text` is kept in sync as the plain extract.
+   */
+  richText?: RichTextDocument;
+  /** Optional title above the main text (single per element). */
+  title?: TextTitle;
+  /** Supplementary notes below the main text. */
+  notes?: TextNote[];
+  /** Comments anchored to ranges inside richText / plain text. */
+  comments?: TextComment[];
   fontSize: number;
   fontFamily: string;
   fontWeight: FontWeight;
@@ -69,6 +99,16 @@ export interface TextElement extends BaseElement {
   backgroundColor: string | null;
   padding: number;
   cornerRadius: number;
+}
+
+/** Standalone mathematical expression — LaTeX is the source of truth. */
+export interface EquationElement extends BaseElement {
+  type: 'equation';
+  /** Canonical LaTeX source (no $ / $$ fences). */
+  latex: string;
+  fontSize: number;
+  color: string;
+  displayMode: EquationDisplayMode;
 }
 
 export interface ShapeElement extends BaseElement {
@@ -109,6 +149,15 @@ export interface ImageElement extends BaseElement {
   naturalHeight: number;
 }
 
+/** Interactive graphing calculator — canvas geometry is separate from GraphViewport. */
+export interface GraphElement extends BaseElement {
+  type: 'graph';
+  expressions: GraphExpression[];
+  points: GraphPoint[];
+  viewport: GraphViewport;
+  settings: GraphSettings;
+}
+
 export interface ConnectorElement extends BaseElement {
   type: 'connector';
   connectorType: ConnectorType;
@@ -123,15 +172,19 @@ export interface ConnectorElement extends BaseElement {
 
 export type CanvasElement =
   | TextElement
+  | EquationElement
   | ShapeElement
   | DrawingElement
   | ImageElement
+  | GraphElement
   | ConnectorElement;
 
 export type CanvasElementType = CanvasElement['type'];
 
 export interface CanvasDocument {
   version: typeof DOCUMENT_VERSION;
+  /** Stable board identity for RAG indexing / sync (not regenerated on load). */
+  id: string;
   elements: CanvasElement[];
   camera: Camera;
 }
@@ -191,6 +244,7 @@ export const TRANSPARENT = null;
 export function createEmptyDocument(): CanvasDocument {
   return {
     version: DOCUMENT_VERSION,
+    id: nanoid(12),
     elements: [],
     camera: { ...DEFAULT_CAMERA },
   };

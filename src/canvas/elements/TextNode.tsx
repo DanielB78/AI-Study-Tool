@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { Group, Rect, Text } from 'react-konva';
 import type { TextElement } from '../../types/canvas';
+import { textElementNeedsHtmlOverlay } from '../../features/text/textFeatures';
 
 interface Props {
   element: TextElement;
@@ -87,24 +88,27 @@ export function TextNode({
         fill={element.backgroundColor ?? 'rgba(0,0,0,0.001)'}
         cornerRadius={element.cornerRadius}
       />
-      <Text
-        x={element.padding}
-        y={element.padding}
-        width={Math.max(element.width - element.padding * 2, 1)}
-        height={Math.max(element.height - element.padding * 2, 1)}
-        text={element.text}
-        fontSize={element.fontSize}
-        fontFamily={element.fontFamily}
-        fontStyle={konvaFontStyle(element)}
-        textDecoration={konvaDecoration(element)}
-        fill={element.color}
-        align={element.alignment}
-        verticalAlign="top"
-        lineHeight={element.lineHeight}
-        wrap="word"
-        opacity={isEditing ? 0 : 1}
-        listening={false}
-      />
+      {/* Rich-text / titled / noted elements render via TextHtmlLayer. */}
+      {!textElementNeedsHtmlOverlay(element) && (
+        <Text
+          x={element.padding}
+          y={element.padding}
+          width={Math.max(element.width - element.padding * 2, 1)}
+          height={Math.max(element.height - element.padding * 2, 1)}
+          text={element.text}
+          fontSize={element.fontSize}
+          fontFamily={element.fontFamily}
+          fontStyle={konvaFontStyle(element)}
+          textDecoration={konvaDecoration(element)}
+          fill={element.color}
+          align={element.alignment}
+          verticalAlign="top"
+          lineHeight={element.lineHeight}
+          wrap="word"
+          opacity={isEditing ? 0 : 1}
+          listening={false}
+        />
+      )}
     </Group>
   );
 }
