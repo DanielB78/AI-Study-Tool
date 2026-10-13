@@ -104,6 +104,32 @@ export function resolveExplicitSelection(
         }
       }
     }
+    // Include TextElements attached to a selected GraphElement (explanations, etc.).
+    if (el.type === 'graph') {
+      for (const other of elements) {
+        if (
+          other.type === 'text' &&
+          other.componentMeta?.associatedElementId === el.id &&
+          !seen.has(other.id)
+        ) {
+          seen.add(other.id);
+          const t = extractElementContextContent(other);
+          out.push({
+            element_id: other.id,
+            element_type: other.type,
+            text: t.text,
+            has_readable_content: t.has_readable_content,
+            geometry: {
+              x: other.x,
+              y: other.y,
+              width: other.width,
+              height: other.height,
+            },
+            image_src: null,
+          });
+        }
+      }
+    }
   }
   return out;
 }

@@ -856,6 +856,29 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
           {
             type: 'object',
             additionalProperties: false,
+            required: ['type', 'component', 'content'],
+            properties: {
+              type: { const: 'add_text_to_graph' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_ref: { type: 'string', minLength: 1 },
+              graph_id: { type: 'string', minLength: 1 },
+              component: {
+                type: 'string',
+                enum: ['main_text', 'definition', 'example', 'warning', 'exercise'],
+              },
+              content: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
+              ref: { type: 'string', minLength: 1 },
+              variant: {
+                type: 'string',
+                enum: ['warning', 'common_mistake', 'important_caution'],
+              },
+              rich_text: { type: 'object' },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
             required: ['type', 'visibility'],
             properties: {
               type: { const: 'set_graph_legend' },
@@ -1393,6 +1416,12 @@ GRAPH TEXTBOOK COMPONENTS (optional — app owns style and placement; reuse exis
   Anchor uses graph coordinates / expression ids — not canvas pixels. Whole-graph comments may omit anchor fields.
 - annotate_graph_point: reuses existing GraphPoint markers — { "type":"annotate_graph_point", "target_element_id":"<graph id>", "expression_id":"<id>", "x":1.57, "label":"Maximum" }
   Prefer updating an existing point at the same coordinates over creating a duplicate.
+- add_text_to_graph: attach a textbook TextElement to an existing GraphElement (or create_graph target_ref).
+  { "type":"add_text_to_graph", "target_element_id":"<graph id>"|"target_ref":"<plan ref>", "component":"main_text"|"definition"|"example"|"warning"|"exercise", "content":"…" }
+  App owns style, size, and placement (may place explanation beside the graph when space allows; exercises after explanations).
+  Prefer this over create_text / create_text_component when the user asks to explain, define, exemplify, warn about, or quiz an existing graph.
+  Do NOT supply x/y/width/height/font/colours. Do not associate graph-attached text with the graph's parent TextElement.
+  Specialised ops remain preferred when they fit: add_graph_caption, add_graph_observation, add_graph_comment, set_graph_title.
 - set_graph_legend: native GraphElement legend — { "type":"set_graph_legend", "target_element_id":"<graph id>", "visibility":"show"|"hide"|"auto" }
   Do NOT invent a TextElement legend. App owns legend position, colours, and layout.
 - set_graph_curve_label: rename a curve for the legend without changing its math —

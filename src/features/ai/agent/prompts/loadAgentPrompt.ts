@@ -348,8 +348,16 @@ Use PATCH/minimal change behaviour:
 - "Shade x from 1 to 3" → add_graph_region type=x_interval with mathematical bounds
 - "Highlight this part of the curve" → add_graph_region type=curve_segment
 - "Mark the maximum" → annotate_graph_point (reuse GraphPoint; prefer updating an existing point)
+- "Explain this graph" / "Write a paragraph about this graph" → add_text_to_graph component=main_text
+- "Define amplitude shown here" → add_text_to_graph component=definition
+- "Give an example using this graph" → add_text_to_graph component=example
+- "Add a warning about interpreting this graph" → add_text_to_graph component=warning
+- "Create questions based on this graph" → add_text_to_graph component=exercise
+- Prefer graph-associated text ops over an unrelated create_text when the user is talking about an existing/selected/recent graph.
+- Still use add_graph_caption / add_graph_observation / add_graph_comment / set_graph_title when those specialised intents fit.
+- target_ref works after create_graph in the same response (e.g. ref "new_graph" → add_text_to_graph target_ref).
 
-Do not supply colours, opacity, pixel coordinates, legend position, or label offsets.
+Do not supply colours, opacity, pixel coordinates, legend position, label offsets, or textbox layout.
 Never invent graph_id / expression_id / point_id / region_id. The application generates IDs for newly added expressions/points/regions.
 
 ## GRAPH EXPRESSION FORMAT

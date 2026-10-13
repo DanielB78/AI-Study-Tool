@@ -26,8 +26,13 @@ import {
 } from '../../graphs/types';
 import {
   createTextComponentElement,
+  graphRoleForComponentType,
+  isGraphAttachableComponentType,
+  isTextComponentType,
+  type GraphAttachableComponentType,
   type TextComponentMeta,
   type TextComponentType,
+  type TextComponentVariant,
 } from '../../text/textComponents';
 import {
   GRAPH_COMPONENT_LAYOUT,
@@ -37,6 +42,8 @@ import {
 import { CanvasAgentParseError } from './parseErrors';
 import { createGraphPoint } from '../../graphs/createGraphElement';
 import { parseGraphExpression } from '../../graphs/expressionService';
+import { richTextToPlainText, type RichTextDocument } from '../../text/richText';
+import { parseRichTextDocument } from '../../text/richTextValidate';
 
 export type AddGraphToTextOperation = {
   type: 'add_graph_to_text';
@@ -95,13 +102,28 @@ export type AnnotateGraphPointOperation = {
   label: string;
 };
 
+/** Create a textbook TextElement associated with a GraphElement. */
+export type AddTextToGraphOperation = {
+  type: 'add_text_to_graph';
+  target_element_id?: string;
+  target_ref?: string;
+  graph_id?: string;
+  component: GraphAttachableComponentType;
+  content: string;
+  ref?: string;
+  variant?: TextComponentVariant;
+  /** Optional rich text for main_text explanations. */
+  rich_text?: RichTextDocument;
+};
+
 export type GraphComponentOperation =
   | AddGraphToTextOperation
   | SetGraphTitleOperation
   | AddGraphCaptionOperation
   | AddGraphObservationOperation
   | AddGraphCommentOperation
-  | AnnotateGraphPointOperation;
+  | AnnotateGraphPointOperation
+  | AddTextToGraphOperation;
 
 export const GRAPH_COMPONENT_OPERATION_TYPES = [
   'add_graph_to_text',
@@ -110,6 +132,7 @@ export const GRAPH_COMPONENT_OPERATION_TYPES = [
   'add_graph_observation',
   'add_graph_comment',
   'annotate_graph_point',
+  'add_text_to_graph',
 ] as const;
 
 export function isGraphComponentOperationType(
@@ -332,6 +355,63 @@ export function parseGraphComponentOperation(
     return { type, ...targets, comment, ...(anchor ? { anchor } : {}) };
   }
 
+  if (type === 'add_text_to_graph') {
+    const targets = resolveTargetId(raw, type);
+    const componentRaw =
+      typeof raw.component === 'string'
+        ? raw.component.trim()
+        : typeof raw.component_type === 'string'
+          ? raw.component_type.trim()
+          : '';
+    if (!isGraphAttachableComponentType(componentRaw)) {
+      throw new CanvasAgentParseError(
+        'schema',
+        'add_text_to_graph.component must be main_text|definition|example|warning|exercise.',
+      );
+    }
+    const content =
+      typeof raw.content === 'string'
+        ? raw.content.trim()
+        : typeof raw.text === 'string'
+          ? raw.text.trim()
+          : '';
+    if (!content) {
+      throw new CanvasAgentParseError(
+        'empty_text',
+        'add_text_to_graph needs non-empty content.',
+      );
+    }
+    let rich_text: RichTextDocument | undefined;
+    if (raw.rich_text != null && componentRaw === 'main_text') {
+      try {
+        rich_text = parseRichTextDocument(raw.rich_text);
+      } catch {
+        throw new CanvasAgentParseError(
+          'schema',
+          'add_text_to_graph.rich_text is invalid.',
+        );
+      }
+    }
+    const variant =
+      typeof raw.variant === 'string' ? raw.variant.trim() : undefined;
+    return {
+      type,
+      ...targets,
+      component: componentRaw,
+      content: rich_text ? richTextToPlainText(rich_text) : content,
+      ...(typeof raw.ref === 'string' && raw.ref.trim()
+        ? { ref: raw.ref.trim() }
+        : {}),
+      ...(variant &&
+      (variant === 'warning' ||
+        variant === 'common_mistake' ||
+        variant === 'important_caution')
+        ? { variant }
+        : {}),
+      ...(rich_text ? { rich_text } : {}),
+    };
+  }
+
   // annotate_graph_point
   const targets = resolveTargetId(raw, type);
   if (typeof raw.x !== 'number' || !Number.isFinite(raw.x)) {
@@ -373,7 +453,11 @@ export type GraphComponentExecuteContext = {
 };
 
 function resolveGraphId(
-  op: { target_element_id?: string; target_ref?: string },
+  op: {
+    target_element_id?: string;
+    target_ref?: string;
+    graph_id?: string;
+  },
   ctx: GraphComponentExecuteContext,
 ): string {
   if (op.target_ref) {
@@ -383,8 +467,9 @@ function resolveGraphId(
     }
     return resolved;
   }
-  if (op.target_element_id) {
-    return ctx.resolveRef?.(op.target_element_id) ?? op.target_element_id;
+  const id = op.target_element_id ?? op.graph_id;
+  if (id) {
+    return ctx.resolveRef?.(id) ?? id;
   }
   throw new Error('Missing graph target.');
 }
@@ -420,6 +505,8 @@ function createChromeComponent(
     graph: GraphElement;
     role: NonNullable<TextComponentMeta['role']>;
     metaExtra?: Partial<TextComponentMeta>;
+    richText?: RichTextDocument;
+    operation?: string;
   },
   ctx: GraphComponentExecuteContext,
 ): string {
@@ -445,10 +532,23 @@ function createChromeComponent(
     associatedGraphId: opts.graph.id,
     resolvedPosition: { x: decision.x, y: decision.y },
     measuredBounds: { width: decision.width, height: decision.height },
+    reflow: decision.reflow,
   });
+
+  if (decision.reflow) {
+    const { elementIds, dy } = decision.reflow;
+    for (const id of elementIds) {
+      ctx.updateElement(id, (el) => {
+        if (el.type !== 'text') return el;
+        return { ...el, y: el.y + dy };
+      });
+    }
+  }
+
   const el = createTextComponentElement({
     componentType: opts.componentType,
     text: opts.text,
+    richText: opts.richText,
     position: { x: decision.x, y: decision.y },
     zIndex: ctx.nextZIndex(),
     width: decision.width,
@@ -456,7 +556,7 @@ function createChromeComponent(
     metadata: {
       createdBy: 'ai',
       source: 'agent',
-      operation: opts.role,
+      operation: opts.operation ?? opts.role,
       placementDecision: decision.reason,
     },
   });
@@ -464,6 +564,34 @@ function createChromeComponent(
   el.height = decision.height;
   ctx.addElement(el, false);
   return el.id;
+}
+
+export function executeAddTextToGraph(
+  op: AddTextToGraphOperation,
+  ctx: GraphComponentExecuteContext,
+): { createdId: string } {
+  const graphId = resolveGraphId(op, ctx);
+  const graph = requireGraph(graphId, ctx.getElements());
+  if (!isTextComponentType(op.component) || !isGraphAttachableComponentType(op.component)) {
+    throw new Error(`Unsupported add_text_to_graph component "${op.component}".`);
+  }
+  const role = graphRoleForComponentType(op.component);
+  if (!role) {
+    throw new Error(`No graph role for component "${op.component}".`);
+  }
+  const createdId = createChromeComponent(
+    {
+      componentType: op.component,
+      text: op.content,
+      richText: op.rich_text,
+      graph,
+      role,
+      metaExtra: op.variant ? { variant: op.variant } : undefined,
+      operation: 'add_text_to_graph',
+    },
+    ctx,
+  );
+  return { createdId };
 }
 
 export function executeAddGraphToText(

@@ -6,8 +6,10 @@ import {
   uiAddGraphComment,
   uiAddGraphObservation,
   uiAddGraphRegion,
+  uiAddTextToGraph,
   uiAnnotateGraphPoint,
   uiAttachExistingGraphToText,
+  uiAttachExistingTextToGraph,
   uiRemoveGraphRegion,
   uiSetGraphCurveLabel,
   uiSetGraphLegend,
@@ -15,6 +17,7 @@ import {
 } from '../../features/graphs/graphComponentUi';
 import type { GraphLegendVisibility, GraphRegionType } from '../../features/graphs/types';
 import { useGraphUiStore } from '../../features/graphs/graphUiStore';
+import type { GraphAttachableComponentType } from '../../features/text/textComponents';
 
 type Props = {
   element: GraphElement;
@@ -104,6 +107,37 @@ export function GraphFeaturesMenu({ element }: Props) {
           >
             Add comment
           </button>
+
+          <div className="ctx-features-divider" role="separator" />
+
+          {(
+            [
+              ['main_text', 'Add explanation'],
+              ['definition', 'Add definition'],
+              ['example', 'Add example'],
+              ['warning', 'Add warning'],
+              ['exercise', 'Add exercise'],
+            ] as const
+          ).map(([component, label]) => (
+            <button
+              key={component}
+              type="button"
+              role="menuitem"
+              className="ctx-features-item"
+              onClick={() => {
+                const text = window.prompt(label);
+                if (!text?.trim()) return;
+                uiAddTextToGraph(
+                  element.id,
+                  component as GraphAttachableComponentType,
+                  text,
+                );
+                close();
+              }}
+            >
+              {label}
+            </button>
+          ))}
 
           <div className="ctx-features-divider" role="separator" />
 
@@ -330,7 +364,7 @@ export function GraphFeaturesMenu({ element }: Props) {
                 return;
               }
               const choice = window.prompt(
-                `Attach to TextElement id:\n${texts
+                `Attach graph to TextElement id:\n${texts
                   .slice(0, 8)
                   .map((t) => t.id)
                   .join('\n')}`,
@@ -341,7 +375,39 @@ export function GraphFeaturesMenu({ element }: Props) {
               close();
             }}
           >
-            Attach to text
+            Attach graph to text
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="ctx-features-item"
+            onClick={() => {
+              const texts = useCanvasStore
+                .getState()
+                .document.elements.filter(
+                  (e): e is import('../../types/canvas').TextElement =>
+                    e.type === 'text' &&
+                    e.componentMeta?.associatedElementId !== element.id,
+                );
+              if (texts.length === 0) {
+                window.alert('No TextElement available to attach.');
+                return;
+              }
+              const choice = window.prompt(
+                `Attach existing TextElement to this graph:\n${texts
+                  .slice(0, 8)
+                  .map((t) => `${t.id} (${t.componentType ?? 'text'})`)
+                  .join('\n')}`,
+                texts[0]!.id,
+              );
+              if (!choice?.trim()) return;
+              uiAttachExistingTextToGraph(choice.trim(), element.id, {
+                reflow: false,
+              });
+              close();
+            }}
+          >
+            Attach text to graph
           </button>
         </div>
       )}

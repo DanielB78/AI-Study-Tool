@@ -1014,6 +1014,7 @@ function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
       op.type === 'add_graph_observation' ||
       op.type === 'add_graph_comment' ||
       op.type === 'annotate_graph_point' ||
+      op.type === 'add_text_to_graph' ||
       op.type === 'set_graph_legend' ||
       op.type === 'set_graph_curve_label' ||
       op.type === 'add_graph_region' ||
@@ -1330,6 +1331,9 @@ export function describeOperationPlan(
       }
       if (g.type === 'add_graph_comment') {
         return `${n}. ADD GRAPH COMMENT\n   Target: ${target}\n   Comment: ${g.comment.slice(0, 80)}`;
+      }
+      if (g.type === 'add_text_to_graph') {
+        return `${n}. ADD TEXT TO GRAPH\n   Target: ${target}\n   Component: ${g.component}\n   Text: ${g.content.slice(0, 80)}`;
       }
       return `${n}. ANNOTATE GRAPH POINT\n   Target: ${target}\n   x=${g.x} label=${g.label}`;
     }
