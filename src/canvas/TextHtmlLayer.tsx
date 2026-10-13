@@ -35,7 +35,12 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function buildFeatureHtml(el: TextElement): string {
+/**
+ * Build HTML for textbook / feature TextElements rendered via TextHtmlLayer.
+ * Captions and other label-less components must still emit body text —
+ * otherwise Konva is suppressed and nothing is visible.
+ */
+export function buildFeatureHtml(el: TextElement): string {
   const parts: string[] = [];
   const componentType = getComponentType(el);
   const label = labelForComponent(componentType, el.componentMeta);
@@ -62,7 +67,10 @@ function buildFeatureHtml(el: TextElement): string {
         fontFamily: el.fontFamily,
       }),
     );
-  } else if (label || el.title || (el.notes && el.notes.length > 0)) {
+  } else if (el.text.trim()) {
+    // Always render plain body when present. Captions have no chrome label
+    // (defaultLabel: null); previously they produced an empty HTML overlay
+    // while Konva text was suppressed — invisible generated captions.
     parts.push(`<div class="text-feature-body">${escapeHtml(el.text)}</div>`);
   }
 
