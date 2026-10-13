@@ -5,10 +5,12 @@
 
 import type { TextFeatureOperation } from './textFeatureOperations';
 import type { TextComponentOperation } from './textComponentOperations';
+import type { GraphComponentOperation } from './graphComponentOperations';
 import type { TextCommentType, TextNoteType } from '../../text/textFeatureTypes';
 
 export type { TextFeatureOperation } from './textFeatureOperations';
 export type { TextComponentOperation } from './textComponentOperations';
+export type { GraphComponentOperation } from './graphComponentOperations';
 
 export type PlacementRelation = 'left_of' | 'right_of' | 'above' | 'below' | 'near';
 
@@ -362,7 +364,8 @@ export type CanvasOperation =
   | UpdateGraphPointOperation
   | RemoveGraphPointOperation
   | TextFeatureOperation
-  | TextComponentOperation;
+  | TextComponentOperation
+  | GraphComponentOperation;
 
 export type CanvasAgentResponse = {
   operations: CanvasOperation[];
@@ -698,6 +701,8 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
                   'example',
                   'warning',
                   'exercise',
+                  'caption',
+                  'key_observation',
                 ],
               },
               content: { type: 'string', minLength: 1 },
@@ -739,6 +744,107 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               target_element_id: { type: 'string', minLength: 1 },
               target_id: { type: 'string', minLength: 1 },
               content: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'expressions'],
+            properties: {
+              type: { const: 'add_graph_to_text' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              ref: { type: 'string', minLength: 1 },
+              expressions: {
+                type: 'array',
+                minItems: 1,
+                items: { $ref: '#/$defs/graphExpression' },
+              },
+              points: {
+                type: 'array',
+                items: { $ref: '#/$defs/graphPoint' },
+              },
+              graph: { type: 'object' },
+              viewport: { type: 'object' },
+              settings: { type: 'object' },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'text'],
+            properties: {
+              type: { const: 'set_graph_title' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_ref: { type: 'string', minLength: 1 },
+              graph_id: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
+              content: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'text'],
+            properties: {
+              type: { const: 'add_graph_caption' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_ref: { type: 'string', minLength: 1 },
+              graph_id: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
+              content: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'text'],
+            properties: {
+              type: { const: 'add_graph_observation' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_ref: { type: 'string', minLength: 1 },
+              graph_id: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
+              content: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type'],
+            properties: {
+              type: { const: 'add_graph_comment' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_ref: { type: 'string', minLength: 1 },
+              graph_id: { type: 'string', minLength: 1 },
+              comment: { type: 'string', minLength: 1 },
+              content: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
+              anchor: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  expression_id: { type: 'string', minLength: 1 },
+                  point_id: { type: 'string', minLength: 1 },
+                  x: { type: 'number' },
+                },
+              },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'x', 'label'],
+            properties: {
+              type: { const: 'annotate_graph_point' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_ref: { type: 'string', minLength: 1 },
+              graph_id: { type: 'string', minLength: 1 },
+              expression_id: { type: 'string', minLength: 1 },
+              x: { type: 'number' },
+              y: { type: 'number' },
+              label: { type: 'string', minLength: 1 },
               text: { type: 'string', minLength: 1 },
             },
           },
@@ -1176,6 +1282,21 @@ Rules:
 - Features are optional — a simple explanation may need only main_text. Do not inflate lessons with redundant definitions, warnings, or comments.
 - Do not highlight every important-looking phrase. Prefer comments that add information, identify an error, or clarify a difficult point.
 - Never invent comment_id / block_id. Canonical target field is target_element_id.
+
+GRAPH TEXTBOOK COMPONENTS (optional — app owns style and placement; reuse existing graph ops for curves/points/axes):
+- add_graph_to_text: attach a new GraphElement to an existing TextElement (multiple graphs per text allowed).
+  { "type":"add_graph_to_text", "target_element_id":"<text id>", "ref":"<temp>", "expressions":[{ "expression":"sin(x)", "visible":true, "domain_min":null, "domain_max":null }] }
+  Do NOT supply canvas x/y, width/height, or grid cells. Graphs place after explanations and before exercises by default.
+- set_graph_title: { "type":"set_graph_title", "target_ref":"<plan ref>"|"target_element_id":"<graph id>", "text":"Displacement vs Time" }
+  Creates/updates a Title TextElement above the graph (also syncs settings.title).
+- add_graph_caption: { "type":"add_graph_caption", "target_ref":"…", "text":"…" } — muted caption below the graph (one canonical caption; revise updates it).
+- add_graph_observation: { "type":"add_graph_observation", "target_ref":"…", "text":"…" } — Key Observation component.
+- add_graph_comment: { "type":"add_graph_comment", "target_element_id":"<graph id>", "anchor":{ "expression_id":"<id>", "x":1.57 }, "comment":"…" }
+  Anchor uses graph coordinates / expression ids — not canvas pixels. Whole-graph comments may omit anchor fields.
+- annotate_graph_point: reuses existing GraphPoint markers — { "type":"annotate_graph_point", "target_element_id":"<graph id>", "expression_id":"<id>", "x":1.57, "label":"Maximum" }
+- Axis labels: use existing update_graph_settings (x_axis_label / y_axis_label). Add another curve with add_graph_expression — do NOT create a new graph for an extra curve on the same plot.
+- Prefer editing an existing graph when the user asks to modify it; create a separate graph only when they ask for another graph.
+- Graph features are optional — do not add title+caption+observation to every plot.
 
 RICH TEXT (optional on create_text / update_text):
 {

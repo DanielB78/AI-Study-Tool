@@ -8,6 +8,8 @@ import {
 } from './FormattingControls';
 import { OpacityControl } from './CtxPopover';
 import { TextFeaturesMenu } from './TextFeaturesMenu';
+import { GraphFeaturesMenu } from './GraphFeaturesMenu';
+import type { GraphElement } from '../../types/canvas';
 import { useGraphUiStore } from '../../features/graphs/graphUiStore';
 import { DEFAULT_GRAPH_VIEWPORT } from '../../features/graphs/types';
 import { touch } from '../../utils/ids';
@@ -208,6 +210,7 @@ export function ContextualToolbar() {
             <button type="button" className="ctx-chip" onClick={resetGraphView}>
               Reset View
             </button>
+            <GraphFeaturesMenu element={graph as GraphElement} />
             <OpacityControl
               value={style.opacity}
               onChange={(v) => onLive({ opacity: v })}

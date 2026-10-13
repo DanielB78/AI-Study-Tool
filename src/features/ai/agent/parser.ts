@@ -67,6 +67,11 @@ import {
   type TextComponentOperation,
 } from './textComponentOperations';
 import {
+  isGraphComponentOperationType,
+  parseGraphComponentOperation,
+  type GraphComponentOperation,
+} from './graphComponentOperations';
+import {
   TEXT_COMMENT_TYPES,
   TEXT_NOTE_TYPES,
   type TextCommentType,
@@ -628,6 +633,9 @@ function parseOperation(raw: unknown): CanvasOperation {
   if (isTextComponentOperationType(raw.type)) {
     return parseTextComponentOperation(raw);
   }
+  if (isGraphComponentOperationType(raw.type)) {
+    return parseGraphComponentOperation(raw);
+  }
   if (isTextFeatureOperationType(raw.type)) {
     return parseTextFeatureOperation(raw);
   }
@@ -981,6 +989,20 @@ function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
   if (op.type === 'add_linked_comment' || op.type === 'update_text_component') {
     validateTextTarget(op.target_element_id, ctx);
   }
+  if (op.type === 'add_graph_to_text') {
+    validateTextTarget(op.target_element_id, ctx);
+  }
+  if (
+    (op.type === 'set_graph_title' ||
+      op.type === 'add_graph_caption' ||
+      op.type === 'add_graph_observation' ||
+      op.type === 'add_graph_comment' ||
+      op.type === 'annotate_graph_point') &&
+    op.target_element_id &&
+    ctx.allowedElementIds.has(op.target_element_id)
+  ) {
+    validateGraphTarget(op.target_element_id, ctx);
+  }
   if (
     op.type === 'create_text_component' &&
     op.associated_element_id &&
@@ -1261,6 +1283,34 @@ export function describeOperationPlan(
       const refLine = op.ref ? `\n   Ref: ${op.ref}` : '';
       const richLine = op.rich_text ? `\n   Rich text: ${op.rich_text.blocks.length} block(s)` : '';
       return `${n}. CREATE TEXT${refLine}\n   Placement: ${placementLine}${richLine}\n   Text: ${preview}${op.text.length > 80 ? '…' : ''}`;
+    }
+    if (isGraphComponentOperationType(op.type)) {
+      const g = op as GraphComponentOperation;
+      if (g.type === 'add_graph_to_text') {
+        return [
+          `${n}. ADD GRAPH TO TEXT`,
+          `   Target text: ${g.target_element_id}`,
+          g.ref ? `   Ref: ${g.ref}` : null,
+          `   Expressions: ${g.expressions.map((e) => e.expression).join(', ')}`,
+          '   Placement: (application auto)',
+        ]
+          .filter(Boolean)
+          .join('\n');
+      }
+      const target = g.target_element_id ?? g.target_ref ?? '?';
+      if (g.type === 'set_graph_title') {
+        return `${n}. SET GRAPH TITLE\n   Target: ${target}\n   Text: ${g.text.slice(0, 80)}`;
+      }
+      if (g.type === 'add_graph_caption') {
+        return `${n}. ADD GRAPH CAPTION\n   Target: ${target}\n   Text: ${g.text.slice(0, 80)}`;
+      }
+      if (g.type === 'add_graph_observation') {
+        return `${n}. ADD GRAPH OBSERVATION\n   Target: ${target}\n   Text: ${g.text.slice(0, 80)}`;
+      }
+      if (g.type === 'add_graph_comment') {
+        return `${n}. ADD GRAPH COMMENT\n   Target: ${target}\n   Comment: ${g.comment.slice(0, 80)}`;
+      }
+      return `${n}. ANNOTATE GRAPH POINT\n   Target: ${target}\n   x=${g.x} label=${g.label}`;
     }
     if (isTextComponentOperationType(op.type)) {
       const c = op as TextComponentOperation;

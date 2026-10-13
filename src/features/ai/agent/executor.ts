@@ -57,6 +57,16 @@ import {
   type UpdateTextComponentOperation,
 } from './textComponentOperations';
 import {
+  executeAddGraphCaption,
+  executeAddGraphComment,
+  executeAddGraphObservation,
+  executeAddGraphToText,
+  executeAnnotateGraphPoint,
+  executeSetGraphTitle,
+  isGraphComponentOperationType,
+  type GraphComponentOperation,
+} from './graphComponentOperations';
+import {
   getComponentType,
   type TextComponentType,
 } from '../../text/textComponents';
@@ -660,6 +670,63 @@ export function executeCanvasOperations(
           continue;
         }
 
+        if (isGraphComponentOperationType(op.type)) {
+          const gOp = op as GraphComponentOperation;
+          const gCtx = {
+            getElements: () => target.getElements(),
+            getCamera: () => target.getCamera(),
+            getViewportSize: target.getViewportSize,
+            nextZIndex: () => target.nextZIndex(),
+            addElement: (el: CanvasElement, select?: boolean) =>
+              target.addElement(el, select),
+            updateElement: target.updateElement,
+            resolveRef,
+          };
+
+          if (gOp.type === 'add_graph_to_text') {
+            const { createdId } = executeAddGraphToText(gOp, gCtx);
+            createdIds.push(createdId);
+            if (gOp.ref) planRefMap.set(gOp.ref, createdId);
+            continue;
+          }
+          if (gOp.type === 'set_graph_title') {
+            const result = executeSetGraphTitle(gOp, gCtx);
+            if (result.createdId) createdIds.push(result.createdId);
+            if (result.updatedId) updatedIds.push(result.updatedId);
+            const gid = gOp.target_element_id
+              ? resolveRef(gOp.target_element_id) ?? gOp.target_element_id
+              : gOp.target_ref
+                ? resolveRef(gOp.target_ref)
+                : undefined;
+            if (gid) updatedIds.push(gid);
+            continue;
+          }
+          if (gOp.type === 'add_graph_caption') {
+            const result = executeAddGraphCaption(gOp, gCtx);
+            if (result.createdId) createdIds.push(result.createdId);
+            if (result.updatedId) updatedIds.push(result.updatedId);
+            continue;
+          }
+          if (gOp.type === 'add_graph_observation') {
+            const { createdId } = executeAddGraphObservation(gOp, gCtx);
+            createdIds.push(createdId);
+            continue;
+          }
+          if (gOp.type === 'add_graph_comment') {
+            const { createdId } = executeAddGraphComment(gOp, gCtx);
+            createdIds.push(createdId);
+            continue;
+          }
+          const { pointId } = executeAnnotateGraphPoint(gOp, gCtx);
+          const gid =
+            (gOp.target_element_id &&
+              (resolveRef(gOp.target_element_id) ?? gOp.target_element_id)) ||
+            (gOp.target_ref && resolveRef(gOp.target_ref));
+          if (gid) updatedIds.push(gid);
+          void pointId;
+          continue;
+        }
+
         if (isTextComponentOperationType(op.type)) {
           const compOp = op as TextComponentOperation;
           const ctx = {
@@ -818,13 +885,15 @@ export function executeCanvasOperations(
           opIndex,
           opType: op.type,
           targetId: targetId || undefined,
-          stage: isTextComponentOperationType(op.type)
+          stage: isGraphComponentOperationType(op.type)
             ? 'text_component'
-            : isTextFeatureOperationType(op.type)
-              ? 'text_feature'
-              : op.type.startsWith('create_')
-                ? 'create'
-                : 'apply',
+            : isTextComponentOperationType(op.type)
+              ? 'text_component'
+              : isTextFeatureOperationType(op.type)
+                ? 'text_feature'
+                : op.type.startsWith('create_')
+                  ? 'create'
+                  : 'apply',
           message: 'Canvas operation failed',
           cause,
         });

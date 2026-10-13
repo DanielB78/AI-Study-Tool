@@ -15,6 +15,7 @@ import {
   uiSetAssociatedTitle,
 } from '../../features/text/textComponentUi';
 import { getComponentType } from '../../features/text/textComponents';
+import { uiAddGraphToText } from '../../features/graphs/graphComponentUi';
 
 type Props = {
   element: TextElement;
@@ -185,6 +186,22 @@ export function TextFeaturesMenu({ element }: Props) {
             }}
           >
             Highlight text
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="ctx-features-item"
+            onClick={() => {
+              const expr = window.prompt(
+                'Expression to plot (GraphMathSyntax)',
+                'sin(x)',
+              );
+              if (!expr?.trim()) return;
+              uiAddGraphToText(associateId, expr.trim());
+              close();
+            }}
+          >
+            Add graph
           </button>
         </div>
       )}

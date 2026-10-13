@@ -20,7 +20,15 @@ import type {
 
 export type { TextComponentMeta, TextComponentType };
 
-export const DOCUMENT_VERSION = 6 as const;
+export const DOCUMENT_VERSION = 7 as const;
+
+/** Logical association of a GraphElement to a parent TextElement. */
+export type GraphAssociationMeta = {
+  associatedElementId?: string;
+  placementMode: 'auto' | 'manual';
+  /** Order among graphs attached to the same TextElement (creation order). */
+  order?: number;
+};
 
 export type ShapeType =
   | 'rectangle'
@@ -179,6 +187,11 @@ export interface GraphElement extends BaseElement {
   points: GraphPoint[];
   viewport: GraphViewport;
   settings: GraphSettings;
+  /**
+   * Optional association to a parent TextElement (attached_graph).
+   * Graph remains an independent editable canvas object.
+   */
+  association?: GraphAssociationMeta;
 }
 
 export interface ConnectorElement extends BaseElement {

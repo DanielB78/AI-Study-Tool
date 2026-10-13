@@ -67,6 +67,8 @@ export interface GraphContextItem {
   viewport: GraphContextViewport;
   settings: GraphContextSettings;
   world_bounds: GraphContextWorldBounds;
+  /** Parent TextElement when this graph is an attached_graph. */
+  associated_text_id?: string | null;
 }
 
 function nullIfEmpty(s: string): string | null {
@@ -129,6 +131,7 @@ export function toGraphContextItem(el: GraphElement): GraphContextItem {
       width: el.width,
       height: el.height,
     },
+    associated_text_id: el.association?.associatedElementId ?? null,
   };
 }
 
@@ -152,9 +155,11 @@ export function formatGraphContextItem(
     '',
     `ID: ${item.element_id}`,
     'This graph is available for editing.',
-    '',
-    'EXPRESSIONS:',
   ];
+  if (item.associated_text_id) {
+    lines.push(`Associated TextElement: ${item.associated_text_id}`);
+  }
+  lines.push('', 'EXPRESSIONS:');
 
   if (item.expressions.length === 0) {
     lines.push('none');
