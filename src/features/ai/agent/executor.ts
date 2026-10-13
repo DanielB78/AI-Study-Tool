@@ -61,6 +61,7 @@ import {
   executeAddGraphComment,
   executeAddGraphObservation,
   executeAddGraphToText,
+  executeAddTextToGraph,
   executeAnnotateGraphPoint,
   executeSetGraphTitle,
   isGraphComponentOperationType,
@@ -720,6 +721,18 @@ export function executeCanvasOperations(
           if (gOp.type === 'add_graph_comment') {
             const { createdId } = executeAddGraphComment(gOp, gCtx);
             createdIds.push(createdId);
+            continue;
+          }
+          if (gOp.type === 'add_text_to_graph') {
+            const { createdId } = executeAddTextToGraph(gOp, gCtx);
+            createdIds.push(createdId);
+            if (gOp.ref) planRefMap.set(gOp.ref, createdId);
+            const gid =
+              (gOp.target_element_id &&
+                (resolveRef(gOp.target_element_id) ?? gOp.target_element_id)) ||
+              (gOp.graph_id && (resolveRef(gOp.graph_id) ?? gOp.graph_id)) ||
+              (gOp.target_ref && resolveRef(gOp.target_ref));
+            if (gid) updatedIds.push(gid);
             continue;
           }
           const { pointId } = executeAnnotateGraphPoint(gOp, gCtx);

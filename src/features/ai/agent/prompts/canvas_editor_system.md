@@ -365,6 +365,14 @@ Native GraphElement annotations (prefer these over canvas shapes/textboxes):
 - `update_graph_region` / `remove_graph_region` — edit or delete one region by `region_id`
 - `annotate_graph_point` — reuse GraphPoint markers; prefer updating an existing point at the same coordinates
 
+TextElements attached to GraphElements:
+
+- `add_text_to_graph` — `main_text` | `definition` | `example` | `warning` | `exercise` associated with a graph
+- Prefer this when the user asks to explain/define/exemplify/warn/quiz an existing or recently created graph
+- Keep specialised ops for caption / observation / linked comment / title
+- App owns style and placement; do not invent canvas coordinates
+- A graph may still be associated with a parent TextElement; attached text belongs to the graph, not that parent
+
 Do not supply colours, opacity, pixel coordinates, legend position, or label offsets.
 
 ## GRAPH EXPRESSION FORMAT

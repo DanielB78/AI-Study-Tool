@@ -10,10 +10,12 @@ import {
   executeAddGraphComment,
   executeAddGraphObservation,
   executeAddGraphToText,
+  executeAddTextToGraph,
   executeAnnotateGraphPoint,
   executeSetGraphTitle,
   type GraphComponentExecuteContext,
 } from '../ai/agent/graphComponentOperations';
+import type { GraphAttachableComponentType } from '../text/textComponents';
 import {
   applyGraphAnnotationOperation,
   type GraphAnnotationOperation,
@@ -216,6 +218,95 @@ export function uiRemoveGraphRegion(
     target_element_id: graphId,
     region_id: regionId,
   });
+}
+
+export function uiAddTextToGraph(
+  graphId: string,
+  component: GraphAttachableComponentType,
+  content: string,
+): string | null {
+  const t = content.trim();
+  if (!t) return null;
+  let createdId: string | null = null;
+  withHistory(() => {
+    const result = executeAddTextToGraph(
+      {
+        type: 'add_text_to_graph',
+        target_element_id: graphId,
+        component,
+        content: t,
+      },
+      makeCtx(),
+    );
+    createdId = result.createdId;
+  });
+  return createdId;
+}
+
+/** Associate an existing TextElement with a graph (does not duplicate). */
+export function uiAttachExistingTextToGraph(
+  textId: string,
+  graphId: string,
+  opts?: { reflow?: boolean },
+): boolean {
+  const store = useCanvasStore.getState();
+  const text = store.document.elements.find((e) => e.id === textId);
+  const graph = store.document.elements.find((e) => e.id === graphId);
+  if (!text || text.type !== 'text' || !graph || graph.type !== 'graph') {
+    return false;
+  }
+  withHistory(() => {
+    store.updateElement(textId, (el) => {
+      if (el.type !== 'text') return el;
+      return {
+        ...el,
+        componentMeta: {
+          ...(el.componentMeta ?? { placementMode: 'manual' }),
+          associatedElementId: graphId,
+          placementMode: opts?.reflow ? 'auto' : 'manual',
+          role:
+            el.componentMeta?.role ??
+            (el.componentType === 'definition'
+              ? 'graph_definition'
+              : el.componentType === 'example'
+                ? 'graph_example'
+                : el.componentType === 'warning'
+                  ? 'graph_warning'
+                  : el.componentType === 'exercise'
+                    ? 'graph_exercise'
+                    : el.componentType === 'caption'
+                      ? 'graph_caption'
+                      : el.componentType === 'key_observation'
+                        ? 'graph_observation'
+                        : 'graph_explanation'),
+        },
+      };
+    });
+  });
+  return true;
+}
+
+export function uiDetachTextFromGraph(textId: string): boolean {
+  const store = useCanvasStore.getState();
+  const text = store.document.elements.find((e) => e.id === textId);
+  if (!text || text.type !== 'text' || !text.componentMeta?.associatedElementId) {
+    return false;
+  }
+  withHistory(() => {
+    store.updateElement(textId, (el) => {
+      if (el.type !== 'text') return el;
+      const { associatedElementId: _a, role: _r, ...rest } =
+        el.componentMeta ?? { placementMode: 'manual' as const };
+      return {
+        ...el,
+        componentMeta: {
+          ...rest,
+          placementMode: 'manual',
+        },
+      };
+    });
+  });
+  return true;
 }
 
 export function uiAttachExistingGraphToText(

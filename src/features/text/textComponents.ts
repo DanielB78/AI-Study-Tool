@@ -30,9 +30,61 @@ export const COMPONENT_ROLES = [
   'graph_caption',
   'graph_observation',
   'graph_comment',
+  /** General textbook components attached to a GraphElement. */
+  'graph_explanation',
+  'graph_definition',
+  'graph_example',
+  'graph_warning',
+  'graph_exercise',
   'attached_graph_parent',
 ] as const;
 export type ComponentRole = (typeof COMPONENT_ROLES)[number];
+
+/** Map textbook component type → graph-association role. */
+export function graphRoleForComponentType(
+  component: TextComponentType,
+): ComponentRole | null {
+  switch (component) {
+    case 'title':
+      return 'graph_title';
+    case 'caption':
+      return 'graph_caption';
+    case 'key_observation':
+      return 'graph_observation';
+    case 'linked_comment':
+      return 'graph_comment';
+    case 'main_text':
+      return 'graph_explanation';
+    case 'definition':
+      return 'graph_definition';
+    case 'example':
+      return 'graph_example';
+    case 'warning':
+      return 'graph_warning';
+    case 'exercise':
+      return 'graph_exercise';
+    default:
+      return null;
+  }
+}
+
+/** Components creatable via add_text_to_graph (specialised ops cover the rest). */
+export const GRAPH_ATTACHABLE_COMPONENT_TYPES = [
+  'main_text',
+  'definition',
+  'example',
+  'warning',
+  'exercise',
+] as const satisfies readonly TextComponentType[];
+
+export type GraphAttachableComponentType =
+  (typeof GRAPH_ATTACHABLE_COMPONENT_TYPES)[number];
+
+export function isGraphAttachableComponentType(
+  v: string,
+): v is GraphAttachableComponentType {
+  return (GRAPH_ATTACHABLE_COMPONENT_TYPES as readonly string[]).includes(v);
+}
 
 export const TEXT_COMPONENT_VARIANTS = [
   'warning',

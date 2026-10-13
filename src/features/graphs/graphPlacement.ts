@@ -250,8 +250,37 @@ export function resolveGraphAttachPlacement(opts: {
   };
 }
 
+/** Stack rank — lower appears closer to the graph (default reading order). */
+const GRAPH_TEXT_STACK_RANK: Partial<Record<TextComponentType, number>> = {
+  caption: 0,
+  key_observation: 1,
+  main_text: 2,
+  definition: 3,
+  example: 4,
+  warning: 5,
+  exercise: 6,
+};
+
+const MIN_SIDE_GRAPH_WIDTH = 280;
+const MIN_SIDE_TEXT_WIDTH = 220;
+
+export type GraphChromePlacementDecision = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  reason: string;
+  /** Auto-placed siblings to shift down after inserting this component. */
+  reflow?: { elementIds: string[]; dy: number };
+};
+
+function stackRankOf(el: TextElement): number {
+  return GRAPH_TEXT_STACK_RANK[getComponentType(el)] ?? 50;
+}
+
 /**
- * Place a textbook component relative to a GraphElement.
+ * Place a textbook / chrome component relative to a GraphElement.
+ * Used by title/caption/observation/comment and add_text_to_graph.
  */
 export function resolveGraphChromePlacement(opts: {
   componentType: TextComponentType;
@@ -261,13 +290,7 @@ export function resolveGraphChromePlacement(opts: {
   elements: CanvasElement[];
   camera: Camera;
   viewport: ViewportSize;
-}): {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  reason: string;
-} {
+}): GraphChromePlacementDecision {
   const widthHint = Math.max(
     opts.graph.width * 0.85,
     TEXT_COMPONENT_STYLES[opts.componentType].defaultWidth,
@@ -294,7 +317,12 @@ export function resolveGraphChromePlacement(opts: {
       height: size.height,
     };
     const placed = tryPlace(preferred, opts.elements);
-    return { ...placed, width: size.width, height: size.height, reason: 'graph_title_above' };
+    return {
+      ...placed,
+      width: size.width,
+      height: size.height,
+      reason: 'graph_title_above',
+    };
   }
 
   if (opts.componentType === 'linked_comment') {
@@ -313,27 +341,108 @@ export function resolveGraphChromePlacement(opts: {
     };
   }
 
-  // Caption / key_observation — stack below graph (+ existing chrome)
-  let y = opts.graph.y + opts.graph.height + GRAPH_COMPONENT_LAYOUT.captionGap;
-  for (const el of chrome) {
-    const t = getComponentType(el);
-    if (t === 'title') continue;
-    const b = asRect(el);
-    y = Math.max(y, b.y + b.height + GRAPH_COMPONENT_LAYOUT.observationGap);
+  const rank = GRAPH_TEXT_STACK_RANK[opts.componentType] ?? 50;
+
+  // Prefer explanation beside the graph when both keep comfortable widths.
+  if (opts.componentType === 'main_text') {
+    const viewportRight =
+      opts.camera.x + opts.viewport.width / Math.max(opts.camera.zoom, 0.01);
+    const sideX =
+      opts.graph.x + opts.graph.width + GRAPH_COMPONENT_LAYOUT.graphSideGap;
+    const room = viewportRight - sideX - 40;
+    if (
+      opts.graph.width >= MIN_SIDE_GRAPH_WIDTH &&
+      room >= MIN_SIDE_TEXT_WIDTH
+    ) {
+      const w = Math.min(
+        Math.max(size.width, MIN_SIDE_TEXT_WIDTH),
+        TEXT_COMPONENT_STYLES.main_text.defaultWidth,
+        room,
+      );
+      const sideSize = measureTextComponent({
+        componentType: 'main_text',
+        text: opts.text,
+        meta: opts.meta,
+        availableWidth: w,
+      });
+      const preferred: Rect = {
+        x: sideX,
+        y: opts.graph.y,
+        width: w,
+        height: sideSize.height,
+      };
+      if (!overlaps(preferred, opts.elements)) {
+        return { ...preferred, reason: 'graph_explanation_beside' };
+      }
+    }
   }
 
-  const preferred: Rect = {
-    x: opts.graph.x,
-    y,
-    width: Math.min(size.width, opts.graph.width),
-    height: size.height,
-  };
-  const placed = tryPlace(preferred, opts.elements);
+  const presentation = measureGraphPresentation(opts.graph, opts.elements);
+  let y =
+    presentation.y + presentation.height + GRAPH_COMPONENT_LAYOUT.captionGap;
+
+  for (const el of chrome) {
+    const elType = getComponentType(el);
+    if (elType === 'title' || elType === 'linked_comment') continue;
+    const elRank = stackRankOf(el);
+    if (elRank < rank || (elRank === rank && elType === opts.componentType)) {
+      const b = asRect(el);
+      y = Math.max(
+        y,
+        b.y + b.height + GRAPH_COMPONENT_LAYOUT.observationGap,
+      );
+    }
+  }
+
+  const width = Math.min(size.width, Math.max(opts.graph.width, 280));
+  const height = measureTextComponent({
+    componentType: opts.componentType,
+    text: opts.text,
+    meta: opts.meta,
+    availableWidth: width,
+  }).height;
+
+  const preferred: Rect = { x: opts.graph.x, y, width, height };
+
+  const exerciseRank = GRAPH_TEXT_STACK_RANK.exercise ?? 6;
+  const toShift = chrome.filter((el) => {
+    const elType = getComponentType(el);
+    if (elType === 'title' || elType === 'linked_comment') return false;
+    const elRank = stackRankOf(el);
+    if (elRank > rank) return true;
+    return elType === 'exercise' && rank < exerciseRank;
+  });
+
+  const dy =
+    toShift.length > 0
+      ? height + GRAPH_COMPONENT_LAYOUT.observationGap
+      : 0;
+
+  if (toShift.length > 0 && rank < exerciseRank) {
+    const topShiftY = Math.min(...toShift.map((e) => e.y));
+    if (preferred.y + preferred.height + 4 > topShiftY) {
+      preferred.y = Math.max(
+        presentation.y +
+          presentation.height +
+          GRAPH_COMPONENT_LAYOUT.captionGap,
+        topShiftY,
+      );
+    }
+  }
+
+  const obstacles = opts.elements.filter(
+    (el) => !toShift.some((s) => s.id === el.id),
+  );
+  const placed = tryPlace(preferred, obstacles);
+
   return {
     ...placed,
-    width: Math.min(size.width, opts.graph.width),
-    height: size.height,
+    width,
+    height,
     reason: `${opts.componentType}_below_graph`,
+    ...(dy > 0 && toShift.length > 0
+      ? { reflow: { elementIds: toShift.map((e) => e.id), dy } }
+      : {}),
   };
 }
 
