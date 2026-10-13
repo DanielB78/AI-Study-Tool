@@ -93,13 +93,22 @@ Pair each important mathematical step with a short explanation (\`layout_cell\` 
 
 ## AVAILABLE ACTIONS
 
-1. \`create_text\` — create a new TextElement (optional \`title\`, \`notes\`, \`comments\`, \`rich_text\`)
-2. \`create_equation\` — create a new EquationElement (LaTeX)
+1. \`create_text\` — create a new TextElement (optional \`title\`, \`notes\`, \`comments\`, \`rich_text\` with inline/display math)
+2. \`create_equation\` — create a standalone EquationElement (LaTeX) only when a separate movable equation object is needed
 3. \`update_text\` — replace the COMPLETE text of an existing TextElement
-4. TextElement features (same capabilities as the manual Add menu): \`set_text_title\`, \`remove_text_title\`, \`insert_text_heading\`, \`highlight_text\`, \`add_text_comment\`, \`update_text_comment\`, \`remove_text_comment\`, \`add_text_note\`, \`update_text_note\`, \`remove_text_note\`
-5. \`create_graph\` — create a new interactive GraphElement
-6. Graph edits (context graphs only): \`add_graph_expression\`, \`update_graph_expression\`, \`remove_graph_expression\`, \`set_graph_expression_visibility\`, \`update_graph_viewport\`, \`update_graph_settings\`, \`add_graph_point\`, \`update_graph_point\`, \`remove_graph_point\`
-7. \`layout\` (response-level) — \`chronological_grid\` (default) or explicit \`grid\` for multi-element creation
+4. TextElement features: \`set_text_title\`, \`remove_text_title\`, \`insert_text_heading\`, \`highlight_text\`, \`add_text_comment\`, \`update_text_comment\`, \`remove_text_comment\`, \`add_text_note\`, \`update_text_note\`, \`remove_text_note\`
+5. Text math inside a TextElement: \`insert_inline_math\`, \`insert_display_math\`, \`update_text_math\`, \`remove_text_math\`, \`convert_text_math\`
+6. \`create_graph\` — create a new interactive GraphElement
+7. Graph edits (context graphs only): \`add_graph_expression\`, \`update_graph_expression\`, \`remove_graph_expression\`, \`set_graph_expression_visibility\`, \`update_graph_viewport\`, \`update_graph_settings\`, \`add_graph_point\`, \`update_graph_point\`, \`remove_graph_point\`
+8. \`layout\` (response-level) — \`chronological_grid\` (default) or explicit \`grid\` for multi-element creation
+
+### Mathematics in TextElements vs standalone equations
+
+- **Inline Math** (\`inline_math\` span or \`insert_inline_math\`): expression is part of a sentence ("The restoring force is F=-kx.").
+- **Display Math** (\`display_math\` block or \`insert_display_math\`): important / derivation equations on their own centred line inside the textbox.
+- **Standalone \`create_equation\`**: only when the user wants a separate movable equation object, or when pairing explanation|equation side-by-side in step_by_step cells.
+- Prefer embedding math in \`rich_text\` for a single explanatory textbox. Do NOT duplicate the same formula as both TextElement math and a standalone EquationElement.
+- Never invent \`math_id\` / block ids for existing nodes — use ids from context. Omit ids for new math nodes.
 
 Do NOT emit: delete, move, resize, style, shape, connector, or group operations.
 

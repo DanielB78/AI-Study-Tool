@@ -21,7 +21,7 @@ import type {
 
 export type { TextComponentMeta, TextComponentType };
 
-export const DOCUMENT_VERSION = 8 as const;
+export const DOCUMENT_VERSION = 9 as const;
 
 /** Logical association of a GraphElement to a parent TextElement. */
 export type GraphAssociationMeta = {

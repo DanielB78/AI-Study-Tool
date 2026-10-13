@@ -41,6 +41,23 @@ describe('rich text', () => {
     ).toThrow(RichTextParseError);
   });
 
+  it('accepts display_math blocks and inline_math spans', () => {
+    const doc = parseRichTextDocument({
+      blocks: [
+        {
+          type: 'paragraph',
+          spans: [
+            { text: 'Field ' },
+            { type: 'inline_math', latex: 'E=F/q' },
+          ],
+        },
+        { type: 'display_math', latex: '\\nabla\\cdot\\mathbf{E}' },
+      ],
+    });
+    expect(doc.blocks[1]!.type).toBe('display_math');
+    expect(richTextToPlainText(doc)).toContain('[LaTeX: E=F/q]');
+  });
+
   it('legacy plain text round-trips', () => {
     const doc = plainTextToRichText('Hello\nWorld');
     expect(richTextToPlainText(doc)).toBe('Hello\nWorld');

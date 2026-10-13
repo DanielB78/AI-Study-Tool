@@ -7,12 +7,14 @@ import type { TextFeatureOperation } from './textFeatureOperations';
 import type { TextComponentOperation } from './textComponentOperations';
 import type { GraphComponentOperation } from './graphComponentOperations';
 import type { GraphAnnotationOperation } from './graphAnnotationOperations';
+import type { TextMathOperation } from './textMathOperations';
 import type { TextCommentType, TextNoteType } from '../../text/textFeatureTypes';
 
 export type { TextFeatureOperation } from './textFeatureOperations';
 export type { TextComponentOperation } from './textComponentOperations';
 export type { GraphComponentOperation } from './graphComponentOperations';
 export type { GraphAnnotationOperation } from './graphAnnotationOperations';
+export type { TextMathOperation } from './textMathOperations';
 
 export type PlacementRelation = 'left_of' | 'right_of' | 'above' | 'below' | 'near';
 
@@ -125,18 +127,41 @@ export type AgentRichTextSpanStyle = {
   font_size?: string | number;
 };
 
-export type AgentRichTextSpan = {
+export type AgentRichTextTextSpan = {
+  type?: 'text';
   text: string;
   style?: AgentRichTextSpanStyle;
 };
 
-export type AgentRichTextBlock = {
+export type AgentRichTextInlineMathSpan = {
+  type: 'inline_math';
+  /** App-assigned; LLM must omit for new nodes. */
+  id?: string;
+  latex: string;
+  style?: Pick<AgentRichTextSpanStyle, 'color' | 'highlight_color'>;
+};
+
+export type AgentRichTextSpan =
+  | AgentRichTextTextSpan
+  | AgentRichTextInlineMathSpan;
+
+export type AgentRichTextContentBlock = {
   /** Optional temporary local id for comment anchors within the same create plan. */
   id?: string;
   type: 'paragraph' | 'heading' | 'bullet' | 'numbered';
   role?: 'heading' | 'body';
   spans: AgentRichTextSpan[];
 };
+
+export type AgentRichTextDisplayMathBlock = {
+  id?: string;
+  type: 'display_math';
+  latex: string;
+};
+
+export type AgentRichTextBlock =
+  | AgentRichTextContentBlock
+  | AgentRichTextDisplayMathBlock;
 
 export type AgentRichTextDocument = {
   blocks: AgentRichTextBlock[];
@@ -370,7 +395,8 @@ export type CanvasOperation =
   | TextFeatureOperation
   | TextComponentOperation
   | GraphComponentOperation
-  | GraphAnnotationOperation;
+  | GraphAnnotationOperation
+  | TextMathOperation;
 
 export type CanvasAgentResponse = {
   operations: CanvasOperation[];
@@ -1104,6 +1130,75 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               note_id: { type: 'string', minLength: 1 },
             },
           },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'latex'],
+            properties: {
+              type: { const: 'insert_inline_math' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              latex: { type: 'string', minLength: 1 },
+              after_text: { type: 'string' },
+              before_text: { type: 'string' },
+              after_block_id: { type: 'string', minLength: 1 },
+              before_block_id: { type: 'string', minLength: 1 },
+              block_id: { type: 'string', minLength: 1 },
+              occurrence: { type: 'integer', minimum: 0 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'latex'],
+            properties: {
+              type: { const: 'insert_display_math' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              latex: { type: 'string', minLength: 1 },
+              after_text: { type: 'string' },
+              before_text: { type: 'string' },
+              after_block_id: { type: 'string', minLength: 1 },
+              before_block_id: { type: 'string', minLength: 1 },
+              block_id: { type: 'string', minLength: 1 },
+              occurrence: { type: 'integer', minimum: 0 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'math_id', 'latex'],
+            properties: {
+              type: { const: 'update_text_math' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              math_id: { type: 'string', minLength: 1 },
+              latex: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'math_id'],
+            properties: {
+              type: { const: 'remove_text_math' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              math_id: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'math_id', 'to'],
+            properties: {
+              type: { const: 'convert_text_math' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              math_id: { type: 'string', minLength: 1 },
+              to: { type: 'string', enum: ['inline', 'display'] },
+            },
+          },
         ],
       },
     },
@@ -1267,55 +1362,92 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
           type: 'array',
           minItems: 1,
           items: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['type', 'spans'],
-            properties: {
-              id: { type: 'string', minLength: 1 },
-              type: {
-                type: 'string',
-                enum: ['paragraph', 'heading', 'bullet', 'numbered'],
-              },
-              role: { type: 'string', enum: ['heading', 'body'] },
-              spans: {
-                type: 'array',
-                minItems: 1,
-                items: {
-                  type: 'object',
-                  additionalProperties: false,
-                  required: ['text'],
-                  properties: {
-                    text: { type: 'string' },
-                    style: {
-                      type: 'object',
-                      additionalProperties: false,
-                      properties: {
-                        bold: { type: 'boolean' },
-                        italic: { type: 'boolean' },
-                        underline: { type: 'boolean' },
-                        color: { type: 'string' },
-                        highlight_color: { type: 'string' },
-                        font_size: {
-                          anyOf: [
-                            { type: 'number' },
-                            {
-                              type: 'string',
-                              enum: [
-                                'heading_large',
-                                'heading',
-                                'subheading',
-                                'body',
-                                'small',
-                              ],
+            oneOf: [
+              {
+                type: 'object',
+                additionalProperties: false,
+                required: ['type', 'spans'],
+                properties: {
+                  id: { type: 'string', minLength: 1 },
+                  type: {
+                    type: 'string',
+                    enum: ['paragraph', 'heading', 'bullet', 'numbered'],
+                  },
+                  role: { type: 'string', enum: ['heading', 'body'] },
+                  spans: {
+                    type: 'array',
+                    minItems: 1,
+                    items: {
+                      oneOf: [
+                        {
+                          type: 'object',
+                          additionalProperties: false,
+                          required: ['text'],
+                          properties: {
+                            type: { type: 'string', enum: ['text'] },
+                            text: { type: 'string' },
+                            style: {
+                              type: 'object',
+                              additionalProperties: false,
+                              properties: {
+                                bold: { type: 'boolean' },
+                                italic: { type: 'boolean' },
+                                underline: { type: 'boolean' },
+                                color: { type: 'string' },
+                                highlight_color: { type: 'string' },
+                                font_size: {
+                                  anyOf: [
+                                    { type: 'number' },
+                                    {
+                                      type: 'string',
+                                      enum: [
+                                        'heading_large',
+                                        'heading',
+                                        'subheading',
+                                        'body',
+                                        'small',
+                                      ],
+                                    },
+                                  ],
+                                },
+                              },
                             },
-                          ],
+                          },
                         },
-                      },
+                        {
+                          type: 'object',
+                          additionalProperties: false,
+                          required: ['type', 'latex'],
+                          properties: {
+                            type: { const: 'inline_math' },
+                            id: { type: 'string', minLength: 1 },
+                            latex: { type: 'string', minLength: 1 },
+                            style: {
+                              type: 'object',
+                              additionalProperties: false,
+                              properties: {
+                                color: { type: 'string' },
+                                highlight_color: { type: 'string' },
+                              },
+                            },
+                          },
+                        },
+                      ],
                     },
                   },
                 },
               },
-            },
+              {
+                type: 'object',
+                additionalProperties: false,
+                required: ['type', 'latex'],
+                properties: {
+                  id: { type: 'string', minLength: 1 },
+                  type: { const: 'display_math' },
+                  latex: { type: 'string', minLength: 1 },
+                },
+              },
+            ],
           },
         },
       },
@@ -1444,18 +1576,32 @@ RICH TEXT (optional on create_text / update_text):
     "blocks": [
       { "type": "heading", "spans": [{ "text": "Title", "style": { "bold": true, "font_size": "heading", "color": "blue" } }] },
       { "type": "paragraph", "spans": [
-          { "text": "Gauss's law", "style": { "bold": true, "highlight_color": "default" } },
-          { "text": " relates flux to enclosed charge." }
+          { "text": "The restoring force is " },
+          { "type": "inline_math", "latex": "F=-kx" },
+          { "text": "." }
       ]},
-      { "type": "bullet", "spans": [{ "text": "Closed surface required." }] },
-      { "type": "numbered", "spans": [{ "text": "First step." }] }
+      { "type": "display_math", "latex": "m\\frac{d^2x}{dt^2}=-kx" },
+      { "type": "bullet", "spans": [{ "text": "Closed surface required." }] }
     ]
   }
 }
 Span style (all optional): bold, italic, underline, color (default|blue|green|red|orange|purple|grey|#hex),
 highlight_color (same palette), font_size (heading_large|heading|subheading|body|small|number 10–48).
+Inline math span: { "type":"inline_math", "latex":"..." } — part of a sentence; do NOT invent ids.
+Display math block: { "type":"display_math", "latex":"..." } — centred equation on its own line.
 Use formatting intentionally — not every sentence needs colour/highlight.
-Prefer one textbox with headings/lists over many tiny textboxes for emphasis.
+Prefer one textbox with headings/lists/math over many tiny textboxes for emphasis.
+
+TEXT MATH (edit math inside an existing TextElement — prefer these over create_equation for prose):
+- insert_inline_math: { "type":"insert_inline_math", "target_element_id":"<id>", "latex":"F=-kx", "after_text":"The restoring force is " }
+- insert_display_math: { "type":"insert_display_math", "target_element_id":"<id>", "latex":"m\\frac{d^2x}{dt^2}=-kx", "after_block_id":"<block id>" }
+- update_text_math: { "type":"update_text_math", "target_element_id":"<id>", "math_id":"<from context>", "latex":"..." }
+- remove_text_math: { "type":"remove_text_math", "target_element_id":"<id>", "math_id":"<from context>" }
+- convert_text_math: { "type":"convert_text_math", "target_element_id":"<id>", "math_id":"<id>", "to":"inline"|"display" }
+Anchors: after_text / before_text (optional block_id or occurrence when ambiguous), after_block_id / before_block_id, or omit to append.
+Inline Math — expressions inside sentences. Display Math — important / derivation equations on their own line.
+Standalone create_equation — ONLY when the user wants a separate movable equation object on the canvas.
+Do NOT duplicate the same formula as both TextElement math and a standalone EquationElement.
 
 GRID COLUMN LIMIT:
 For N created objects: columns must satisfy 1 <= columns <= min(4, ceil(sqrt(N))).

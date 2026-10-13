@@ -1,14 +1,19 @@
+import { sanitizeLatexSource, validateLatex } from '../equations/latex';
 import {
   RICH_TEXT_LIMITS,
   RICH_TEXT_SIZE_PRESETS,
+  isDisplayMathBlock,
+  isInlineMathSpan,
   type RichTextBlock,
   type RichTextBlockType,
   type RichTextDocument,
+  type RichTextInlineMathSpan,
   type RichTextSizePreset,
   type RichTextSpan,
   type RichTextSpanStyle,
+  type RichTextTextSpan,
 } from './richText';
-import { ensureBlockIds } from './textFeatures';
+import { ensureBlockIds, ensureMathIds } from './textFeatures';
 
 export class RichTextParseError extends Error {
   readonly detail?: string;
@@ -28,6 +33,7 @@ const BLOCK_TYPES = new Set<RichTextBlockType>([
   'heading',
   'bullet',
   'numbered',
+  'display_math',
 ]);
 
 function parseStyle(raw: unknown, path: string): RichTextSpanStyle | undefined {
@@ -87,8 +93,63 @@ function parseStyle(raw: unknown, path: string): RichTextSpanStyle | undefined {
   return style;
 }
 
+function parseMathChromeStyle(
+  raw: unknown,
+  path: string,
+): RichTextInlineMathSpan['style'] | undefined {
+  const full = parseStyle(raw, path);
+  if (!full) return undefined;
+  const style: RichTextInlineMathSpan['style'] = {};
+  if (full.color !== undefined) style.color = full.color;
+  if (full.highlight_color !== undefined) style.highlight_color = full.highlight_color;
+  if (full.linked_comment_id !== undefined) {
+    style.linked_comment_id = full.linked_comment_id;
+  }
+  return Object.keys(style).length ? style : undefined;
+}
+
+function parseLatexField(raw: unknown, path: string, displayMode: boolean): string {
+  if (typeof raw !== 'string') {
+    throw new RichTextParseError(`${path} must be a string.`);
+  }
+  const latex = sanitizeLatexSource(raw);
+  if (!latex) {
+    throw new RichTextParseError(`${path} must be non-empty LaTeX.`);
+  }
+  if (latex.length > RICH_TEXT_LIMITS.maxLatexChars) {
+    throw new RichTextParseError(
+      `${path} exceeds ${RICH_TEXT_LIMITS.maxLatexChars} characters.`,
+    );
+  }
+  const check = validateLatex(latex, displayMode);
+  if (!check.ok) {
+    throw new RichTextParseError(`${path} is invalid LaTeX: ${check.error ?? 'unknown error'}`);
+  }
+  return latex;
+}
+
 function parseSpan(raw: unknown, path: string): RichTextSpan {
   if (!isRecord(raw)) throw new RichTextParseError(`${path} must be an object.`);
+
+  const spanType = raw.type;
+  if (spanType === 'inline_math') {
+    const latex = parseLatexField(raw.latex, `${path}.latex`, false);
+    const id =
+      typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : undefined;
+    return {
+      type: 'inline_math',
+      latex,
+      ...(id ? { id } : {}),
+      style: parseMathChromeStyle(raw.style, `${path}.style`),
+    };
+  }
+
+  // Legacy / text spans: type omitted or type === 'text'
+  if (spanType !== undefined && spanType !== 'text') {
+    throw new RichTextParseError(
+      `${path}.type must be "text" or "inline_math" when present.`,
+    );
+  }
   if (typeof raw.text !== 'string') {
     throw new RichTextParseError(`${path}.text must be a string.`);
   }
@@ -97,10 +158,12 @@ function parseSpan(raw: unknown, path: string): RichTextSpan {
       `${path}.text exceeds ${RICH_TEXT_LIMITS.maxSpanChars} characters.`,
     );
   }
-  return {
+  const textSpan: RichTextTextSpan = {
     text: raw.text,
     style: parseStyle(raw.style, `${path}.style`),
   };
+  if (spanType === 'text') textSpan.type = 'text';
+  return textSpan;
 }
 
 function parseBlock(raw: unknown, path: string): RichTextBlock {
@@ -109,9 +172,23 @@ function parseBlock(raw: unknown, path: string): RichTextBlock {
   if (type === undefined && raw.role === 'heading') type = 'heading';
   if (typeof type !== 'string' || !BLOCK_TYPES.has(type as RichTextBlockType)) {
     throw new RichTextParseError(
-      `${path}.type must be one of: paragraph, heading, bullet, numbered.`,
+      `${path}.type must be one of: paragraph, heading, bullet, numbered, display_math.`,
     );
   }
+
+  const id =
+    typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : undefined;
+
+  if (type === 'display_math') {
+    const latex = parseLatexField(raw.latex, `${path}.latex`, true);
+    return {
+      type: 'display_math',
+      latex,
+      spans: [],
+      ...(id ? { id } : {}),
+    };
+  }
+
   if (!Array.isArray(raw.spans) || raw.spans.length === 0) {
     throw new RichTextParseError(`${path}.spans must be a non-empty array.`);
   }
@@ -121,16 +198,29 @@ function parseBlock(raw: unknown, path: string): RichTextBlock {
     );
   }
   const spans = raw.spans.map((s, i) => parseSpan(s, `${path}.spans[${i}]`));
-  const id =
-    typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : undefined;
   return {
-    type: type as RichTextBlockType,
+    type: type as Exclude<RichTextBlockType, 'display_math'>,
     spans,
     ...(id ? { id } : {}),
   };
 }
 
-/** Parse + validate LLM rich_text payload. Assigns stable block ids when missing. */
+function totalPlainChars(doc: RichTextDocument): number {
+  let total = 0;
+  for (const block of doc.blocks) {
+    if (isDisplayMathBlock(block)) {
+      total += block.latex.length;
+      continue;
+    }
+    for (const span of block.spans) {
+      if (isInlineMathSpan(span)) total += span.latex.length;
+      else total += span.text.length;
+    }
+  }
+  return total;
+}
+
+/** Parse + validate LLM rich_text payload. Assigns stable block/math ids when missing. */
 export function parseRichTextDocument(raw: unknown): RichTextDocument {
   if (!isRecord(raw)) {
     throw new RichTextParseError('rich_text must be an object with blocks.');
@@ -144,10 +234,7 @@ export function parseRichTextDocument(raw: unknown): RichTextDocument {
     );
   }
   const blocks = raw.blocks.map((b, i) => parseBlock(b, `rich_text.blocks[${i}]`));
-  const total = blocks.reduce(
-    (n, b) => n + b.spans.reduce((m, s) => m + s.text.length, 0),
-    0,
-  );
+  const total = totalPlainChars({ blocks });
   if (total > RICH_TEXT_LIMITS.maxTotalChars) {
     throw new RichTextParseError(
       `rich_text total text exceeds ${RICH_TEXT_LIMITS.maxTotalChars} characters.`,
@@ -156,5 +243,5 @@ export function parseRichTextDocument(raw: unknown): RichTextDocument {
   if (total === 0) {
     throw new RichTextParseError('rich_text must contain non-empty text.');
   }
-  return ensureBlockIds({ blocks });
+  return ensureMathIds(ensureBlockIds({ blocks }));
 }

@@ -655,6 +655,7 @@ export function migrateDocument(raw: unknown): CanvasDocument | null {
     version !== 5 &&
     version !== 6 &&
     version !== 7 &&
+    version !== 8 &&
     version !== DOCUMENT_VERSION
   ) {
     return null;

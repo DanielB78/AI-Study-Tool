@@ -1446,6 +1446,46 @@ textarea {
   white-space: normal;
 }
 
+/* Inline / display math inside TextElement rich text */
+.rt-math--inline {
+  display: inline-block;
+  vertical-align: middle;
+  padding: 0 0.1em;
+  cursor: pointer;
+  max-width: 100%;
+  overflow-x: auto;
+  line-height: 1.2;
+}
+
+.rt-math--display {
+  cursor: pointer;
+  user-select: none;
+}
+
+.rt-math--error {
+  color: #b91c1c;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9em;
+  white-space: pre-wrap;
+}
+
+.popover-action {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 0.45rem 0.65rem;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.popover-action:hover {
+  background: rgba(15, 23, 42, 0.06);
+}
+
 /* —— Equation HTML overlays —— */
 .equation-html-layer {
   position: absolute;
