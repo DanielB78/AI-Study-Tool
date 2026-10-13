@@ -9,13 +9,22 @@ import {
 import { OpacityControl } from './CtxPopover';
 import { TextFeaturesMenu } from './TextFeaturesMenu';
 import { GraphFeaturesMenu } from './GraphFeaturesMenu';
-import type { GraphElement } from '../../types/canvas';
+import { EquationFeaturesMenu } from './EquationFeaturesMenu';
+import type { EquationElement, GraphElement } from '../../types/canvas';
 import { useGraphUiStore } from '../../features/graphs/graphUiStore';
 import { DEFAULT_GRAPH_VIEWPORT } from '../../features/graphs/types';
 import { touch } from '../../utils/ids';
 import type { TextElement } from '../../types/canvas';
 
-type ContextMode = 'text' | 'shape' | 'stroke' | 'image' | 'graph' | 'multi' | null;
+type ContextMode =
+  | 'text'
+  | 'shape'
+  | 'stroke'
+  | 'image'
+  | 'graph'
+  | 'equation'
+  | 'multi'
+  | null;
 
 function resolveMode(
   activeTool: string,
@@ -38,6 +47,9 @@ function resolveMode(
   }
   if (selectedTypes.includes('image')) return 'image';
   if (activeTool === 'graph' || selectedTypes.includes('graph')) return 'graph';
+  if (activeTool === 'equation' || selectedTypes.includes('equation')) {
+    return 'equation';
+  }
   return null;
 }
 
@@ -133,6 +145,7 @@ export function ContextualToolbar() {
   };
 
   const graph = selected.find((el) => el.type === 'graph');
+  const equation = selected.find((el) => el.type === 'equation');
 
   const resetGraphView = () => {
     if (!graph || graph.type !== 'graph') return;
@@ -218,6 +231,16 @@ export function ContextualToolbar() {
             />
           </>
         )}
+        {mode === 'equation' && equation && !equation.locked && (
+          <>
+            <EquationFeaturesMenu element={equation as EquationElement} />
+            <OpacityControl
+              value={style.opacity}
+              onChange={(v) => onLive({ opacity: v })}
+              onCommit={(v) => onCommit({ opacity: v })}
+            />
+          </>
+        )}
         {mode === 'multi' && (
           <OpacityControl
             value={style.opacity}
@@ -233,6 +256,7 @@ export function ContextualToolbar() {
               mode === 'stroke' ||
               mode === 'image' ||
               mode === 'graph' ||
+              mode === 'equation' ||
               mode === 'multi') && <div className="ctx-divider" aria-hidden />}
             <ArrangePopover
               count={selected.length}

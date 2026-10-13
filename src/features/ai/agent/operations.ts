@@ -8,6 +8,7 @@ import type { TextComponentOperation } from './textComponentOperations';
 import type { GraphComponentOperation } from './graphComponentOperations';
 import type { GraphAnnotationOperation } from './graphAnnotationOperations';
 import type { TextMathOperation } from './textMathOperations';
+import type { EquationComponentOperation } from './equationComponentOperations';
 import type { TextCommentType, TextNoteType } from '../../text/textFeatureTypes';
 
 export type { TextFeatureOperation } from './textFeatureOperations';
@@ -15,6 +16,7 @@ export type { TextComponentOperation } from './textComponentOperations';
 export type { GraphComponentOperation } from './graphComponentOperations';
 export type { GraphAnnotationOperation } from './graphAnnotationOperations';
 export type { TextMathOperation } from './textMathOperations';
+export type { EquationComponentOperation } from './equationComponentOperations';
 
 export type PlacementRelation = 'left_of' | 'right_of' | 'above' | 'below' | 'near';
 
@@ -396,7 +398,8 @@ export type CanvasOperation =
   | TextComponentOperation
   | GraphComponentOperation
   | GraphAnnotationOperation
-  | TextMathOperation;
+  | TextMathOperation
+  | EquationComponentOperation;
 
 export type CanvasAgentResponse = {
   operations: CanvasOperation[];
@@ -1199,6 +1202,109 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               to: { type: 'string', enum: ['inline', 'display'] },
             },
           },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'target_element_id', 'latex'],
+            properties: {
+              type: { const: 'add_equation_to_text' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              latex: { type: 'string', minLength: 1 },
+              ref: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'latex'],
+            properties: {
+              type: { const: 'update_equation' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              target_ref: { type: 'string', minLength: 1 },
+              latex: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'text'],
+            properties: {
+              type: { const: 'set_equation_title' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              target_ref: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'component', 'content'],
+            properties: {
+              type: { const: 'add_text_to_equation' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              target_ref: { type: 'string', minLength: 1 },
+              component: {
+                type: 'string',
+                enum: [
+                  'title',
+                  'lead_in',
+                  'step_explanation',
+                  'symbol_definitions',
+                  'interpretation',
+                  'warning',
+                ],
+              },
+              content: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
+              ref: { type: 'string', minLength: 1 },
+              variant: {
+                type: 'string',
+                enum: ['warning', 'common_mistake', 'important_caution'],
+              },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'symbols'],
+            properties: {
+              type: { const: 'add_equation_symbol_definitions' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              target_ref: { type: 'string', minLength: 1 },
+              symbols: {
+                type: 'array',
+                minItems: 1,
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['symbol', 'definition'],
+                  properties: {
+                    symbol: { type: 'string', minLength: 1 },
+                    definition: { type: 'string', minLength: 1 },
+                    unit: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'content'],
+            properties: {
+              type: { const: 'add_equation_interpretation' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_id: { type: 'string', minLength: 1 },
+              target_ref: { type: 'string', minLength: 1 },
+              content: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
+            },
+          },
         ],
       },
     },
@@ -1592,16 +1698,18 @@ Display math block: { "type":"display_math", "latex":"..." } — centred equatio
 Use formatting intentionally — not every sentence needs colour/highlight.
 Prefer one textbox with headings/lists/math over many tiny textboxes for emphasis.
 
-TEXT MATH (edit math inside an existing TextElement — prefer these over create_equation for prose):
+TEXT MATH (short expressions inside TextElement prose — prefer over EquationElement for in-sentence math):
 - insert_inline_math: { "type":"insert_inline_math", "target_element_id":"<id>", "latex":"F=-kx", "after_text":"The restoring force is " }
-- insert_display_math: { "type":"insert_display_math", "target_element_id":"<id>", "latex":"m\\frac{d^2x}{dt^2}=-kx", "after_block_id":"<block id>" }
-- update_text_math: { "type":"update_text_math", "target_element_id":"<id>", "math_id":"<from context>", "latex":"..." }
-- remove_text_math: { "type":"remove_text_math", "target_element_id":"<id>", "math_id":"<from context>" }
-- convert_text_math: { "type":"convert_text_math", "target_element_id":"<id>", "math_id":"<id>", "to":"inline"|"display" }
-Anchors: after_text / before_text (optional block_id or occurrence when ambiguous), after_block_id / before_block_id, or omit to append.
-Inline Math — expressions inside sentences. Display Math — important / derivation equations on their own line.
-Standalone create_equation — ONLY when the user wants a separate movable equation object on the canvas.
-Do NOT duplicate the same formula as both TextElement math and a standalone EquationElement.
+- insert_display_math / update_text_math / remove_text_math / convert_text_math — supported for manual compatibility; prefer EquationElement for substantial centred working.
+
+EQUATION TEXTBOOK COMPONENTS (preferred for derivations / multiline working):
+- add_equation_to_text: { "type":"add_equation_to_text", "target_element_id":"<text id>", "ref":"eq1", "latex":"\\begin{aligned}F&=-kx\\\\m\\ddot{x}&=-kx\\end{aligned}" }
+- add_text_to_equation: { "type":"add_text_to_equation", "target_ref":"eq1", "component":"lead_in"|"step_explanation"|"title"|"symbol_definitions"|"interpretation"|"warning", "content":"…" }
+- set_equation_title / add_equation_symbol_definitions / add_equation_interpretation / update_equation
+- create_equation — standalone EquationElement when not attaching to existing text
+Group consecutive algebraic steps in ONE multiline EquationElement (aligned). Use another EquationElement when prose interrupts.
+Do NOT invent coordinates, font sizes, or layout cells for equation components.
+PRIMARY ELEMENT TYPES ONLY: TextElement, GraphElement, EquationElement (+ their supported components). Never shapes, arrows, freehand, or decorative objects.
 
 GRID COLUMN LIMIT:
 For N created objects: columns must satisfy 1 <= columns <= min(4, ceil(sqrt(N))).

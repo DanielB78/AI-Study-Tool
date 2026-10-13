@@ -50,6 +50,9 @@ export function EquationHtmlLayer({
               color: el.color,
               opacity: el.opacity,
               pointerEvents: 'none',
+              justifyContent:
+                el.displayMode === 'inline' ? 'flex-start' : 'center',
+              textAlign: el.displayMode === 'inline' ? 'left' : 'center',
             }}
           >
             {error ? (
@@ -61,6 +64,10 @@ export function EquationHtmlLayer({
             ) : (
               <div
                 className="equation-html-math"
+                style={{
+                  textAlign: el.displayMode === 'inline' ? 'left' : 'center',
+                  width: '100%',
+                }}
                 dangerouslySetInnerHTML={{ __html: html }}
               />
             )}

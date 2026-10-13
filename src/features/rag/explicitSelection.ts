@@ -78,11 +78,11 @@ export function resolveExplicitSelection(
       },
       image_src: el.type === 'image' ? el.src : null,
     });
-    // Include GraphElements attached to a selected TextElement (association metadata).
+    // Include GraphElements / EquationElements attached to a selected TextElement.
     if (el.type === 'text') {
       for (const other of elements) {
         if (
-          other.type === 'graph' &&
+          (other.type === 'graph' || other.type === 'equation') &&
           other.association?.associatedElementId === el.id &&
           !seen.has(other.id)
         ) {
@@ -104,8 +104,8 @@ export function resolveExplicitSelection(
         }
       }
     }
-    // Include TextElements attached to a selected GraphElement (explanations, etc.).
-    if (el.type === 'graph') {
+    // Include TextElements attached to a selected GraphElement or EquationElement.
+    if (el.type === 'graph' || el.type === 'equation') {
       for (const other of elements) {
         if (
           other.type === 'text' &&

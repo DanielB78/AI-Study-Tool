@@ -21,15 +21,24 @@ import type {
 
 export type { TextComponentMeta, TextComponentType };
 
-export const DOCUMENT_VERSION = 9 as const;
+export const DOCUMENT_VERSION = 10 as const;
 
-/** Logical association of a GraphElement to a parent TextElement. */
-export type GraphAssociationMeta = {
+/**
+ * Logical association of a GraphElement or EquationElement to a parent TextElement.
+ * Child TextElements use TextComponentMeta.associatedElementId instead.
+ */
+export type ElementAssociationMeta = {
   associatedElementId?: string;
   placementMode: 'auto' | 'manual';
-  /** Order among graphs attached to the same TextElement (creation order). */
+  /** Order among siblings attached to the same parent (creation order). */
   order?: number;
 };
+
+/** @deprecated Alias — prefer ElementAssociationMeta. */
+export type GraphAssociationMeta = ElementAssociationMeta;
+
+/** Association of an EquationElement to a parent TextElement. */
+export type EquationAssociationMeta = ElementAssociationMeta;
 
 export type ShapeType =
   | 'rectangle'
@@ -136,11 +145,16 @@ export interface TextElement extends BaseElement {
 /** Standalone mathematical expression — LaTeX is the source of truth. */
 export interface EquationElement extends BaseElement {
   type: 'equation';
-  /** Canonical LaTeX source (no $ / $$ fences). */
+  /** Canonical LaTeX source (no $ / $$ fences). May be multiline / aligned. */
   latex: string;
   fontSize: number;
   color: string;
   displayMode: EquationDisplayMode;
+  /**
+   * Optional association to a parent TextElement (textbook derivation).
+   * Equation remains an independent editable canvas object.
+   */
+  association?: EquationAssociationMeta;
 }
 
 export interface ShapeElement extends BaseElement {

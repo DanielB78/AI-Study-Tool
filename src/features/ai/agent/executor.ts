@@ -52,6 +52,16 @@ import {
   type TextMathOperation,
 } from './textMathOperations';
 import {
+  executeAddEquationInterpretation,
+  executeAddEquationSymbolDefinitions,
+  executeAddEquationToText,
+  executeAddTextToEquation,
+  executeSetEquationTitle,
+  executeUpdateEquation,
+  isEquationComponentOperationType,
+  type EquationComponentOperation,
+} from './equationComponentOperations';
+import {
   executeAddLinkedComment,
   executeCreateTextComponent,
   executeUpdateTextComponent,
@@ -929,6 +939,55 @@ export function executeCanvasOperations(
           continue;
         }
 
+        if (isEquationComponentOperationType(op.type)) {
+          const eOp = op as EquationComponentOperation;
+          const eCtx = {
+            getElements: () => target.getElements(),
+            getCamera: () => target.getCamera(),
+            getViewportSize: target.getViewportSize,
+            nextZIndex: () => target.nextZIndex(),
+            addElement: (el: CanvasElement, select?: boolean) =>
+              target.addElement(el, select),
+            updateElement: target.updateElement,
+            resolveRef,
+          };
+
+          if (eOp.type === 'add_equation_to_text') {
+            const { createdId } = executeAddEquationToText(eOp, eCtx);
+            createdIds.push(createdId);
+            if (eOp.ref) planRefMap.set(eOp.ref, createdId);
+            continue;
+          }
+          if (eOp.type === 'update_equation') {
+            const { updatedId } = executeUpdateEquation(eOp, eCtx);
+            updatedIds.push(updatedId);
+            continue;
+          }
+          if (eOp.type === 'set_equation_title') {
+            const result = executeSetEquationTitle(eOp, eCtx);
+            if (result.createdId) createdIds.push(result.createdId);
+            if (result.updatedId) updatedIds.push(result.updatedId);
+            continue;
+          }
+          if (eOp.type === 'add_text_to_equation') {
+            const { createdId } = executeAddTextToEquation(eOp, eCtx);
+            createdIds.push(createdId);
+            if (eOp.ref) planRefMap.set(eOp.ref, createdId);
+            continue;
+          }
+          if (eOp.type === 'add_equation_symbol_definitions') {
+            const result = executeAddEquationSymbolDefinitions(eOp, eCtx);
+            createdIds.push(result.createdId);
+            if (result.updatedId) updatedIds.push(result.updatedId);
+            continue;
+          }
+          if (eOp.type === 'add_equation_interpretation') {
+            const { createdId } = executeAddEquationInterpretation(eOp, eCtx);
+            createdIds.push(createdId);
+            continue;
+          }
+        }
+
         if (isGridCreatableOp(op)) {
           const forced =
             gridResolved && op.ref ? gridResolved.byRef.get(op.ref) : undefined;
@@ -964,9 +1023,11 @@ export function executeCanvasOperations(
               : isTextFeatureOperationType(op.type) ||
                   isTextMathOperationType(op.type)
                 ? 'text_feature'
-                : op.type.startsWith('create_')
-                  ? 'create'
-                  : 'apply',
+                : isEquationComponentOperationType(op.type)
+                  ? 'text_component'
+                  : op.type.startsWith('create_')
+                    ? 'create'
+                    : 'apply',
           message: 'Canvas operation failed',
           cause,
         });

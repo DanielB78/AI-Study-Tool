@@ -37,8 +37,72 @@ export const COMPONENT_ROLES = [
   'graph_warning',
   'graph_exercise',
   'attached_graph_parent',
+  /** Textbook components attached to an EquationElement. */
+  'equation_title',
+  'equation_lead_in',
+  'equation_step_explanation',
+  'equation_symbol_definitions',
+  'equation_interpretation',
+  'equation_warning',
 ] as const;
 export type ComponentRole = (typeof COMPONENT_ROLES)[number];
+
+/** Equation-associated semantic component kinds (agent + UI). */
+export const EQUATION_COMPONENT_KINDS = [
+  'title',
+  'lead_in',
+  'step_explanation',
+  'symbol_definitions',
+  'interpretation',
+  'warning',
+] as const;
+export type EquationComponentKind = (typeof EQUATION_COMPONENT_KINDS)[number];
+
+export function isEquationComponentKind(v: string): v is EquationComponentKind {
+  return (EQUATION_COMPONENT_KINDS as readonly string[]).includes(v);
+}
+
+/** Map equation component kind → TextComponentType + role. */
+export function equationComponentMapping(kind: EquationComponentKind): {
+  componentType: TextComponentType;
+  role: ComponentRole;
+  defaultLabel: string | null;
+} {
+  switch (kind) {
+    case 'title':
+      return { componentType: 'title', role: 'equation_title', defaultLabel: null };
+    case 'lead_in':
+      return {
+        componentType: 'main_text',
+        role: 'equation_lead_in',
+        defaultLabel: null,
+      };
+    case 'step_explanation':
+      return {
+        componentType: 'main_text',
+        role: 'equation_step_explanation',
+        defaultLabel: null,
+      };
+    case 'symbol_definitions':
+      return {
+        componentType: 'definition',
+        role: 'equation_symbol_definitions',
+        defaultLabel: 'where',
+      };
+    case 'interpretation':
+      return {
+        componentType: 'key_observation',
+        role: 'equation_interpretation',
+        defaultLabel: 'Interpretation',
+      };
+    case 'warning':
+      return {
+        componentType: 'warning',
+        role: 'equation_warning',
+        defaultLabel: 'Warning',
+      };
+  }
+}
 
 /** Map textbook component type → graph-association role. */
 export function graphRoleForComponentType(
@@ -306,6 +370,22 @@ export const TEXT_COMPONENT_STYLES: Record<TextComponentType, TextComponentStyle
     defaultLabel: 'Key Observation',
   },
 };
+
+/** Format symbol definitions into compact textbook "where:" text. */
+export function formatSymbolDefinitions(
+  symbols: Array<{ symbol: string; definition: string; unit?: string }>,
+): string {
+  const lines = symbols
+    .map((s) => {
+      const sym = s.symbol.trim();
+      const def = s.definition.trim();
+      if (!sym || !def) return '';
+      const unit = s.unit?.trim();
+      return unit ? `${sym} — ${def} (${unit})` : `${sym} — ${def}`;
+    })
+    .filter(Boolean);
+  return lines.join('\n');
+}
 
 export function isTextComponentType(v: unknown): v is TextComponentType {
   return typeof v === 'string' && (TEXT_COMPONENT_TYPES as readonly string[]).includes(v);

@@ -110,25 +110,41 @@ export function measureEquationSize(
   const source = sanitizeLatexSource(latex);
   const pad = EQUATION_PADDING * 2;
 
+  // Count aligned / gathered lines for heuristic height when DOM is unavailable.
+  const lineHints =
+    (source.match(/\\\\/g)?.length ?? 0) +
+    (source.includes('\\begin{aligned}') || source.includes('\\begin{gather}')
+      ? 1
+      : 0);
+
   if (typeof document === 'undefined') {
     const approx = Math.max(source.length * fontSize * 0.45, EQUATION_MIN_WIDTH);
+    const lines = Math.max(1, lineHints || 1);
     return {
       width: Math.min(Math.max(approx + pad, EQUATION_MIN_WIDTH), maxWidth),
-      height: Math.max(fontSize * (displayMode ? 2.2 : 1.4) + pad, EQUATION_MIN_HEIGHT),
+      height: Math.max(
+        fontSize * (displayMode ? 2.2 : 1.4) * lines + pad,
+        EQUATION_MIN_HEIGHT,
+      ),
     };
   }
 
   const { html, error } = renderLatexHtml(source, { displayMode });
   const host = document.createElement('div');
+  // Allow multiline display equations (aligned/gather) to wrap vertically.
+  // Inline mode keeps nowrap for single-line metrics.
+  const whiteSpace = displayMode ? 'normal' : 'nowrap';
   host.style.cssText = [
     'position:absolute',
     'left:-99999px',
     'top:0',
     'visibility:hidden',
     `font-size:${fontSize}px`,
-    'line-height:1.2',
+    'line-height:1.35',
     'display:inline-block',
-    'white-space:nowrap',
+    `white-space:${whiteSpace}`,
+    `max-width:${maxWidth}px`,
+    'text-align:center',
   ].join(';');
   if (error || !html) {
     host.textContent = source || '(empty)';
