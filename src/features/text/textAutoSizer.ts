@@ -210,15 +210,39 @@ function estimateRichLayout(
   let contentHeight = 0;
   let wrappedLines = 0;
   for (const block of richText.blocks) {
-    const text = block.spans.map((s) => s.text).join('');
+    if (block.type === 'display_math') {
+      // Display equations: taller than body, with vertical spacing.
+      const displaySize = style.fontSize * 1.15;
+      const approxLines = Math.max(1.8, 1.2 + block.latex.length / 48);
+      const blockH = approxLines * displaySize * 1.35 + style.fontSize * 1.3;
+      contentHeight += blockH;
+      wrappedLines += Math.ceil(approxLines);
+      continue;
+    }
+
+    // Approximate inline math width contribution for wrap estimates.
+    let text = '';
+    for (const s of block.spans) {
+      if (s.type === 'inline_math') {
+        text += 'M'.repeat(Math.max(2, Math.ceil(s.latex.length * 0.65)));
+      } else {
+        text += s.text;
+      }
+    }
     const spanSize = block.spans.reduce((max, s) => {
+      if (s.type === 'inline_math') {
+        return Math.max(max, style.fontSize * 1.1);
+      }
       const sz = resolveRichTextFontSize(s.style?.font_size, style.fontSize);
       return Math.max(max, sz);
     }, style.fontSize);
 
     if (block.type === 'heading') {
+      const headingSpan = block.spans.find((s) => s.type !== 'inline_math');
       const size = resolveRichTextFontSize(
-        block.spans[0]?.style?.font_size ?? 'heading',
+        headingSpan && headingSpan.type !== 'inline_math'
+          ? headingSpan.style?.font_size ?? 'heading'
+          : 'heading',
         style.fontSize,
       );
       const lines = countWrappedLinesForParagraph(text, contentWidth, size);

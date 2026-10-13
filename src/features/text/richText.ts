@@ -1,6 +1,11 @@
 /**
  * Structured rich text for TextElements.
  * Plain `text` on TextElement remains the RAG / legacy extract.
+ *
+ * Mathematical expressions are first-class nodes:
+ * - inline_math spans participate in paragraph flow
+ * - display_math blocks are dedicated centred equation blocks
+ * Both store original LaTeX source (never rendered image bytes).
  */
 
 export type RichTextColorName =
@@ -36,24 +41,59 @@ export type RichTextSpanStyle = {
   font_size?: RichTextSizePreset | number;
 };
 
-export type RichTextSpan = {
+/** Ordinary text run (legacy spans omit `type`). */
+export type RichTextTextSpan = {
+  type?: 'text';
   text: string;
   style?: RichTextSpanStyle;
 };
 
-export type RichTextBlockType = 'paragraph' | 'heading' | 'bullet' | 'numbered';
+/** Atomic inline LaTeX expression embedded in a paragraph/list/heading. */
+export type RichTextInlineMathSpan = {
+  type: 'inline_math';
+  /** Stable id assigned on parse/normalize when missing. */
+  id?: string;
+  latex: string;
+  /** Optional chrome styles (color / highlight / comment mark). */
+  style?: Pick<
+    RichTextSpanStyle,
+    'color' | 'highlight_color' | 'linked_comment_id'
+  >;
+};
 
-export type RichTextBlock = {
+export type RichTextSpan = RichTextTextSpan | RichTextInlineMathSpan;
+
+export type RichTextBlockType =
+  | 'paragraph'
+  | 'heading'
+  | 'bullet'
+  | 'numbered'
+  | 'display_math';
+
+export type RichTextContentBlockType = Exclude<RichTextBlockType, 'display_math'>;
+
+export type RichTextContentBlock = {
   /**
    * Stable block id for headings / comment anchors.
    * Assigned on parse/normalize when missing (backward compatible).
    */
   id?: string;
-  type: RichTextBlockType;
+  type: RichTextContentBlockType;
   /** Optional role hint for paragraphs (e.g. heading) — normalized into type. */
   role?: 'heading' | 'body';
   spans: RichTextSpan[];
 };
+
+/** Dedicated block-level LaTeX equation (display style, centred). */
+export type RichTextDisplayMathBlock = {
+  id?: string;
+  type: 'display_math';
+  latex: string;
+  /** Always empty — display math has no text spans. */
+  spans: [];
+};
+
+export type RichTextBlock = RichTextContentBlock | RichTextDisplayMathBlock;
 
 export type RichTextDocument = {
   blocks: RichTextBlock[];
@@ -92,11 +132,37 @@ export const RICH_TEXT_LIMITS = {
   maxSpansPerBlock: 40,
   maxSpanChars: 4000,
   maxTotalChars: 20000,
+  maxLatexChars: 2000,
   minFontSize: 10,
   maxFontSize: 48,
 } as const;
 
 const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+export function isInlineMathSpan(span: RichTextSpan): span is RichTextInlineMathSpan {
+  return span.type === 'inline_math';
+}
+
+export function isTextSpan(span: RichTextSpan): span is RichTextTextSpan {
+  return span.type !== 'inline_math';
+}
+
+export function isDisplayMathBlock(
+  block: RichTextBlock,
+): block is RichTextDisplayMathBlock {
+  return block.type === 'display_math';
+}
+
+/** Searchable plain extract for one math node — used by RAG / anchors. */
+export function latexPlainExtract(latex: string): string {
+  return `[LaTeX: ${latex}]`;
+}
+
+/** Plain-text contribution of a single span (math → searchable token). */
+export function spanPlainText(span: RichTextSpan): string {
+  if (isInlineMathSpan(span)) return latexPlainExtract(span.latex);
+  return span.text;
+}
 
 export function resolveRichTextColor(
   value: string | undefined,
@@ -141,18 +207,13 @@ export function resolveRichTextFontSize(
 /** Plain-text extract for RAG / legacy — reading order, no style metadata. */
 export function richTextToPlainText(doc: RichTextDocument): string {
   const lines: string[] = [];
-  let numbered = 0;
   for (const block of doc.blocks) {
-    const content = block.spans.map((s) => s.text).join('');
-    if (block.type === 'bullet') {
-      lines.push(content);
-    } else if (block.type === 'numbered') {
-      numbered += 1;
-      lines.push(content);
-    } else {
-      numbered = 0;
-      lines.push(content);
+    if (isDisplayMathBlock(block)) {
+      lines.push(latexPlainExtract(block.latex));
+      continue;
     }
+    const content = block.spans.map(spanPlainText).join('');
+    lines.push(content);
   }
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd();
 }
@@ -182,8 +243,35 @@ export function isPlainRichText(doc: RichTextDocument): boolean {
       b.type === 'paragraph' &&
       b.spans.every(
         (s) =>
-          !s.style ||
-          Object.values(s.style).every((v) => v === undefined || v === false),
+          isTextSpan(s) &&
+          (!s.style ||
+            Object.values(s.style).every((v) => v === undefined || v === false)),
       ),
   );
+}
+
+/** Create an inline math span (id optional — assigned on normalize). */
+export function createInlineMathSpan(
+  latex: string,
+  options?: { id?: string; style?: RichTextInlineMathSpan['style'] },
+): RichTextInlineMathSpan {
+  return {
+    type: 'inline_math',
+    latex,
+    ...(options?.id ? { id: options.id } : {}),
+    ...(options?.style ? { style: options.style } : {}),
+  };
+}
+
+/** Create a display math block (id optional — assigned on normalize). */
+export function createDisplayMathBlock(
+  latex: string,
+  options?: { id?: string },
+): RichTextDisplayMathBlock {
+  return {
+    type: 'display_math',
+    latex,
+    spans: [],
+    ...(options?.id ? { id: options.id } : {}),
+  };
 }

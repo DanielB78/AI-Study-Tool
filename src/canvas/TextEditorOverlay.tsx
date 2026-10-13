@@ -7,6 +7,11 @@ import {
   type RichTextDocument,
 } from '../features/text/richText';
 import { htmlToRichText, richTextToHtml } from '../features/text/richTextHtml';
+import {
+  findRichMathSelection,
+  promptForLatex,
+  updateRichMathNode,
+} from '../features/text/richTextCommands';
 
 type Editable =
   | { kind: 'text'; element: TextElement }
@@ -41,9 +46,9 @@ export function TextEditorOverlay({
   const ignoreBlurUntil = useRef(0);
   const id = target.element.id;
   const isText = target.kind === 'text';
-  const useRich =
-    isText &&
-    !!(target.element.richText && target.element.richText.blocks.length > 0);
+  // Always use the rich editor for TextElements so inline/display math can be
+  // inserted even when the element previously stored only plain text.
+  const useRich = isText;
 
   useLayoutEffect(() => {
     ignoreBlurUntil.current = Date.now() + 300;
@@ -157,7 +162,15 @@ export function TextEditorOverlay({
           outline: '2px solid rgba(37, 99, 235, 0.35)',
         }}
         onInput={() => commitRich()}
-        onMouseDown={(e) => e.stopPropagation()}
+        onMouseDown={(e) => {
+          e.stopPropagation();
+          const math = findRichMathSelection(e.target);
+          if (math && e.detail >= 2) {
+            e.preventDefault();
+            const latex = promptForLatex(math.latex, math.mode);
+            if (latex) updateRichMathNode(math, latex);
+          }
+        }}
         onPointerDown={(e) => e.stopPropagation()}
         onBlur={() => {
           if (Date.now() < ignoreBlurUntil.current) {
@@ -173,6 +186,15 @@ export function TextEditorOverlay({
             e.preventDefault();
             commitRich();
             onClose();
+          }
+          // Delete / Backspace removes a selected math atom.
+          if (e.key === 'Backspace' || e.key === 'Delete') {
+            const math = findRichMathSelection();
+            if (math) {
+              e.preventDefault();
+              math.element.remove();
+              commitRich();
+            }
           }
         }}
       />

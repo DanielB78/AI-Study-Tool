@@ -4,14 +4,21 @@
  * Font sizes in generated HTML use `em` relative to the host's CSS font-size so
  * a single camera zoom scale on the host scales headings, body, and mixed spans
  * together (world coordinates stay fixed on the TextElement).
+ *
+ * Inline/display math reuse KaTeX via features/equations/latex.ts.
  */
 
+import { renderLatexHtml } from '../equations/latex';
 import {
+  isDisplayMathBlock,
+  isInlineMathSpan,
   resolveRichTextColor,
   resolveRichTextFontSize,
   type RichTextBlock,
   type RichTextDocument,
+  type RichTextInlineMathSpan,
   type RichTextSpan,
+  type RichTextTextSpan,
 } from './richText';
 
 function escapeHtml(s: string): string {
@@ -26,12 +33,50 @@ function escapeHtml(s: string): string {
 function fontSizeToEm(worldPx: number, baseFontSize: number): string {
   const base = Math.max(baseFontSize, 1);
   const em = worldPx / base;
-  // Keep short CSS; avoid floating noise.
   return `${Math.round(em * 1000) / 1000}em`;
 }
 
-function spanToHtml(
-  span: RichTextSpan,
+function mathChromeStyle(
+  style: RichTextInlineMathSpan['style'] | undefined,
+  defaults: { color: string },
+): string {
+  if (!style) return '';
+  const parts: string[] = [];
+  if (style.color) {
+    const color = resolveRichTextColor(style.color, 'text', defaults.color);
+    if (color !== defaults.color) parts.push(`color:${color}`);
+  }
+  if (style.highlight_color) {
+    parts.push(
+      `background-color:${resolveRichTextColor(style.highlight_color, 'highlight', '#FEF08A')}`,
+    );
+  }
+  if (style.linked_comment_id) {
+    parts.push('background-color:rgba(221,214,254,0.55)');
+    parts.push('border-bottom:2px solid #7C3AED');
+  }
+  return parts.length ? ` style="${parts.join(';')}"` : '';
+}
+
+function inlineMathToHtml(
+  span: RichTextInlineMathSpan,
+  defaults: { color: string; fontSize: number },
+): string {
+  const { html, error } = renderLatexHtml(span.latex, { displayMode: false });
+  const idAttr = span.id ? ` data-rt-math-id="${escapeHtml(span.id)}"` : '';
+  const latexAttr = ` data-rt-latex="${escapeHtml(span.latex)}"`;
+  const chrome = mathChromeStyle(span.style, defaults);
+  const commentAttr = span.style?.linked_comment_id
+    ? ` data-linked-comment="${escapeHtml(span.style.linked_comment_id)}"`
+    : '';
+  if (error || !html) {
+    return `<span contenteditable="false" data-rt-span="inline_math"${idAttr}${latexAttr}${commentAttr}${chrome} class="rt-math rt-math--inline rt-math--error" title="${escapeHtml(error ?? 'Invalid LaTeX')}">${escapeHtml(span.latex)}</span>`;
+  }
+  return `<span contenteditable="false" data-rt-span="inline_math"${idAttr}${latexAttr}${commentAttr}${chrome} class="rt-math rt-math--inline">${html}</span>`;
+}
+
+function textSpanToHtml(
+  span: RichTextTextSpan,
   defaults: { color: string; fontSize: number },
 ): string {
   const style = span.style ?? {};
@@ -47,11 +92,9 @@ function spanToHtml(
   if (style.italic) parts.push('font-style:italic');
   if (style.underline || hasComment) parts.push('text-decoration:underline');
   if (color !== defaults.color) parts.push(`color:${color}`);
-  // Relative em so zooming the host scales all spans uniformly.
   if (fontSize !== defaults.fontSize) {
     parts.push(`font-size:${fontSizeToEm(fontSize, defaults.fontSize)}`);
   }
-  // Ordinary highlight and linked-comment marks coexist.
   if (highlight) parts.push(`background-color:${highlight}`);
   else if (hasComment) parts.push('background-color:rgba(221,214,254,0.55)');
   if (hasComment) {
@@ -68,11 +111,37 @@ function spanToHtml(
   return `<span${attrs}${parts.length ? ` style="${parts.join(';')}"` : ''}>${text}</span>`;
 }
 
+function spanToHtml(
+  span: RichTextSpan,
+  defaults: { color: string; fontSize: number },
+): string {
+  if (isInlineMathSpan(span)) return inlineMathToHtml(span, defaults);
+  return textSpanToHtml(span, defaults);
+}
+
+function displayMathToHtml(
+  block: Extract<RichTextBlock, { type: 'display_math' }>,
+  defaults: { color: string; fontSize: number },
+): string {
+  const { html, error } = renderLatexHtml(block.latex, { displayMode: true });
+  const idAttr = block.id ? ` data-rt-math-id="${escapeHtml(block.id)}"` : '';
+  const latexAttr = ` data-rt-latex="${escapeHtml(block.latex)}"`;
+  const inner =
+    error || !html
+      ? `<span class="rt-math--error" title="${escapeHtml(error ?? 'Invalid LaTeX')}">${escapeHtml(block.latex)}</span>`
+      : html;
+  // Centred display block; overflow-x for unusually wide expressions.
+  return `<div data-rt-type="display_math"${idAttr}${latexAttr} class="rt-math rt-math--display" contenteditable="false" style="display:block;text-align:center;margin:0.65em 0;padding:0.15em 0;overflow-x:auto;line-height:1.35;font-size:${fontSizeToEm(defaults.fontSize * 1.15, defaults.fontSize)};background:transparent;border:none">${inner}</div>`;
+}
+
 function blockToHtml(
   block: RichTextBlock,
   defaults: { color: string; fontSize: number },
   numberedIndex: number,
 ): { html: string; nextNumbered: number } {
+  if (isDisplayMathBlock(block)) {
+    return { html: displayMathToHtml(block, defaults), nextNumbered: 0 };
+  }
   const inner = block.spans.map((s) => spanToHtml(s, defaults)).join('');
   if (block.type === 'heading') {
     const size = resolveRichTextFontSize('heading', defaults.fontSize);
@@ -119,7 +188,6 @@ export function richTextToHtml(
     numbered = block.type === 'numbered' ? nextNumbered : 0;
     parts.push(html);
   }
-  // font-size:1em — inherit from host (which applies camera.zoom for overlays).
   return `<div data-rt-root="1" style="font-family:${defaults.fontFamily};font-size:1em;color:${defaults.color};line-height:1.35;word-wrap:break-word;overflow-wrap:anywhere">${parts.join('')}</div>`;
 }
 
@@ -142,7 +210,6 @@ function styleFromElement(
       ? rgbToHex(cs.backgroundColor)
       : cs.backgroundColor;
   }
-  // Convert computed screen px back to world font size via root ratio.
   const computedPx = parseFloat(computed.fontSize);
   if (Number.isFinite(computedPx) && rootFontPx > 0) {
     const world = Math.round((computedPx / rootFontPx) * baseFontSize);
@@ -160,6 +227,30 @@ function rgbToHex(rgb: string): string {
   return `#${h(m[1]!)}${h(m[2]!)}${h(m[3]!)}`.toUpperCase();
 }
 
+function inlineMathFromElement(el: HTMLElement): RichTextInlineMathSpan {
+  const latex = el.getAttribute('data-rt-latex') ?? el.textContent ?? '';
+  const id = el.getAttribute('data-rt-math-id') ?? undefined;
+  const linked = el.getAttribute('data-linked-comment') ?? undefined;
+  const style: RichTextInlineMathSpan['style'] = {};
+  if (el.style.color) {
+    style.color = el.style.color.startsWith('rgb')
+      ? rgbToHex(el.style.color)
+      : el.style.color;
+  }
+  if (el.style.backgroundColor && el.style.backgroundColor !== 'transparent') {
+    style.highlight_color = el.style.backgroundColor.startsWith('rgb')
+      ? rgbToHex(el.style.backgroundColor)
+      : el.style.backgroundColor;
+  }
+  if (linked) style.linked_comment_id = linked;
+  return {
+    type: 'inline_math',
+    latex,
+    ...(id ? { id } : {}),
+    ...(Object.keys(style).length ? { style } : {}),
+  };
+}
+
 function spansFromNode(
   node: Node,
   baseFontSize: number,
@@ -173,7 +264,14 @@ function spansFromNode(
   }
   if (node.nodeType !== Node.ELEMENT_NODE) return [];
   const el = node as HTMLElement;
+
+  if (el.getAttribute('data-rt-span') === 'inline_math') {
+    return [inlineMathFromElement(el)];
+  }
+
+  // Skip list markers / other non-editable chrome, but not math (handled above).
   if (el.getAttribute('contenteditable') === 'false') return [];
+
   const merged = {
     ...(inherited ?? {}),
     ...(styleFromElement(el, baseFontSize, rootFontPx) ?? {}),
@@ -190,8 +288,16 @@ function spansFromNode(
 function mergeAdjacentSpans(spans: RichTextSpan[]): RichTextSpan[] {
   const out: RichTextSpan[] = [];
   for (const s of spans) {
+    if (isInlineMathSpan(s)) {
+      out.push({ ...s });
+      continue;
+    }
     const prev = out[out.length - 1];
-    if (prev && JSON.stringify(prev.style ?? {}) === JSON.stringify(s.style ?? {})) {
+    if (
+      prev &&
+      !isInlineMathSpan(prev) &&
+      JSON.stringify(prev.style ?? {}) === JSON.stringify(s.style ?? {})
+    ) {
       prev.text += s.text;
     } else {
       out.push({ ...s });
@@ -220,13 +326,26 @@ export function htmlToRichText(
 
   for (const node of nodes) {
     const el = node as HTMLElement;
-    const typeAttr = el.getAttribute('data-rt-type') as RichTextBlock['type'] | null;
+    const typeAttr = el.getAttribute('data-rt-type');
+
+    if (typeAttr === 'display_math') {
+      const latex = el.getAttribute('data-rt-latex') ?? el.textContent ?? '';
+      const id = el.getAttribute('data-rt-math-id') ?? undefined;
+      blocks.push({
+        type: 'display_math',
+        latex,
+        spans: [],
+        ...(id ? { id } : {}),
+      });
+      continue;
+    }
+
     let contentRoot: HTMLElement = el;
     if (typeAttr === 'bullet' || typeAttr === 'numbered') {
       contentRoot = (el.querySelector(':scope > div') as HTMLElement) ?? el;
     }
     const spans = spansFromNode(contentRoot, baseFontSize, rootFontPx);
-    const type: RichTextBlock['type'] =
+    const type: Exclude<RichTextBlock['type'], 'display_math'> =
       typeAttr === 'heading' || typeAttr === 'bullet' || typeAttr === 'numbered'
         ? typeAttr
         : 'paragraph';
@@ -259,19 +378,7 @@ export function measureRichTextHeight(
   const contentWidth = Math.max(width - pad * 2, 40);
 
   if (typeof document === 'undefined') {
-    let lines = 0;
-    for (const block of doc.blocks) {
-      const text = block.spans.map((s) => s.text).join('');
-      const size = resolveRichTextFontSize(
-        block.type === 'heading' ? 'heading' : block.spans[0]?.style?.font_size,
-        defaults.fontSize,
-      );
-      const avg = size * 0.52;
-      const cpl = Math.max(1, Math.floor(contentWidth / avg));
-      lines += Math.max(1, Math.ceil(Math.max(text.length, 1) / cpl));
-      lines += 0.35;
-    }
-    return Math.max(56, Math.ceil(lines * defaults.fontSize * (defaults.lineHeight ?? 1.35) + pad * 2));
+    return estimateRichTextHeightFallback(doc, contentWidth, defaults, pad);
   }
 
   const host = document.createElement('div');
@@ -282,7 +389,6 @@ export function measureRichTextHeight(
     'visibility:hidden',
     `width:${contentWidth}px`,
     'box-sizing:border-box',
-    // World-space font size — zoom must not affect measurement.
     `font-size:${defaults.fontSize}px`,
     `font-family:${defaults.fontFamily}`,
     `color:${defaults.color}`,
@@ -304,25 +410,50 @@ export function measureRichTextHeight(
   );
   document.body.removeChild(host);
 
-  // Stub DOM environments (e.g. happy-dom) report 0 — use structural fallback.
   if (contentHeight < defaults.fontSize * 0.5) {
-    let lines = 0;
-    for (const block of doc.blocks) {
-      const text = block.spans.map((s) => s.text).join('');
-      const size = resolveRichTextFontSize(
-        block.type === 'heading' ? 'heading' : block.spans[0]?.style?.font_size,
-        defaults.fontSize,
-      );
-      const avg = size * 0.52;
-      const cpl = Math.max(1, Math.floor(contentWidth / avg));
-      lines += Math.max(1, Math.ceil(Math.max(text.length, 1) / cpl));
-      lines += 0.35;
-    }
-    return Math.max(
-      56,
-      Math.ceil(lines * defaults.fontSize * (defaults.lineHeight ?? 1.35) + pad * 2),
-    );
+    return estimateRichTextHeightFallback(doc, contentWidth, defaults, pad);
   }
 
   return Math.max(56, Math.ceil(contentHeight + pad * 2 + 4));
+}
+
+function estimateRichTextHeightFallback(
+  doc: RichTextDocument,
+  contentWidth: number,
+  defaults: { fontSize: number; lineHeight?: number },
+  pad: number,
+): number {
+  let lines = 0;
+  for (const block of doc.blocks) {
+    if (isDisplayMathBlock(block)) {
+      // Tall display equations (fractions etc.) need more than one body line.
+      const approx = Math.max(2.2, 1.2 + block.latex.length / 40);
+      lines += approx;
+      lines += 0.8;
+      continue;
+    }
+    let textLen = 0;
+    let extraMathWidth = 0;
+    for (const s of block.spans) {
+      if (isInlineMathSpan(s)) {
+        // Treat inline math as wider than raw latex char count.
+        textLen += Math.max(2, Math.ceil(s.latex.length * 0.7));
+        extraMathWidth += defaults.fontSize * 0.35;
+      } else {
+        textLen += s.text.length;
+      }
+    }
+    const size = resolveRichTextFontSize(
+      block.type === 'heading' ? 'heading' : undefined,
+      defaults.fontSize,
+    );
+    const avg = size * 0.52;
+    const cpl = Math.max(1, Math.floor((contentWidth - extraMathWidth) / avg));
+    lines += Math.max(1, Math.ceil(Math.max(textLen, 1) / cpl));
+    lines += 0.35;
+  }
+  return Math.max(
+    56,
+    Math.ceil(lines * defaults.fontSize * (defaults.lineHeight ?? 1.35) + pad * 2),
+  );
 }

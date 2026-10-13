@@ -47,6 +47,11 @@ import {
   type TextFeatureOperation,
 } from './textFeatureOperations';
 import {
+  applyTextMathOperation,
+  isTextMathOperationType,
+  type TextMathOperation,
+} from './textMathOperations';
+import {
   executeAddLinkedComment,
   executeCreateTextComponent,
   executeUpdateTextComponent,
@@ -909,6 +914,21 @@ export function executeCanvasOperations(
           continue;
         }
 
+        if (isTextMathOperationType(op.type)) {
+          const mathOp = op as TextMathOperation;
+          const id = mathOp.target_element_id;
+          const before = target.getElements().find((e) => e.id === id);
+          if (!before || before.type !== 'text') {
+            throw new Error(`Target "${id}" is not a TextElement.`);
+          }
+          target.updateElement(id, (el) => {
+            if (el.type !== 'text') return el;
+            return applyTextMathOperation(el, mathOp);
+          });
+          updatedIds.push(id);
+          continue;
+        }
+
         if (isGridCreatableOp(op)) {
           const forced =
             gridResolved && op.ref ? gridResolved.byRef.get(op.ref) : undefined;
@@ -941,7 +961,8 @@ export function executeCanvasOperations(
             ? 'text_component'
             : isTextComponentOperationType(op.type)
               ? 'text_component'
-              : isTextFeatureOperationType(op.type)
+              : isTextFeatureOperationType(op.type) ||
+                  isTextMathOperationType(op.type)
                 ? 'text_feature'
                 : op.type.startsWith('create_')
                   ? 'create'

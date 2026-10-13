@@ -7,11 +7,18 @@ import { nanoid } from 'nanoid';
 import type { TextElement } from '../../types/canvas';
 import {
   getRichTextDocument,
+  isDisplayMathBlock,
+  isInlineMathSpan,
+  isTextSpan,
+  latexPlainExtract,
   plainTextToRichText,
   richTextToPlainText,
+  spanPlainText,
   type RichTextBlock,
   type RichTextDocument,
+  type RichTextInlineMathSpan,
   type RichTextSpan,
+  type RichTextTextSpan,
 } from './richText';
 import type {
   TextComment,
@@ -58,8 +65,27 @@ export function ensureBlockIds(doc: RichTextDocument): RichTextDocument {
   };
 }
 
+/** Assign stable ids to inline_math spans and display_math blocks when missing. */
+export function ensureMathIds(doc: RichTextDocument): RichTextDocument {
+  return {
+    blocks: doc.blocks.map((b) => {
+      if (isDisplayMathBlock(b)) {
+        return b.id?.trim() ? b : { ...b, id: newFeatureId('math') };
+      }
+      return {
+        ...b,
+        spans: b.spans.map((s) => {
+          if (!isInlineMathSpan(s)) return s;
+          return s.id?.trim() ? s : { ...s, id: newFeatureId('math') };
+        }),
+      };
+    }),
+  };
+}
+
 export function blockPlainText(block: RichTextBlock): string {
-  return block.spans.map((s) => s.text).join('');
+  if (isDisplayMathBlock(block)) return latexPlainExtract(block.latex);
+  return block.spans.map(spanPlainText).join('');
 }
 
 export function findQuoteOffsets(
@@ -163,6 +189,30 @@ export type SpanDecorationPatch = {
   clearLinkedCommentId?: string;
 };
 
+function applyStylePatch(
+  style: RichTextSpan['style'] | undefined,
+  patch: SpanDecorationPatch,
+): RichTextSpan['style'] | undefined {
+  let next = style ? { ...style } : {};
+  if (patch.highlightColor !== undefined) {
+    next.highlight_color = patch.highlightColor;
+  }
+  if (patch.linkedCommentId !== undefined) {
+    next.linked_comment_id = patch.linkedCommentId;
+  }
+  if (
+    patch.clearLinkedCommentId &&
+    next.linked_comment_id === patch.clearLinkedCommentId
+  ) {
+    delete next.linked_comment_id;
+  }
+  return Object.keys(next).length ? next : undefined;
+}
+
+type DecorationAtom =
+  | { kind: 'text'; ch: string; style?: RichTextTextSpan['style'] }
+  | { kind: 'math'; span: RichTextInlineMathSpan; length: number };
+
 /** Apply range decorations without destroying coexisting highlight/comment marks. */
 export function applyDecorationToBlock(
   block: RichTextBlock,
@@ -171,50 +221,55 @@ export function applyDecorationToBlock(
   patch: SpanDecorationPatch,
 ): RichTextBlock {
   if (start >= end) return block;
+  if (isDisplayMathBlock(block)) return block;
   const plain = blockPlainText(block);
   const lo = Math.max(0, Math.min(start, plain.length));
   const hi = Math.max(lo, Math.min(end, plain.length));
 
-  const chars: Array<{ ch: string; style?: RichTextSpan['style'] }> = [];
+  const atoms: DecorationAtom[] = [];
   let cursor = 0;
   for (const span of block.spans) {
+    if (isInlineMathSpan(span)) {
+      const token = spanPlainText(span);
+      const overlaps = cursor < hi && cursor + token.length > lo;
+      let next: RichTextInlineMathSpan = { ...span };
+      if (overlaps) {
+        const style = applyStylePatch(span.style, patch);
+        next = { ...span, ...(style ? { style } : { style: undefined }) };
+        if (!style) delete next.style;
+      }
+      atoms.push({ kind: 'math', span: next, length: token.length });
+      cursor += token.length;
+      continue;
+    }
     for (const ch of span.text) {
       const inRange = cursor >= lo && cursor < hi;
       let style = span.style ? { ...span.style } : undefined;
-      if (inRange) {
-        style = { ...(style ?? {}) };
-        if (patch.highlightColor !== undefined) {
-          style.highlight_color = patch.highlightColor;
-        }
-        if (patch.linkedCommentId !== undefined) {
-          style.linked_comment_id = patch.linkedCommentId;
-        }
-        if (
-          patch.clearLinkedCommentId &&
-          style.linked_comment_id === patch.clearLinkedCommentId
-        ) {
-          delete style.linked_comment_id;
-        }
-        if (Object.keys(style).length === 0) style = undefined;
-      }
-      chars.push({ ch, style });
+      if (inRange) style = applyStylePatch(style, patch);
+      atoms.push({ kind: 'text', ch, style });
       cursor += 1;
     }
   }
 
   const spans: RichTextSpan[] = [];
-  for (const c of chars) {
-    const last = spans[spans.length - 1];
-    const styleKey = JSON.stringify(c.style ?? null);
-    const lastKey = last ? JSON.stringify(last.style ?? null) : null;
-    if (last && styleKey === lastKey) {
-      last.text += c.ch;
-    } else {
-      spans.push({
-        text: c.ch,
-        ...(c.style ? { style: c.style } : {}),
-      });
+  for (const atom of atoms) {
+    if (atom.kind === 'math') {
+      spans.push(atom.span);
+      continue;
     }
+    const last = spans[spans.length - 1];
+    if (last && isTextSpan(last)) {
+      const styleKey = JSON.stringify(atom.style ?? null);
+      const lastKey = JSON.stringify(last.style ?? null);
+      if (styleKey === lastKey) {
+        last.text += atom.ch;
+        continue;
+      }
+    }
+    spans.push({
+      text: atom.ch,
+      ...(atom.style ? { style: atom.style } : {}),
+    });
   }
 
   return { ...block, spans: spans.length ? spans : [{ text: '' }] };
@@ -298,8 +353,10 @@ export function composeTextElementIndexText(el: TextElement): string {
 }
 
 export function ensureRichText(el: TextElement): RichTextDocument {
-  if (el.richText?.blocks?.length) return ensureBlockIds(el.richText);
-  return ensureBlockIds(plainTextToRichText(el.text || ''));
+  if (el.richText?.blocks?.length) {
+    return ensureMathIds(ensureBlockIds(el.richText));
+  }
+  return ensureMathIds(ensureBlockIds(plainTextToRichText(el.text || '')));
 }
 
 export function setTitleOnElement(el: TextElement, text: string): TextElement {
@@ -448,37 +505,79 @@ export type InsertHeadingPosition = {
   afterQuote?: QuoteAnchorSpec;
 };
 
+type SplitAtom =
+  | { kind: 'text'; ch: string; style?: RichTextTextSpan['style'] }
+  | { kind: 'math'; span: RichTextInlineMathSpan };
+
 function splitBlockAt(
   block: RichTextBlock,
   offset: number,
 ): { before: RichTextBlock; after: RichTextBlock } {
+  if (isDisplayMathBlock(block)) {
+    // Display math is atomic — split before or after the whole block.
+    if (offset <= 0) {
+      return {
+        before: { type: 'paragraph', id: block.id, spans: [{ text: '' }] },
+        after: { ...block, id: newFeatureId('block') },
+      };
+    }
+    return {
+      before: { ...block },
+      after: { type: 'paragraph', id: newFeatureId('block'), spans: [{ text: '' }] },
+    };
+  }
   const plain = blockPlainText(block);
   const cut = Math.max(0, Math.min(offset, plain.length));
-  const beforeChars: Array<{ ch: string; style?: RichTextSpan['style'] }> = [];
-  const afterChars: Array<{ ch: string; style?: RichTextSpan['style'] }> = [];
+  const beforeAtoms: SplitAtom[] = [];
+  const afterAtoms: SplitAtom[] = [];
   let cursor = 0;
   for (const span of block.spans) {
+    if (isInlineMathSpan(span)) {
+      const token = spanPlainText(span);
+      const atom: SplitAtom = { kind: 'math', span: { ...span } };
+      // Keep math atomic: if cut falls inside the token, put whole atom after.
+      if (cursor < cut) beforeAtoms.push(atom);
+      else afterAtoms.push(atom);
+      cursor += token.length;
+      continue;
+    }
     for (const ch of span.text) {
-      const entry = { ch, style: span.style ? { ...span.style } : undefined };
-      if (cursor < cut) beforeChars.push(entry);
-      else afterChars.push(entry);
+      const entry: SplitAtom = {
+        kind: 'text',
+        ch,
+        style: span.style ? { ...span.style } : undefined,
+      };
+      if (cursor < cut) beforeAtoms.push(entry);
+      else afterAtoms.push(entry);
       cursor += 1;
     }
   }
-  const toSpans = (chars: typeof beforeChars): RichTextSpan[] => {
+  const toSpans = (atoms: SplitAtom[]): RichTextSpan[] => {
     const spans: RichTextSpan[] = [];
-    for (const c of chars) {
+    for (const atom of atoms) {
+      if (atom.kind === 'math') {
+        spans.push(atom.span);
+        continue;
+      }
       const last = spans[spans.length - 1];
-      const styleKey = JSON.stringify(c.style ?? null);
-      const lastKey = last ? JSON.stringify(last.style ?? null) : null;
-      if (last && styleKey === lastKey) last.text += c.ch;
-      else spans.push({ text: c.ch, ...(c.style ? { style: c.style } : {}) });
+      if (last && isTextSpan(last)) {
+        const styleKey = JSON.stringify(atom.style ?? null);
+        const lastKey = JSON.stringify(last.style ?? null);
+        if (styleKey === lastKey) {
+          last.text += atom.ch;
+          continue;
+        }
+      }
+      spans.push({
+        text: atom.ch,
+        ...(atom.style ? { style: atom.style } : {}),
+      });
     }
     return spans.length ? spans : [{ text: '' }];
   };
   return {
-    before: { ...block, id: block.id, spans: toSpans(beforeChars) },
-    after: { ...block, id: newFeatureId('block'), spans: toSpans(afterChars) },
+    before: { ...block, id: block.id, spans: toSpans(beforeAtoms) },
+    after: { ...block, id: newFeatureId('block'), spans: toSpans(afterAtoms) },
   };
 }
 

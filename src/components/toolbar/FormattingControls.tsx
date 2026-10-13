@@ -2,7 +2,12 @@ import type { StyleDefaults, StrokeStyle, ArrowHeads } from '../../types/canvas'
 import {
   applyRichPaletteColor,
   applyRichSelectionCommand,
+  deleteRichMathNode,
+  findRichMathSelection,
+  insertRichMath,
   isRichTextEditing,
+  promptForLatex,
+  updateRichMathNode,
 } from '../../features/text/richTextCommands';
 import { ColorSwatchButton } from './ColorPickerPopover';
 import { CtxPopover, OpacityControl } from './CtxPopover';
@@ -158,6 +163,99 @@ export function TextFormattingControls({
         allowTransparent
         onChange={(c) => onCommit({ textBackgroundColor: c })}
       />
+      <CtxPopover label="Insert Math">
+        <button
+          type="button"
+          className="popover-action"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            if (!isRichTextEditing()) {
+              onEdit?.();
+              window.setTimeout(() => {
+                const latex = promptForLatex('F=-kx', 'inline');
+                if (latex) insertRichMath('inline', latex);
+              }, 80);
+              return;
+            }
+            const latex = promptForLatex('F=-kx', 'inline');
+            if (latex) insertRichMath('inline', latex);
+          }}
+        >
+          Inline Equation
+        </button>
+        <button
+          type="button"
+          className="popover-action"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            if (!isRichTextEditing()) {
+              onEdit?.();
+              window.setTimeout(() => {
+                const latex = promptForLatex(
+                  'm\\frac{d^2x}{dt^2}=-kx',
+                  'display',
+                );
+                if (latex) insertRichMath('display', latex);
+              }, 80);
+              return;
+            }
+            const latex = promptForLatex(
+              'm\\frac{d^2x}{dt^2}=-kx',
+              'display',
+            );
+            if (latex) insertRichMath('display', latex);
+          }}
+        >
+          Display Equation
+        </button>
+        <button
+          type="button"
+          className="popover-action"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            const sel = findRichMathSelection();
+            if (!sel) {
+              window.alert('Click an equation in the textbox first.');
+              return;
+            }
+            const latex = promptForLatex(sel.latex, sel.mode);
+            if (latex) updateRichMathNode(sel, latex);
+          }}
+        >
+          Edit LaTeX
+        </button>
+        <button
+          type="button"
+          className="popover-action"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            const sel = findRichMathSelection();
+            if (!sel) {
+              window.alert('Click an equation in the textbox first.');
+              return;
+            }
+            const to = sel.mode === 'inline' ? 'display' : 'inline';
+            updateRichMathNode(sel, sel.latex, to);
+          }}
+        >
+          Switch Inline / Display
+        </button>
+        <button
+          type="button"
+          className="popover-action"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            const sel = findRichMathSelection();
+            if (!sel) {
+              window.alert('Click an equation in the textbox first.');
+              return;
+            }
+            deleteRichMathNode(sel);
+          }}
+        >
+          Delete Equation
+        </button>
+      </CtxPopover>
       <CtxPopover label="More">
         <label className="popover-row">
           <span>Line height</span>

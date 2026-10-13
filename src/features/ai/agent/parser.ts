@@ -62,6 +62,11 @@ import {
   type InsertTextHeadingOperation,
 } from './textFeatureOperations';
 import {
+  isTextMathOperationType,
+  parseTextMathOperation,
+  type TextMathOperation,
+} from './textMathOperations';
+import {
   isTextComponentOperationType,
   parseTextComponentOperation,
   type TextComponentOperation,
@@ -655,6 +660,9 @@ function parseOperation(raw: unknown): CanvasOperation {
   if (isTextFeatureOperationType(raw.type)) {
     return parseTextFeatureOperation(raw);
   }
+  if (isTextMathOperationType(raw.type)) {
+    return parseTextMathOperation(raw);
+  }
   throw new CanvasAgentParseError(
     'unknown_operation',
     `Unsupported operation type "${raw.type}".`,
@@ -1040,6 +1048,9 @@ function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
   }
   if (isTextFeatureOperationType(op.type)) {
     validateTextTarget((op as TextFeatureOperation).target_element_id, ctx);
+  }
+  if (isTextMathOperationType(op.type)) {
+    validateTextTarget((op as TextMathOperation).target_element_id, ctx);
   }
   if (op.type === 'create_text' || op.type === 'create_equation' || op.type === 'create_graph') {
     validateRelativePlacement(op.placement, ctx);
