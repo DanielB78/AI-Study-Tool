@@ -11,7 +11,9 @@
 import type { GraphElement } from '../../types/canvas';
 import type {
   GraphExpression,
+  GraphLegendVisibility,
   GraphPoint,
+  GraphRegion,
   GraphSettings,
   GraphViewport,
 } from '../graphs/types';
@@ -19,6 +21,7 @@ import type {
 export interface GraphContextExpression {
   id: string;
   expression: string;
+  label: string | null;
   visible: boolean;
   domain_min: number | null;
   domain_max: number | null;
@@ -29,6 +32,18 @@ export interface GraphContextPoint {
   x: number;
   y: number;
   label: string;
+  visible: boolean;
+}
+
+export interface GraphContextRegion {
+  id: string;
+  type: GraphRegion['type'];
+  x_min: number;
+  x_max: number;
+  y_min: number | null;
+  y_max: number | null;
+  expression_id: string | null;
+  label: string | null;
   visible: boolean;
 }
 
@@ -46,6 +61,7 @@ export interface GraphContextSettings {
   show_grid: boolean;
   show_x_axis: boolean;
   show_y_axis: boolean;
+  legend_visibility: GraphLegendVisibility;
 }
 
 export interface GraphContextWorldBounds {
@@ -64,6 +80,7 @@ export interface GraphContextItem {
   element_type: 'graph';
   expressions: GraphContextExpression[];
   points: GraphContextPoint[];
+  regions: GraphContextRegion[];
   viewport: GraphContextViewport;
   settings: GraphContextSettings;
   world_bounds: GraphContextWorldBounds;
@@ -80,6 +97,7 @@ function mapExpression(e: GraphExpression): GraphContextExpression {
   return {
     id: e.id,
     expression: e.sourceText,
+    label: nullIfEmpty(e.label ?? ''),
     visible: e.visible,
     domain_min: e.domainMin,
     domain_max: e.domainMax,
@@ -93,6 +111,20 @@ function mapPoint(p: GraphPoint): GraphContextPoint {
     y: p.y,
     label: p.label,
     visible: p.visible,
+  };
+}
+
+function mapRegion(r: GraphRegion): GraphContextRegion {
+  return {
+    id: r.id,
+    type: r.type,
+    x_min: r.xMin,
+    x_max: r.xMax,
+    y_min: r.yMin,
+    y_max: r.yMax,
+    expression_id: r.expressionId,
+    label: nullIfEmpty(r.label),
+    visible: r.visible,
   };
 }
 
@@ -113,6 +145,7 @@ function mapSettings(s: GraphSettings): GraphContextSettings {
     show_grid: s.showGrid,
     show_x_axis: s.showXAxis,
     show_y_axis: s.showYAxis,
+    legend_visibility: s.legendVisibility ?? 'auto',
   };
 }
 
@@ -123,6 +156,7 @@ export function toGraphContextItem(el: GraphElement): GraphContextItem {
     element_type: 'graph',
     expressions: el.expressions.map(mapExpression),
     points: el.points.map(mapPoint),
+    regions: (el.regions ?? []).map(mapRegion),
     viewport: mapViewport(el.viewport),
     settings: mapSettings(el.settings),
     world_bounds: {
@@ -168,6 +202,7 @@ export function formatGraphContextItem(
       lines.push('');
       lines.push(`- ID: ${e.id}`);
       lines.push(`  expression: ${e.expression}`);
+      if (e.label) lines.push(`  label: ${e.label}`);
       lines.push(`  visible: ${e.visible}`);
       lines.push(`  domain: ${formatDomain(e.domain_min, e.domain_max)}`);
     }
@@ -193,6 +228,23 @@ export function formatGraphContextItem(
   }
 
   lines.push('');
+  lines.push('REGIONS:');
+  if (item.regions.length === 0) {
+    lines.push('none');
+  } else {
+    for (const r of item.regions) {
+      const yPart =
+        r.y_min != null && r.y_max != null
+          ? ` y=[${r.y_min}, ${r.y_max}]`
+          : '';
+      const exprPart = r.expression_id ? ` expression_id=${r.expression_id}` : '';
+      lines.push(
+        `- ID: ${r.id}  type=${r.type}  x=[${r.x_min}, ${r.x_max}]${yPart}${exprPart}${r.label ? `  label: ${r.label}` : ''}  visible: ${r.visible}`,
+      );
+    }
+  }
+
+  lines.push('');
   lines.push('SETTINGS:');
   lines.push(`title: ${item.settings.title === null ? 'null' : JSON.stringify(item.settings.title)}`);
   lines.push(
@@ -204,6 +256,7 @@ export function formatGraphContextItem(
   lines.push(`show_grid: ${item.settings.show_grid}`);
   lines.push(`show_x_axis: ${item.settings.show_x_axis}`);
   lines.push(`show_y_axis: ${item.settings.show_y_axis}`);
+  lines.push(`legend_visibility: ${item.settings.legend_visibility}`);
 
   if (options?.includeWorldBounds) {
     lines.push('');

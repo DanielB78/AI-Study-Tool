@@ -131,23 +131,28 @@ describe('graph RAG context — no embeddings, selection/spatial only', () => {
         showGrid: false,
         showXAxis: true,
         showYAxis: true,
+        legendVisibility: 'auto' as const,
       },
     };
     const item = toGraphContextItem(g);
     expect(item.expressions[0]).toEqual({
       id: 'e1',
       expression: '1/x',
+      label: null,
       visible: true,
       domain_min: null,
       domain_max: null,
     });
     expect(item.settings.title).toBe('Reciprocal');
     expect(item.settings.show_grid).toBe(false);
+    expect(item.settings.legend_visibility).toBe('auto');
+    expect(item.regions).toEqual([]);
     expect(Object.keys(item)).toEqual([
       'element_id',
       'element_type',
       'expressions',
       'points',
+      'regions',
       'viewport',
       'settings',
       'world_bounds',

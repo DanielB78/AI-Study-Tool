@@ -6,11 +6,13 @@
 import type { TextFeatureOperation } from './textFeatureOperations';
 import type { TextComponentOperation } from './textComponentOperations';
 import type { GraphComponentOperation } from './graphComponentOperations';
+import type { GraphAnnotationOperation } from './graphAnnotationOperations';
 import type { TextCommentType, TextNoteType } from '../../text/textFeatureTypes';
 
 export type { TextFeatureOperation } from './textFeatureOperations';
 export type { TextComponentOperation } from './textComponentOperations';
 export type { GraphComponentOperation } from './graphComponentOperations';
+export type { GraphAnnotationOperation } from './graphAnnotationOperations';
 
 export type PlacementRelation = 'left_of' | 'right_of' | 'above' | 'below' | 'near';
 
@@ -233,6 +235,8 @@ export type CreateGraphExpressionSpec = {
   visible: boolean;
   domain_min: number | null;
   domain_max: number | null;
+  /** Optional legend / display name — does not change the math source. */
+  label?: string;
 };
 
 /** Explicit labeled point on a newly created GraphElement. */
@@ -365,7 +369,8 @@ export type CanvasOperation =
   | RemoveGraphPointOperation
   | TextFeatureOperation
   | TextComponentOperation
-  | GraphComponentOperation;
+  | GraphComponentOperation
+  | GraphAnnotationOperation;
 
 export type CanvasAgentResponse = {
   operations: CanvasOperation[];
@@ -851,6 +856,98 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
           {
             type: 'object',
             additionalProperties: false,
+            required: ['type', 'visibility'],
+            properties: {
+              type: { const: 'set_graph_legend' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_ref: { type: 'string', minLength: 1 },
+              graph_id: { type: 'string', minLength: 1 },
+              visibility: { type: 'string', enum: ['auto', 'show', 'hide'] },
+              mode: { type: 'string', enum: ['auto', 'show', 'hide'] },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'expression_id', 'label'],
+            properties: {
+              type: { const: 'set_graph_curve_label' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_ref: { type: 'string', minLength: 1 },
+              graph_id: { type: 'string', minLength: 1 },
+              expression_id: { type: 'string', minLength: 1 },
+              label: { type: 'string', minLength: 1 },
+              text: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type'],
+            properties: {
+              type: { const: 'add_graph_region' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_ref: { type: 'string', minLength: 1 },
+              graph_id: { type: 'string', minLength: 1 },
+              region: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['type', 'x_min', 'x_max'],
+                properties: {
+                  type: {
+                    type: 'string',
+                    enum: ['x_interval', 'rectangle', 'curve_segment'],
+                  },
+                  x_min: { type: 'number' },
+                  x_max: { type: 'number' },
+                  y_min: { type: ['number', 'null'] },
+                  y_max: { type: ['number', 'null'] },
+                  expression_id: { type: 'string', minLength: 1 },
+                  label: { type: 'string' },
+                },
+              },
+              // Flat aliases (region fields at top level)
+              x_min: { type: 'number' },
+              x_max: { type: 'number' },
+              y_min: { type: ['number', 'null'] },
+              y_max: { type: ['number', 'null'] },
+              expression_id: { type: 'string', minLength: 1 },
+              label: { type: 'string' },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'region_id'],
+            properties: {
+              type: { const: 'update_graph_region' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_ref: { type: 'string', minLength: 1 },
+              graph_id: { type: 'string', minLength: 1 },
+              region_id: { type: 'string', minLength: 1 },
+              label: { type: 'string' },
+              x_min: { type: 'number' },
+              x_max: { type: 'number' },
+              y_min: { type: ['number', 'null'] },
+              y_max: { type: ['number', 'null'] },
+              visible: { type: 'boolean' },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', 'region_id'],
+            properties: {
+              type: { const: 'remove_graph_region' },
+              target_element_id: { type: 'string', minLength: 1 },
+              target_ref: { type: 'string', minLength: 1 },
+              graph_id: { type: 'string', minLength: 1 },
+              region_id: { type: 'string', minLength: 1 },
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
             required: ['type', 'target_element_id', 'text'],
             properties: {
               type: { const: 'insert_text_heading' },
@@ -1009,6 +1106,7 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
         visible: { type: 'boolean' },
         domain_min: { type: ['number', 'null'] },
         domain_max: { type: ['number', 'null'] },
+        label: { type: 'string' },
       },
     },
     graphPoint: {
@@ -1294,9 +1392,22 @@ GRAPH TEXTBOOK COMPONENTS (optional — app owns style and placement; reuse exis
 - add_graph_comment: { "type":"add_graph_comment", "target_element_id":"<graph id>", "anchor":{ "expression_id":"<id>", "x":1.57 }, "comment":"…" }
   Anchor uses graph coordinates / expression ids — not canvas pixels. Whole-graph comments may omit anchor fields.
 - annotate_graph_point: reuses existing GraphPoint markers — { "type":"annotate_graph_point", "target_element_id":"<graph id>", "expression_id":"<id>", "x":1.57, "label":"Maximum" }
+  Prefer updating an existing point at the same coordinates over creating a duplicate.
+- set_graph_legend: native GraphElement legend — { "type":"set_graph_legend", "target_element_id":"<graph id>", "visibility":"show"|"hide"|"auto" }
+  Do NOT invent a TextElement legend. App owns legend position, colours, and layout.
+- set_graph_curve_label: rename a curve for the legend without changing its math —
+  { "type":"set_graph_curve_label", "target_element_id":"<graph id>", "expression_id":"<id>", "label":"Displacement" }
+- add_graph_region: native shaded / highlighted region in mathematical coordinates (not canvas shapes).
+  X interval: { "type":"add_graph_region", "target_element_id":"<id>", "region":{ "type":"x_interval", "x_min":1, "x_max":3, "label":"Approximation valid" } }
+  Rectangle: { "type":"add_graph_region", "target_element_id":"<id>", "region":{ "type":"rectangle", "x_min":1, "x_max":3, "y_min":0, "y_max":2, "label":"ROI" } }
+  Curve segment: { "type":"add_graph_region", "target_element_id":"<id>", "region":{ "type":"curve_segment", "expression_id":"<id>", "x_min":0, "x_max":3.14, "label":"Increasing" } }
+  Do NOT invent bounds for implicit requests (e.g. "where positive") unless you already have reliable numbers.
+  Do NOT supply colours, opacity, or pixel coordinates. Adding a region must not replace other regions.
+- update_graph_region / remove_graph_region: edit or delete one region by region_id from graph context.
 - Axis labels: use existing update_graph_settings (x_axis_label / y_axis_label). Add another curve with add_graph_expression — do NOT create a new graph for an extra curve on the same plot.
+- Prefer native GraphElement annotations over standalone canvas rectangles, textboxes, or arrows that imitate legends/highlights.
 - Prefer editing an existing graph when the user asks to modify it; create a separate graph only when they ask for another graph.
-- Graph features are optional — do not add title+caption+observation to every plot.
+- Graph features are optional — do not add title+caption+observation+legend+regions to every plot.
 
 RICH TEXT (optional on create_text / update_text):
 {

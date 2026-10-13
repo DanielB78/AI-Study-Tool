@@ -4,6 +4,7 @@ import { nanoid } from 'nanoid';
 import type {
   GraphExpression,
   GraphPoint,
+  GraphRegion,
   GraphSettings,
   GraphViewport,
 } from '../features/graphs/types';
@@ -20,7 +21,7 @@ import type {
 
 export type { TextComponentMeta, TextComponentType };
 
-export const DOCUMENT_VERSION = 7 as const;
+export const DOCUMENT_VERSION = 8 as const;
 
 /** Logical association of a GraphElement to a parent TextElement. */
 export type GraphAssociationMeta = {
@@ -185,6 +186,8 @@ export interface GraphElement extends BaseElement {
   type: 'graph';
   expressions: GraphExpression[];
   points: GraphPoint[];
+  /** Native shaded / highlighted regions in mathematical coordinates. */
+  regions: GraphRegion[];
   viewport: GraphViewport;
   settings: GraphSettings;
   /**

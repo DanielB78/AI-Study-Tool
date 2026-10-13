@@ -398,6 +398,12 @@ textarea {
   gap: 2px;
 }
 
+.ctx-features-divider {
+  height: 1px;
+  margin: 4px 8px;
+  background: rgba(15, 23, 42, 0.1);
+}
+
 .ctx-features-item {
   appearance: none;
   border: none;

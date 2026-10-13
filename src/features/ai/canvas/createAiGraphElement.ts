@@ -46,6 +46,7 @@ function toSettings(op: CreateGraphOperation['settings']): GraphSettings {
     showGrid: op.show_grid,
     showXAxis: op.show_x_axis,
     showYAxis: op.show_y_axis,
+    legendVisibility: 'auto',
   };
 }
 
@@ -71,7 +72,11 @@ export function createAiGraphElement(
   });
 
   const expressions = op.expressions.map((spec, index) => {
-    const expr = createEmptyGraphExpression(index, canonicalExpressions[index]!);
+    const expr = createEmptyGraphExpression(
+      index,
+      canonicalExpressions[index]!,
+      spec.label?.trim() ?? '',
+    );
     return {
       ...expr,
       visible: spec.visible,
