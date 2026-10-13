@@ -902,9 +902,13 @@ export function executeCanvasOperations(
           const result = createOne(op, target, style, viewport, forced);
           createdIds.push(...result.createdIds);
           structureInstanceIds.push(...result.structureInstanceIds);
-          if (op.type === 'create_text' && op.ref && result.createdIds[0]) {
+          // Register plan refs for ALL create ops so later ops can target them
+          // via target_ref (e.g. create_graph → add_graph_caption).
+          if (op.ref && result.createdIds[0]) {
             planRefMap.set(op.ref, result.createdIds[0]);
-            lastMainTextId = result.createdIds[0];
+            if (op.type === 'create_text') {
+              lastMainTextId = result.createdIds[0];
+            }
           }
         }
       } catch (cause) {
