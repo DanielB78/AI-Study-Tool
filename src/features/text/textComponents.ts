@@ -16,9 +16,23 @@ export const TEXT_COMPONENT_TYPES = [
   'warning',
   'linked_comment',
   'exercise',
+  /** Muted description below a GraphElement. */
+  'caption',
+  /** Key mathematical/physical observation associated with a graph. */
+  'key_observation',
 ] as const;
 
 export type TextComponentType = (typeof TEXT_COMPONENT_TYPES)[number];
+
+/** Semantic role of a TextElement relative to its associated element. */
+export const COMPONENT_ROLES = [
+  'graph_title',
+  'graph_caption',
+  'graph_observation',
+  'graph_comment',
+  'attached_graph_parent',
+] as const;
+export type ComponentRole = (typeof COMPONENT_ROLES)[number];
 
 export const TEXT_COMPONENT_VARIANTS = [
   'warning',
@@ -31,7 +45,9 @@ export type ComponentPlacementMode = 'auto' | 'manual';
 
 /** Persistent component metadata on a TextElement. */
 export type TextComponentMeta = {
-  /** Logical association to another TextElement (usually main_text). */
+  /**
+   * Logical association to another canvas element (TextElement or GraphElement).
+   */
   associatedElementId?: string;
   placementMode: ComponentPlacementMode;
   /** Display label override (e.g. "Definition", "Example 1"). */
@@ -40,13 +56,24 @@ export type TextComponentMeta = {
   variant?: TextComponentVariant;
   /** Auto numbering for example / exercise. */
   number?: number;
-  /** Linked-comment anchor (stored on the comment element). */
+  /** Role relative to the associated element (graph chrome, etc.). */
+  role?: ComponentRole;
+  /** Linked-comment anchor on a TextElement phrase. */
   anchor?: {
     targetElementId: string;
     blockId: string;
     start: number;
     end: number;
     quote: string;
+    status: 'resolved' | 'unresolved';
+  };
+  /** Linked-comment / annotation anchor on a GraphElement feature. */
+  graphAnchor?: {
+    targetGraphId: string;
+    expressionId?: string;
+    pointId?: string;
+    /** Mathematical x (graph coords), not canvas pixels. */
+    x?: number;
     status: 'resolved' | 'unresolved';
   };
 };
@@ -192,6 +219,40 @@ export const TEXT_COMPONENT_STYLES: Record<TextComponentType, TextComponentStyle
     defaultWidth: 380,
     defaultLabel: 'Exercise',
   },
+  caption: {
+    fontSize: 13,
+    fontWeight: 'normal',
+    fontItalic: false,
+    color: '#64748B',
+    backgroundColor: null,
+    borderColor: null,
+    borderWidth: 0,
+    accentBorderColor: null,
+    accentBorderWidth: 0,
+    padding: 6,
+    cornerRadius: 0,
+    alignment: 'left',
+    lineHeight: 1.45,
+    defaultWidth: 400,
+    defaultLabel: null,
+  },
+  key_observation: {
+    fontSize: 14,
+    fontWeight: 'normal',
+    fontItalic: false,
+    color: '#1a1a1a',
+    backgroundColor: '#F1F5F9',
+    borderColor: null,
+    borderWidth: 0,
+    accentBorderColor: null,
+    accentBorderWidth: 0,
+    padding: 14,
+    cornerRadius: 8,
+    alignment: 'left',
+    lineHeight: 1.45,
+    defaultWidth: 400,
+    defaultLabel: 'Key Observation',
+  },
 };
 
 export function isTextComponentType(v: unknown): v is TextComponentType {
@@ -283,7 +344,9 @@ export function applyComponentStyleToElement(
       ...(meta?.label ? { label: meta.label } : {}),
       ...(meta?.variant ? { variant: meta.variant } : {}),
       ...(meta?.number != null ? { number: meta.number } : {}),
+      ...(meta?.role ? { role: meta.role } : {}),
       ...(meta?.anchor ? { anchor: meta.anchor } : {}),
+      ...(meta?.graphAnchor ? { graphAnchor: meta.graphAnchor } : {}),
     },
     fontSize: preset.fontSize,
     fontFamily: 'Georgia, "Times New Roman", serif',

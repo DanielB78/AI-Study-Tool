@@ -496,12 +496,33 @@ export function InfiniteCanvas() {
     (id: string, x: number, y: number) => {
       const drag = multiDrag.current;
       const markManual = (el: import('../types/canvas').CanvasElement) => {
-        if (el.type !== 'text' || !el.componentMeta) return el;
-        if (el.componentMeta.placementMode === 'manual') return el;
-        return {
-          ...el,
-          componentMeta: { ...el.componentMeta, placementMode: 'manual' as const },
-        };
+        if (el.type === 'text' && el.componentMeta) {
+          if (el.componentMeta.placementMode === 'manual') return el;
+          return {
+            ...el,
+            componentMeta: {
+              ...el.componentMeta,
+              placementMode: 'manual' as const,
+            },
+          };
+        }
+        if (el.type === 'graph' && el.association) {
+          if (el.association.placementMode === 'manual') return el;
+          return {
+            ...el,
+            association: {
+              ...el.association,
+              placementMode: 'manual' as const,
+            },
+          };
+        }
+        if (el.type === 'graph') {
+          return {
+            ...el,
+            association: { placementMode: 'manual' as const },
+          };
+        }
+        return el;
       };
       if (drag && drag.primaryId === id) {
         const primary = useCanvasStore
@@ -524,8 +545,11 @@ export function InfiniteCanvas() {
           if (!o) return el;
           return markManual({ ...el, x: o.x + dx, y: o.y + dy });
         });
-        // Auto-placed related components follow a moved main text.
-        if (primary?.type === 'text' && (dx !== 0 || dy !== 0)) {
+        // Auto-placed related components follow a moved text or graph.
+        if (
+          (primary?.type === 'text' || primary?.type === 'graph') &&
+          (dx !== 0 || dy !== 0)
+        ) {
           const related = useCanvasStore
             .getState()
             .document.elements.filter(
@@ -551,7 +575,10 @@ export function InfiniteCanvas() {
         const dx = before ? x - before.x : 0;
         const dy = before ? y - before.y : 0;
         updateElement(id, (el) => markManual({ ...el, x, y }));
-        if (before?.type === 'text' && (dx !== 0 || dy !== 0)) {
+        if (
+          (before?.type === 'text' || before?.type === 'graph') &&
+          (dx !== 0 || dy !== 0)
+        ) {
           const related = useCanvasStore
             .getState()
             .document.elements.filter(

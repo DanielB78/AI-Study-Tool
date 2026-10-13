@@ -151,7 +151,9 @@ describe('graph RAG context — no embeddings, selection/spatial only', () => {
       'viewport',
       'settings',
       'world_bounds',
+      'associated_text_id',
     ]);
+    expect(item.associated_text_id).toBeNull();
   });
 
   it('does not put graphs into empty documents as semantic content', () => {

@@ -34,6 +34,7 @@ import {
   applyComponentStyleToElement,
   createTextComponentElement,
   isTextComponentType,
+  type ComponentRole,
   type TextComponentType,
 } from '../features/text/textComponents';
 import { COMPONENT_LAYOUT } from '../features/text/textComponents';
@@ -199,6 +200,9 @@ function migrateText(raw: Record<string, unknown>, z: number): TextElement {
               | 'important_caution',
           }
         : {}),
+      ...(typeof raw.componentMeta.role === 'string'
+        ? { role: raw.componentMeta.role as ComponentRole }
+        : {}),
       ...(isObject(raw.componentMeta.anchor)
         ? {
             anchor: {
@@ -209,6 +213,29 @@ function migrateText(raw: Record<string, unknown>, z: number): TextElement {
               quote: str(raw.componentMeta.anchor.quote, ''),
               status:
                 raw.componentMeta.anchor.status === 'unresolved'
+                  ? 'unresolved'
+                  : 'resolved',
+            },
+          }
+        : {}),
+      ...(isObject(raw.componentMeta.graphAnchor)
+        ? {
+            graphAnchor: {
+              targetGraphId: str(
+                raw.componentMeta.graphAnchor.targetGraphId,
+                '',
+              ),
+              ...(typeof raw.componentMeta.graphAnchor.expressionId === 'string'
+                ? { expressionId: raw.componentMeta.graphAnchor.expressionId }
+                : {}),
+              ...(typeof raw.componentMeta.graphAnchor.pointId === 'string'
+                ? { pointId: raw.componentMeta.graphAnchor.pointId }
+                : {}),
+              ...(typeof raw.componentMeta.graphAnchor.x === 'number'
+                ? { x: raw.componentMeta.graphAnchor.x }
+                : {}),
+              status:
+                raw.componentMeta.graphAnchor.status === 'unresolved'
                   ? 'unresolved'
                   : 'resolved',
             },
@@ -481,6 +508,20 @@ function migrateGraph(raw: Record<string, unknown>, z: number): GraphElement {
     color: str(p.color, '#111827'),
   }));
 
+  let association: GraphElement['association'];
+  if (isObject(raw.association)) {
+    association = {
+      placementMode:
+        raw.association.placementMode === 'manual' ? 'manual' : 'auto',
+      ...(typeof raw.association.associatedElementId === 'string'
+        ? { associatedElementId: raw.association.associatedElementId }
+        : {}),
+      ...(typeof raw.association.order === 'number'
+        ? { order: raw.association.order }
+        : {}),
+    };
+  }
+
   return {
     ...migrateBase(raw, z),
     type: 'graph',
@@ -500,6 +541,7 @@ function migrateGraph(raw: Record<string, unknown>, z: number): GraphElement {
       yAxisLabel: str(settingsRaw.yAxisLabel, ''),
       title: str(settingsRaw.title, ''),
     },
+    ...(association ? { association } : {}),
   };
 }
 
@@ -576,6 +618,7 @@ export function migrateDocument(raw: unknown): CanvasDocument | null {
     version !== 3 &&
     version !== 4 &&
     version !== 5 &&
+    version !== 6 &&
     version !== DOCUMENT_VERSION
   ) {
     return null;
