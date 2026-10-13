@@ -33,6 +33,9 @@ export function GraphElementWidget({
   const cursor = useGraphUiStore((s) =>
     s.interactingGraphId === element.id ? s.cursor : null,
   );
+  const regionToolActive = useGraphUiStore(
+    (s) => s.regionTool?.graphId === element.id,
+  );
 
   // Coalesce pan/zoom into a single commit when gesture ends (plugin already fires complete).
   const pending = useRef<GraphViewport | null>(null);
@@ -67,8 +70,11 @@ export function GraphElementWidget({
         <span className="graph-element-title">
           {element.settings.title.trim() || 'Graph'}
         </span>
-        {interactive && (
+        {interactive && !regionToolActive && (
           <span className="graph-element-badge">Graph interaction active</span>
+        )}
+        {regionToolActive && (
+          <span className="graph-element-badge">Highlight region — drag on plot</span>
         )}
         {interactive && cursor && (
           <span className="graph-element-cursor">

@@ -14,11 +14,18 @@ import {
   executeSetGraphTitle,
   type GraphComponentExecuteContext,
 } from '../ai/agent/graphComponentOperations';
+import {
+  applyGraphAnnotationOperation,
+  type GraphAnnotationOperation,
+  type GraphRegionSpec,
+} from '../ai/agent/graphAnnotationOperations';
 import { getDefaultViewportSize } from '../ai/canvas/placement';
-import { DEFAULT_GRAPH_VIEWPORT } from './types';
+import {
+  DEFAULT_GRAPH_VIEWPORT,
+  type GraphLegendVisibility,
+} from './types';
 
 function makeCtx(): GraphComponentExecuteContext {
-  const store = useCanvasStore.getState();
   return {
     getElements: () => useCanvasStore.getState().document.elements,
     getCamera: () => useCanvasStore.getState().document.camera,
@@ -151,6 +158,64 @@ export function uiAnnotateGraphPoint(
     );
   });
   return true;
+}
+
+function applyAnnotation(graphId: string, op: GraphAnnotationOperation): boolean {
+  withHistory(() => {
+    useCanvasStore.getState().updateElement(graphId, (el) => {
+      if (el.type !== 'graph') return el;
+      return applyGraphAnnotationOperation(el, op);
+    });
+  });
+  return true;
+}
+
+export function uiSetGraphLegend(
+  graphId: string,
+  visibility: GraphLegendVisibility,
+): boolean {
+  return applyAnnotation(graphId, {
+    type: 'set_graph_legend',
+    target_element_id: graphId,
+    visibility,
+  });
+}
+
+export function uiSetGraphCurveLabel(
+  graphId: string,
+  expressionId: string,
+  label: string,
+): boolean {
+  const t = label.trim();
+  if (!t) return false;
+  return applyAnnotation(graphId, {
+    type: 'set_graph_curve_label',
+    target_element_id: graphId,
+    expression_id: expressionId,
+    label: t,
+  });
+}
+
+export function uiAddGraphRegion(
+  graphId: string,
+  region: GraphRegionSpec,
+): boolean {
+  return applyAnnotation(graphId, {
+    type: 'add_graph_region',
+    target_element_id: graphId,
+    region,
+  });
+}
+
+export function uiRemoveGraphRegion(
+  graphId: string,
+  regionId: string,
+): boolean {
+  return applyAnnotation(graphId, {
+    type: 'remove_graph_region',
+    target_element_id: graphId,
+    region_id: regionId,
+  });
 }
 
 export function uiAttachExistingGraphToText(

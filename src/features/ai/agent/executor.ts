@@ -67,6 +67,11 @@ import {
   type GraphComponentOperation,
 } from './graphComponentOperations';
 import {
+  applyGraphAnnotationOperation,
+  isGraphAnnotationOperationType,
+  type GraphAnnotationOperation,
+} from './graphAnnotationOperations';
+import {
   getComponentType,
   type TextComponentType,
 } from '../../text/textComponents';
@@ -727,6 +732,35 @@ export function executeCanvasOperations(
           continue;
         }
 
+        if (isGraphAnnotationOperationType(op.type)) {
+          const aOp = op as GraphAnnotationOperation;
+          const rawId =
+            aOp.target_element_id ??
+            aOp.graph_id ??
+            (aOp.target_ref ? resolveRef(aOp.target_ref) : undefined);
+          const graphId = rawId
+            ? (resolveRef(rawId) ?? rawId)
+            : undefined;
+          if (!graphId) {
+            throw new Error('Graph annotation op missing target graph id.');
+          }
+          target.updateElement(graphId, (el) => {
+            if (el.type !== 'graph') return el;
+            const next = applyGraphAnnotationOperation(el, aOp);
+            return {
+              ...next,
+              metadata: {
+                ...next.metadata,
+                lastEditedBy: 'ai',
+                source: 'agent',
+                operation: aOp.type,
+              },
+            };
+          });
+          updatedIds.push(graphId);
+          continue;
+        }
+
         if (isTextComponentOperationType(op.type)) {
           const compOp = op as TextComponentOperation;
           const ctx = {
@@ -868,9 +902,13 @@ export function executeCanvasOperations(
           const result = createOne(op, target, style, viewport, forced);
           createdIds.push(...result.createdIds);
           structureInstanceIds.push(...result.structureInstanceIds);
-          if (op.type === 'create_text' && op.ref && result.createdIds[0]) {
+          // Register plan refs for ALL create ops so later ops can target them
+          // via target_ref (e.g. create_graph → add_graph_caption).
+          if (op.ref && result.createdIds[0]) {
             planRefMap.set(op.ref, result.createdIds[0]);
-            lastMainTextId = result.createdIds[0];
+            if (op.type === 'create_text') {
+              lastMainTextId = result.createdIds[0];
+            }
           }
         }
       } catch (cause) {
@@ -885,7 +923,8 @@ export function executeCanvasOperations(
           opIndex,
           opType: op.type,
           targetId: targetId || undefined,
-          stage: isGraphComponentOperationType(op.type)
+          stage: isGraphComponentOperationType(op.type) ||
+            isGraphAnnotationOperationType(op.type)
             ? 'text_component'
             : isTextComponentOperationType(op.type)
               ? 'text_component'

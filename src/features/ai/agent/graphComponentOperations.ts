@@ -148,6 +148,12 @@ function parseExpressions(raw: unknown, path: string): CreateGraphExpressionSpec
         encoded.error ?? `Invalid expression: ${expression}`,
       );
     }
+    const label =
+      typeof item.label === 'string'
+        ? item.label.trim()
+        : typeof item.name === 'string'
+          ? item.name.trim()
+          : '';
     return {
       expression: encoded.canonical,
       visible: item.visible !== false,
@@ -159,6 +165,7 @@ function parseExpressions(raw: unknown, path: string): CreateGraphExpressionSpec
         typeof item.domain_max === 'number' && Number.isFinite(item.domain_max)
           ? item.domain_max
           : null,
+      ...(label ? { label } : {}),
     };
   });
 }
@@ -175,12 +182,6 @@ function resolveTargetId(
         : typeof raw.target_id === 'string'
           ? raw.target_id.trim()
           : '';
-  const ref =
-    typeof raw.target_ref === 'string'
-      ? raw.target_ref.trim()
-      : typeof raw.ref === 'string' && path !== 'add_graph_to_text'
-        ? ''
-        : '';
   // For set_graph_title etc., target_ref is explicit
   const targetRef =
     typeof raw.target_ref === 'string' ? raw.target_ref.trim() : '';
@@ -715,6 +716,25 @@ export function executeAnnotateGraphPoint(
   }
   if (y == null) {
     throw new Error('annotate_graph_point needs y or a evaluable expression_id.');
+  }
+
+  const EPS = 1e-6;
+  const existing = graph.points.find(
+    (p) => Math.abs(p.x - op.x) < EPS && Math.abs(p.y - y) < EPS,
+  );
+  if (existing) {
+    ctx.updateElement(graph.id, (el) => {
+      if (el.type !== 'graph') return el;
+      return {
+        ...el,
+        points: el.points.map((p) =>
+          p.id === existing.id
+            ? { ...p, label: op.label, visible: true }
+            : p,
+        ),
+      };
+    });
+    return { pointId: existing.id };
   }
 
   const point = createGraphPoint(op.x, y, op.label, '#111827');

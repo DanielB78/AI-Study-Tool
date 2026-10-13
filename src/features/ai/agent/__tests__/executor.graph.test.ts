@@ -9,6 +9,7 @@ import { useCanvasStore } from '../../../../store/canvasStore';
 import { ragSync } from '../../../rag/ragSync';
 import { executeCanvasOperations } from '../executor';
 import { createLiveAgentExecutorTarget } from '../liveExecutor';
+import { parseCanvasAgentResponse } from '../parser';
 import type { CreateGraphOperation } from '../operations';
 import { DEFAULT_GRAPH_HEIGHT, DEFAULT_GRAPH_WIDTH } from '../../../graphs/types';
 
@@ -202,5 +203,73 @@ describe('executeCanvasOperations — create_graph', () => {
     expect(graph.points[0]?.label).toBe('A');
     expect(graph.points[0]?.x).toBe(2);
     expect(graph.points[0]?.y).toBe(4);
+  });
+
+  it('resolves create_graph ref for add_graph_caption target_ref', () => {
+    const plan = parseCanvasAgentResponse(
+      JSON.stringify({
+        operations: [
+          {
+            type: 'create_graph',
+            ref: 'pendulum_graph',
+            expressions: [
+              {
+                expression: '0.5*exp(-0.18*x)*cos(2.393*x)',
+                visible: true,
+                domain_min: 0,
+                domain_max: 20,
+              },
+              {
+                expression:
+                  '0.5*exp(-0.18*x)*cos(2.393*x) + 0.316*sin(2*x - 0.388)',
+                visible: true,
+                domain_min: 0,
+                domain_max: 20,
+              },
+            ],
+            points: [],
+            viewport: {
+              x_min: 0,
+              x_max: 20,
+              y_min: -0.9,
+              y_max: 0.9,
+            },
+            settings: {
+              title: 'Pendulum Motion: Damping and Driving Forces',
+              x_axis_label: 'Time (s)',
+              y_axis_label: 'Angular displacement (rad)',
+              show_grid: true,
+              show_x_axis: true,
+              show_y_axis: true,
+            },
+            placement: { mode: 'viewport_default' },
+          },
+          {
+            type: 'add_graph_caption',
+            target_ref: 'pendulum_graph',
+            text: 'Small-angle approximation. Curve 1 damps; Curve 2 is driven.',
+          },
+        ],
+      }),
+      { allowedElementIds: new Set() },
+    );
+
+    const result = executeCanvasOperations(
+      plan,
+      createLiveAgentExecutorTarget(),
+    );
+    expect(result.createdIds.length).toBeGreaterThanOrEqual(2);
+
+    const els = useCanvasStore.getState().document.elements;
+    const graph = els.find((e) => e.type === 'graph') as GraphElement;
+    const caption = els.find(
+      (e): e is TextElement =>
+        e.type === 'text' && e.componentType === 'caption',
+    );
+    expect(graph).toBeTruthy();
+    expect(graph.expressions).toHaveLength(2);
+    expect(caption).toBeTruthy();
+    expect(caption!.componentMeta?.associatedElementId).toBe(graph.id);
+    expect(caption!.text).toContain('Small-angle approximation');
   });
 });

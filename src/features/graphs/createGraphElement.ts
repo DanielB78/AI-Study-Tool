@@ -13,10 +13,12 @@ import {
 export function createEmptyGraphExpression(
   index = 0,
   sourceText = '',
+  label = '',
 ): GraphExpression {
   return {
     id: createId(),
     sourceText,
+    label,
     visible: true,
     domainMin: null,
     domainMax: null,
@@ -65,6 +67,7 @@ export function createGraphElement(options: {
     type: 'graph',
     expressions: [],
     points: [],
+    regions: [],
     viewport: { ...DEFAULT_GRAPH_VIEWPORT },
     settings: { ...DEFAULT_GRAPH_SETTINGS },
   };

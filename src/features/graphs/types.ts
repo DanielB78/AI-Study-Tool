@@ -22,6 +22,10 @@ export interface GraphExpression {
    * Not LaTeX. Not mathjs-native `^`. Parser-specific forms are transient.
    */
   sourceText: string;
+  /**
+   * Optional display name for legends / UI. Does not change the math source.
+   */
+  label: string;
   visible: boolean;
   domainMin: number | null;
   domainMax: number | null;
@@ -37,6 +41,8 @@ export interface GraphPoint {
   color: string;
 }
 
+export type GraphLegendVisibility = 'auto' | 'show' | 'hide';
+
 export interface GraphSettings {
   showGrid: boolean;
   showXAxis: boolean;
@@ -44,6 +50,25 @@ export interface GraphSettings {
   xAxisLabel: string;
   yAxisLabel: string;
   title: string;
+  /** Legend visibility. auto = show when 2+ visible curves. */
+  legendVisibility: GraphLegendVisibility;
+}
+
+export type GraphRegionType = 'x_interval' | 'rectangle' | 'curve_segment';
+
+/** Native mathematical annotation stored in graph coordinates. */
+export interface GraphRegion {
+  id: string;
+  type: GraphRegionType;
+  xMin: number;
+  xMax: number;
+  /** Required for rectangle; ignored for x_interval / curve_segment fill bands. */
+  yMin: number | null;
+  yMax: number | null;
+  /** Required for curve_segment. */
+  expressionId: string | null;
+  label: string;
+  visible: boolean;
 }
 
 export const DEFAULT_GRAPH_VIEWPORT: GraphViewport = {
@@ -60,6 +85,7 @@ export const DEFAULT_GRAPH_SETTINGS: GraphSettings = {
   xAxisLabel: '',
   yAxisLabel: '',
   title: '',
+  legendVisibility: 'auto',
 };
 
 export const DEFAULT_GRAPH_WIDTH = 600;
@@ -90,4 +116,23 @@ export function isValidViewport(v: GraphViewport): boolean {
     v.xMin < v.xMax &&
     v.yMin < v.yMax
   );
+}
+
+export function expressionDisplayLabel(expr: GraphExpression): string {
+  const label = expr.label?.trim();
+  if (label) return label;
+  return expr.sourceText.trim() || 'Curve';
+}
+
+export function shouldShowLegend(
+  settings: GraphSettings,
+  expressions: readonly GraphExpression[],
+): boolean {
+  if (settings.legendVisibility === 'show') return true;
+  if (settings.legendVisibility === 'hide') return false;
+  return expressions.filter((e) => e.visible).length >= 2;
+}
+
+export function normalizeInterval(a: number, b: number): { min: number; max: number } {
+  return a <= b ? { min: a, max: b } : { min: b, max: a };
 }

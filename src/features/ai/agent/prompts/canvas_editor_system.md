@@ -351,11 +351,21 @@ Graphs in context may be edited with graph edit operations (selection or spatial
 
 Graphs supplied in context can be edited using graph operations.
 
-Each existing graph/expression/point has a stable ID from context. Never invent IDs.
+Each existing graph/expression/point/region has a stable ID from context. Never invent IDs.
 
 Only edit a graph if that graph_id is in the current context (explicit selection or spatial neighbour). Graphs are not semantically retrieved.
 
 Use PATCH/minimal changes: add/remove/update curves, visibility, viewport, settings, points without resetting unspecified state.
+
+Native GraphElement annotations (prefer these over canvas shapes/textboxes):
+
+- `set_graph_legend` — visibility `auto` | `show` | `hide` (app owns legend layout/colours)
+- `set_graph_curve_label` — display name for a curve; does not change the math source
+- `add_graph_region` — mathematical `x_interval` / `rectangle` / `curve_segment` highlights
+- `update_graph_region` / `remove_graph_region` — edit or delete one region by `region_id`
+- `annotate_graph_point` — reuse GraphPoint markers; prefer updating an existing point at the same coordinates
+
+Do not supply colours, opacity, pixel coordinates, legend position, or label offsets.
 
 ## GRAPH EXPRESSION FORMAT
 

@@ -483,6 +483,7 @@ function migrateGraph(raw: Record<string, unknown>, z: number): GraphElement {
       return {
         id: str(expr.id, `expr-${index}`),
         sourceText: migrateGraphSourceText(str(expr.sourceText, '')),
+        label: str(expr.label, ''),
         visible: bool(expr.visible, true),
         domainMin:
           typeof expr.domainMin === 'number' && Number.isFinite(expr.domainMin)
@@ -508,6 +509,32 @@ function migrateGraph(raw: Record<string, unknown>, z: number): GraphElement {
     color: str(p.color, '#111827'),
   }));
 
+  const regionsRaw = Array.isArray(raw.regions) ? raw.regions : [];
+  const regions: GraphElement['regions'] = regionsRaw
+    .filter(isObject)
+    .map((r, index) => {
+      const type =
+        r.type === 'rectangle' || r.type === 'curve_segment'
+          ? r.type
+          : ('x_interval' as const);
+      return {
+        id: str(r.id, `region-${index}`),
+        type,
+        xMin: num(r.xMin, 0),
+        xMax: num(r.xMax, 1),
+        yMin:
+          typeof r.yMin === 'number' && Number.isFinite(r.yMin) ? r.yMin : null,
+        yMax:
+          typeof r.yMax === 'number' && Number.isFinite(r.yMax) ? r.yMax : null,
+        expressionId:
+          typeof r.expressionId === 'string' && r.expressionId.trim()
+            ? r.expressionId
+            : null,
+        label: str(r.label, ''),
+        visible: bool(r.visible, true),
+      };
+    });
+
   let association: GraphElement['association'];
   if (isObject(raw.association)) {
     association = {
@@ -522,11 +549,18 @@ function migrateGraph(raw: Record<string, unknown>, z: number): GraphElement {
     };
   }
 
+  const legendVisibility =
+    settingsRaw.legendVisibility === 'show' ||
+    settingsRaw.legendVisibility === 'hide'
+      ? settingsRaw.legendVisibility
+      : 'auto';
+
   return {
     ...migrateBase(raw, z),
     type: 'graph',
     expressions,
     points,
+    regions,
     viewport: {
       xMin: num(viewportRaw.xMin, DEFAULT_GRAPH_VIEWPORT.xMin),
       xMax: num(viewportRaw.xMax, DEFAULT_GRAPH_VIEWPORT.xMax),
@@ -540,6 +574,7 @@ function migrateGraph(raw: Record<string, unknown>, z: number): GraphElement {
       xAxisLabel: str(settingsRaw.xAxisLabel, ''),
       yAxisLabel: str(settingsRaw.yAxisLabel, ''),
       title: str(settingsRaw.title, ''),
+      legendVisibility,
     },
     ...(association ? { association } : {}),
   };
@@ -619,6 +654,7 @@ export function migrateDocument(raw: unknown): CanvasDocument | null {
     version !== 4 &&
     version !== 5 &&
     version !== 6 &&
+    version !== 7 &&
     version !== DOCUMENT_VERSION
   ) {
     return null;

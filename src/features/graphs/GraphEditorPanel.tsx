@@ -14,8 +14,10 @@ import { validateGraphExpression } from './expressionService';
 import { fitViewportToSamples, sampleAllExpressions } from './sampling';
 import {
   DEFAULT_GRAPH_VIEWPORT,
+  expressionDisplayLabel,
   isValidViewport,
   type GraphExpression,
+  type GraphLegendVisibility,
   type GraphSettings,
   type GraphViewport,
 } from './types';
@@ -144,6 +146,17 @@ function ExpressionRow({
             }
           />
         </label>
+        <label className="graph-field">
+          Legend label
+          <input
+            className="graph-input"
+            placeholder={expression.sourceText || 'Curve name'}
+            value={expression.label}
+            onChange={(e) =>
+              onChange({ ...expression, label: e.target.value })
+            }
+          />
+        </label>
       </div>
     </div>
   );
@@ -237,6 +250,7 @@ export function GraphEditorPanel() {
                 prev &&
                 prev.sourceText !== next.sourceText &&
                 prev.visible === next.visible &&
+                prev.label === next.label &&
                 prev.domainMin === next.domainMin &&
                 prev.domainMax === next.domainMax &&
                 prev.style.color === next.style.color &&
@@ -404,6 +418,84 @@ export function GraphEditorPanel() {
             }
           />
         </label>
+        <label className="graph-field">
+          Legend
+          <select
+            className="graph-input"
+            value={element.settings.legendVisibility ?? 'auto'}
+            onChange={(e) =>
+              setSettings({
+                ...element.settings,
+                legendVisibility: e.target.value as GraphLegendVisibility,
+              })
+            }
+          >
+            <option value="auto">Automatic</option>
+            <option value="show">Show</option>
+            <option value="hide">Hide</option>
+          </select>
+        </label>
+      </section>
+
+      <section className="graph-editor-section">
+        <div className="graph-editor-section-title">Highlighted regions</div>
+        {(element.regions ?? []).length === 0 && (
+          <p className="graph-meta">No regions. Use Features → Highlight region.</p>
+        )}
+        {(element.regions ?? []).map((r) => (
+          <div key={r.id} className="graph-point-row">
+            <label className="graph-check">
+              <input
+                type="checkbox"
+                checked={r.visible}
+                onChange={(e) =>
+                  patch((g) => ({
+                    ...g,
+                    regions: (g.regions ?? []).map((reg) =>
+                      reg.id === r.id
+                        ? { ...reg, visible: e.target.checked }
+                        : reg,
+                    ),
+                  }))
+                }
+              />
+            </label>
+            <span className="graph-meta">
+              {r.type} [{r.xMin}, {r.xMax}]
+              {r.expressionId
+                ? ` · ${expressionDisplayLabel(
+                    element.expressions.find((e) => e.id === r.expressionId) ??
+                      createEmptyGraphExpression(0, r.expressionId),
+                  )}`
+                : ''}
+            </span>
+            <input
+              className="graph-input"
+              placeholder="label"
+              value={r.label}
+              onChange={(e) =>
+                patch((g) => ({
+                  ...g,
+                  regions: (g.regions ?? []).map((reg) =>
+                    reg.id === r.id ? { ...reg, label: e.target.value } : reg,
+                  ),
+                }))
+              }
+            />
+            <button
+              type="button"
+              className="graph-btn ghost"
+              onClick={() =>
+                patch((g) => ({
+                  ...g,
+                  regions: (g.regions ?? []).filter((reg) => reg.id !== r.id),
+                }))
+              }
+            >
+              ×
+            </button>
+          </div>
+        ))}
       </section>
 
       <section className="graph-editor-section">

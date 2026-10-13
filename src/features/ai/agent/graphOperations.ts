@@ -101,7 +101,19 @@ function parseExpressionSpec(raw: unknown, path: string): CreateGraphExpressionS
       `${path} domain_min must be less than domain_max.`,
     );
   }
-  return { expression, visible, domain_min, domain_max };
+  const label =
+    typeof raw.label === 'string'
+      ? raw.label.trim()
+      : typeof raw.name === 'string'
+        ? raw.name.trim()
+        : '';
+  return {
+    expression,
+    visible,
+    domain_min,
+    domain_max,
+    ...(label ? { label } : {}),
+  };
 }
 
 export function parseAddGraphExpression(raw: Record<string, unknown>): AddGraphExpressionOperation {
@@ -366,6 +378,7 @@ export function applyGraphEditOperation(
       const expr = createEmptyGraphExpression(
         graph.expressions.length,
         op.expression.expression,
+        op.expression.label?.trim() ?? '',
       );
       return touch({
         ...graph,

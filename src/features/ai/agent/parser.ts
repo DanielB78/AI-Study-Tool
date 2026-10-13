@@ -72,6 +72,11 @@ import {
   type GraphComponentOperation,
 } from './graphComponentOperations';
 import {
+  isGraphAnnotationOperationType,
+  parseGraphAnnotationOperation,
+  type GraphAnnotationOperation,
+} from './graphAnnotationOperations';
+import {
   TEXT_COMMENT_TYPES,
   TEXT_NOTE_TYPES,
   type TextCommentType,
@@ -369,11 +374,19 @@ function parseGraphExpressionSpec(
     );
   }
 
+  const label =
+    typeof raw.label === 'string'
+      ? raw.label.trim()
+      : typeof raw.name === 'string'
+        ? raw.name.trim()
+        : '';
+
   return {
     expression: encoded.canonical,
     visible,
     domain_min,
     domain_max,
+    ...(label ? { label } : {}),
   };
 }
 
@@ -635,6 +648,9 @@ function parseOperation(raw: unknown): CanvasOperation {
   }
   if (isGraphComponentOperationType(raw.type)) {
     return parseGraphComponentOperation(raw);
+  }
+  if (isGraphAnnotationOperationType(raw.type)) {
+    return parseGraphAnnotationOperation(raw);
   }
   if (isTextFeatureOperationType(raw.type)) {
     return parseTextFeatureOperation(raw);
@@ -997,7 +1013,12 @@ function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
       op.type === 'add_graph_caption' ||
       op.type === 'add_graph_observation' ||
       op.type === 'add_graph_comment' ||
-      op.type === 'annotate_graph_point') &&
+      op.type === 'annotate_graph_point' ||
+      op.type === 'set_graph_legend' ||
+      op.type === 'set_graph_curve_label' ||
+      op.type === 'add_graph_region' ||
+      op.type === 'update_graph_region' ||
+      op.type === 'remove_graph_region') &&
     op.target_element_id &&
     ctx.allowedElementIds.has(op.target_element_id)
   ) {
@@ -1311,6 +1332,23 @@ export function describeOperationPlan(
         return `${n}. ADD GRAPH COMMENT\n   Target: ${target}\n   Comment: ${g.comment.slice(0, 80)}`;
       }
       return `${n}. ANNOTATE GRAPH POINT\n   Target: ${target}\n   x=${g.x} label=${g.label}`;
+    }
+    if (isGraphAnnotationOperationType(op.type)) {
+      const a = op as GraphAnnotationOperation;
+      const target = a.target_element_id ?? a.target_ref ?? '?';
+      if (a.type === 'set_graph_legend') {
+        return `${n}. SET GRAPH LEGEND\n   Target: ${target}\n   Visibility: ${a.visibility}`;
+      }
+      if (a.type === 'set_graph_curve_label') {
+        return `${n}. SET GRAPH CURVE LABEL\n   Target: ${target}\n   Expression: ${a.expression_id}\n   Label: ${a.label}`;
+      }
+      if (a.type === 'add_graph_region') {
+        return `${n}. ADD GRAPH REGION\n   Target: ${target}\n   Type: ${a.region.type}\n   x=[${a.region.x_min}, ${a.region.x_max}]${a.region.label ? `\n   Label: ${a.region.label}` : ''}`;
+      }
+      if (a.type === 'update_graph_region') {
+        return `${n}. UPDATE GRAPH REGION\n   Target: ${target}\n   Region: ${a.region_id}`;
+      }
+      return `${n}. REMOVE GRAPH REGION\n   Target: ${target}\n   Region: ${a.region_id}`;
     }
     if (isTextComponentOperationType(op.type)) {
       const c = op as TextComponentOperation;

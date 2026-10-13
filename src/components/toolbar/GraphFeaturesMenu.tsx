@@ -5,10 +5,16 @@ import {
   uiAddGraphCaption,
   uiAddGraphComment,
   uiAddGraphObservation,
+  uiAddGraphRegion,
   uiAnnotateGraphPoint,
   uiAttachExistingGraphToText,
+  uiRemoveGraphRegion,
+  uiSetGraphCurveLabel,
+  uiSetGraphLegend,
   uiSetGraphTitle,
 } from '../../features/graphs/graphComponentUi';
+import type { GraphLegendVisibility, GraphRegionType } from '../../features/graphs/types';
+import { useGraphUiStore } from '../../features/graphs/graphUiStore';
 
 type Props = {
   element: GraphElement;
@@ -98,6 +104,197 @@ export function GraphFeaturesMenu({ element }: Props) {
           >
             Add comment
           </button>
+
+          <div className="ctx-features-divider" role="separator" />
+
+          <button
+            type="button"
+            role="menuitem"
+            className="ctx-features-item"
+            onClick={() => {
+              const choice = window.prompt(
+                'Legend visibility: auto | show | hide',
+                element.settings.legendVisibility ?? 'auto',
+              );
+              if (!choice?.trim()) return;
+              const v = choice.trim().toLowerCase();
+              if (v !== 'auto' && v !== 'show' && v !== 'hide') return;
+              uiSetGraphLegend(element.id, v as GraphLegendVisibility);
+              close();
+            }}
+          >
+            Legend: {element.settings.legendVisibility ?? 'auto'}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="ctx-features-item"
+            onClick={() => {
+              if (element.expressions.length === 0) {
+                window.alert('No curves to rename.');
+                return;
+              }
+              const list = element.expressions
+                .map(
+                  (e, i) =>
+                    `${i + 1}. ${e.id}  (${e.label || e.sourceText || 'unnamed'})`,
+                )
+                .join('\n');
+              const pick = window.prompt(
+                `Rename which curve?\n${list}\nEnter expression id:`,
+                element.expressions[0]!.id,
+              );
+              if (!pick?.trim()) return;
+              const expr = element.expressions.find((e) => e.id === pick.trim());
+              if (!expr) return;
+              const label = window.prompt(
+                'Curve display name',
+                expr.label || expr.sourceText,
+              );
+              if (!label?.trim()) return;
+              uiSetGraphCurveLabel(element.id, expr.id, label);
+              close();
+            }}
+          >
+            Rename curve
+          </button>
+
+          <div className="ctx-features-divider" role="separator" />
+
+          <button
+            type="button"
+            role="menuitem"
+            className="ctx-features-item"
+            onClick={() => {
+              const typeRaw = window.prompt(
+                'Region type: x_interval | rectangle | curve_segment\n(then drag on the graph)',
+                'x_interval',
+              );
+              if (!typeRaw?.trim()) return;
+              const type = typeRaw.trim() as GraphRegionType;
+              if (
+                type !== 'x_interval' &&
+                type !== 'rectangle' &&
+                type !== 'curve_segment'
+              ) {
+                return;
+              }
+              let expressionId: string | undefined;
+              if (type === 'curve_segment') {
+                expressionId =
+                  window.prompt(
+                    'expression_id for curve segment',
+                    element.expressions[0]?.id ?? '',
+                  )?.trim() || undefined;
+                if (!expressionId) return;
+              }
+              useGraphUiStore.getState().startRegionTool({
+                graphId: element.id,
+                regionType: type,
+                ...(expressionId ? { expressionId } : {}),
+              });
+              close();
+            }}
+          >
+            Highlight region (drag)
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="ctx-features-item"
+            onClick={() => {
+              const typeRaw = window.prompt(
+                'Region type: x_interval | rectangle | curve_segment',
+                'x_interval',
+              );
+              if (!typeRaw?.trim()) return;
+              const type = typeRaw.trim() as GraphRegionType;
+              if (
+                type !== 'x_interval' &&
+                type !== 'rectangle' &&
+                type !== 'curve_segment'
+              ) {
+                return;
+              }
+              const xMin = Number(window.prompt('x_min', '1'));
+              const xMax = Number(window.prompt('x_max', '3'));
+              if (!Number.isFinite(xMin) || !Number.isFinite(xMax) || xMin === xMax) {
+                return;
+              }
+              const label =
+                window.prompt('Region label (optional)', '')?.trim() || undefined;
+              if (type === 'rectangle') {
+                const yMin = Number(window.prompt('y_min', '0'));
+                const yMax = Number(window.prompt('y_max', '2'));
+                if (
+                  !Number.isFinite(yMin) ||
+                  !Number.isFinite(yMax) ||
+                  yMin === yMax
+                ) {
+                  return;
+                }
+                uiAddGraphRegion(element.id, {
+                  type,
+                  x_min: xMin,
+                  x_max: xMax,
+                  y_min: yMin,
+                  y_max: yMax,
+                  label,
+                });
+              } else if (type === 'curve_segment') {
+                const exprId =
+                  window.prompt(
+                    'expression_id',
+                    element.expressions[0]?.id ?? '',
+                  )?.trim() ?? '';
+                if (!exprId) return;
+                uiAddGraphRegion(element.id, {
+                  type,
+                  x_min: xMin,
+                  x_max: xMax,
+                  expression_id: exprId,
+                  label,
+                });
+              } else {
+                uiAddGraphRegion(element.id, {
+                  type,
+                  x_min: xMin,
+                  x_max: xMax,
+                  label,
+                });
+              }
+              close();
+            }}
+          >
+            Highlight region (values)
+          </button>
+          {(element.regions ?? []).length > 0 && (
+            <button
+              type="button"
+              role="menuitem"
+              className="ctx-features-item"
+              onClick={() => {
+                const list = (element.regions ?? [])
+                  .map(
+                    (r) =>
+                      `${r.id}  ${r.type}  [${r.xMin}, ${r.xMax}]${r.label ? `  ${r.label}` : ''}`,
+                  )
+                  .join('\n');
+                const id = window.prompt(
+                  `Remove which region?\n${list}\nEnter region id:`,
+                  element.regions[0]?.id ?? '',
+                );
+                if (!id?.trim()) return;
+                uiRemoveGraphRegion(element.id, id.trim());
+                close();
+              }}
+            >
+              Remove region
+            </button>
+          )}
+
+          <div className="ctx-features-divider" role="separator" />
+
           <button
             type="button"
             role="menuitem"
