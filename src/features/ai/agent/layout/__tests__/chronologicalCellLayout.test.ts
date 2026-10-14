@@ -17,7 +17,6 @@ import {
   MAX_OBJECTS_PER_CELL,
 } from '../chronologicalCellLayout';
 import { resolveGridPlan } from '../resolveGridPlan';
-import { maxColumnsForObjectCount } from '../gridReflow';
 import { getElementBounds } from '../../../../../utils/coordinates';
 import { intersectsWithMargin } from '../collision';
 
@@ -162,20 +161,22 @@ describe('groupCreationOpsIntoCells', () => {
     expect(grouped.cells[0]!.members).toHaveLength(4);
   });
 
-  it('Test D — more than four objects auto-splits preserving order', () => {
-    const grouped = groupCreationOpsIntoCells([
-      textOp('a', 'A', 'cell_1'),
-      textOp('b', 'B', 'cell_1'),
-      textOp('c', 'C', 'cell_1'),
-      textOp('d', 'D', 'cell_1'),
-      textOp('e', 'E', 'cell_1'),
-      textOp('f', 'F', 'cell_1'),
-    ]);
+  it('Test D — oversized shared cell auto-splits at maxObjectsPerCell', () => {
+    const refs = Array.from({ length: MAX_OBJECTS_PER_CELL + 2 }, (_, i) =>
+      String.fromCharCode(97 + i),
+    );
+    const grouped = groupCreationOpsIntoCells(
+      refs.map((ref) => textOp(ref, ref.toUpperCase(), 'cell_1')),
+    );
     expect(grouped.cells).toHaveLength(2);
-    expect(grouped.cells[0]!.members.map((m) => m.ref)).toEqual(['a', 'b', 'c', 'd']);
-    expect(grouped.cells[1]!.members.map((m) => m.ref)).toEqual(['e', 'f']);
+    expect(grouped.cells[0]!.members.map((m) => m.ref)).toEqual(
+      refs.slice(0, MAX_OBJECTS_PER_CELL),
+    );
+    expect(grouped.cells[1]!.members.map((m) => m.ref)).toEqual(
+      refs.slice(MAX_OBJECTS_PER_CELL),
+    );
     expect(grouped.splits).toHaveLength(1);
-    expect(grouped.splits[0]!.partSizes).toEqual([4, 2]);
+    expect(grouped.splits[0]!.partSizes).toEqual([MAX_OBJECTS_PER_CELL, 2]);
     expect(grouped.cells.every((c) => c.members.length <= MAX_OBJECTS_PER_CELL)).toBe(
       true,
     );
@@ -283,23 +284,22 @@ describe('chronological_grid integration', () => {
     }
   });
 
-  it('Test D — six objects in one cell split into 4+2', () => {
-    const plan = chronologicalPlan([
-      textOp('a', 'A', 'cell_1'),
-      textOp('b', 'B', 'cell_1'),
-      textOp('c', 'C', 'cell_1'),
-      textOp('d', 'D', 'cell_1'),
-      textOp('e', 'E', 'cell_1'),
-      textOp('f', 'F', 'cell_1'),
-    ]);
+  it('Test D — oversized shared cell splits at maxObjectsPerCell (legacy layout_cell)', () => {
+    const refs = Array.from({ length: MAX_OBJECTS_PER_CELL + 2 }, (_, i) =>
+      String.fromCharCode(97 + i),
+    );
+    const plan = chronologicalPlan(
+      refs.map((ref) => textOp(ref, ref.toUpperCase(), 'cell_1')),
+    );
     const result = executeCanvasOperations(plan, createLiveAgentExecutorTarget());
     const debug = result.layoutDebug!.chronologicalCells!;
     expect(debug.cellCount).toBe(2);
     expect(debug.splits).toHaveLength(1);
-    expect(debug.splits[0]!.partSizes).toEqual([4, 2]);
-    expect(debug.cells[0]!.refs).toEqual(['a', 'b', 'c', 'd']);
-    expect(debug.cells[1]!.refs).toEqual(['e', 'f']);
-    expect(result.createdIds).toHaveLength(6);
+    expect(debug.splits[0]!.partSizes).toEqual([MAX_OBJECTS_PER_CELL, 2]);
+    expect(debug.cells[0]!.refs).toEqual(refs.slice(0, MAX_OBJECTS_PER_CELL));
+    expect(debug.cells[1]!.refs).toEqual(refs.slice(MAX_OBJECTS_PER_CELL));
+    expect(result.createdIds).toHaveLength(refs.length);
+    expect(result.layoutDebug?.columns).toBe(1);
   });
 
   it('Test E — parser rejects non-contiguous layout_cell', () => {
@@ -385,26 +385,30 @@ describe('chronological_grid integration', () => {
     expect(result.layoutDebug?.collisionFree).toBe(true);
   });
 
-  it('Test H — enough cells wrap into multiple rows under dynamic column limit', () => {
+  it('Test H — many cells stay in a single vertical column (no multi-column wrap)', () => {
     const ops = Array.from({ length: 9 }, (_, i) => textOp(`t${i}`, `Note ${i}`));
     const plan = chronologicalPlan(ops);
     const result = executeCanvasOperations(plan, createLiveAgentExecutorTarget());
-    const n = 9;
-    const maxCols = maxColumnsForObjectCount(n);
-    expect(result.layoutDebug?.maxColumns).toBe(maxCols);
-    expect(result.layoutDebug?.columns).toBeLessThanOrEqual(maxCols);
-    expect(result.layoutDebug?.rows).toBeGreaterThanOrEqual(3);
+    expect(result.layoutDebug?.columns).toBe(1);
+    expect(result.layoutDebug?.rows).toBe(9);
     expect(result.layoutDebug?.chronologicalCells?.cellCount).toBe(9);
-    expect(result.layoutDebug?.wrapped).toBe(true);
+    expect(result.layoutDebug?.chronologicalCells?.gridArrangement).toBe(
+      'vertical_sequence',
+    );
+    const byRef = Object.fromEntries(
+      result.layoutDebug!.items.map((i) => [i.ref, i]),
+    );
+    for (let i = 1; i < 9; i++) {
+      expect(byRef[`t${i}`]!.localY).toBeGreaterThan(byRef[`t${i - 1}`]!.localY);
+    }
   });
 
-  it('Test I — column-spanning cell wraps rather than reordering', () => {
+  it('Test I — legacy column_span / columns hints are ignored for agent geometry', () => {
     const plan = chronologicalPlan([
       textOp('a', 'A'),
       textOp('title', 'Wide title', undefined, 2),
       textOp('b', 'B'),
     ]);
-    // Force 2 columns so span-2 title cannot sit beside A.
     const resolved = resolveGridPlan({
       layout: { type: 'chronological_grid', placement: basePlacement, columns: 2 },
       operations: plan.operations,
@@ -415,13 +419,12 @@ describe('chronological_grid integration', () => {
     const byRef = Object.fromEntries(
       resolved.debug.items.map((i) => [i.ref, i]),
     );
-    expect(byRef.a!.row).toBe(0);
+    expect(resolved.debug.columns).toBe(1);
     expect(byRef.a!.column).toBe(0);
-    // Title spans 2 → must start a new row rather than move before A.
-    expect(byRef.title!.row).toBeGreaterThanOrEqual(1);
     expect(byRef.title!.column).toBe(0);
-    expect(byRef.title!.columnSpan).toBe(2);
-    expect(byRef.b!.row).toBeGreaterThanOrEqual(byRef.title!.row);
+    expect(byRef.b!.column).toBe(0);
+    expect(byRef.title!.localY).toBeGreaterThan(byRef.a!.localY);
+    expect(byRef.b!.localY).toBeGreaterThan(byRef.title!.localY);
     const order = resolved.debug.chronologicalCells!.objectOrder;
     expect(order).toEqual(['a', 'title', 'b']);
   });
@@ -602,7 +605,7 @@ describe('chronological_grid integration', () => {
     });
     expect(resolved.debug.chronologicalCells?.cellCount).toBe(2);
     expect(resolved.debug.chronologicalCells?.objectCount).toBe(3);
-    expect(resolved.debug.chronologicalCells?.maxObjectsPerCell).toBe(4);
+    expect(resolved.debug.chronologicalCells?.maxObjectsPerCell).toBe(8);
     expect(resolved.byRef.size).toBe(3);
   });
 });

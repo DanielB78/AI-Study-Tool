@@ -297,11 +297,36 @@ function resolveChronologicalGrid(
   });
 }
 
+/**
+ * Agent-generated multi-element layouts always use a single vertical column
+ * in operation order. Explicit multi-column `grid` specs from the LLM are
+ * accepted for backward compatibility but do not control geometry.
+ */
 export function resolveGridPlan(input: ResolveGridPlanInput): ResolveGridPlanResult {
-  if (isChronologicalGridLayout(input.layout)) {
-    return resolveChronologicalGrid(input, input.layout);
-  }
+  const chronoLayout: ChronologicalGridLayoutSpec = isChronologicalGridLayout(
+    input.layout,
+  )
+    ? { ...input.layout, columns: 1 }
+    : {
+        type: 'chronological_grid',
+        placement:
+          'placement' in input.layout && input.layout.placement
+            ? input.layout.placement
+            : { mode: 'viewport_default' },
+        columns: 1,
+      };
+  // Explicit multi-column grids from the LLM are ignored for geometry;
+  // resolveExplicitGridPlan remains available for non-agent callers/tests.
+  return resolveChronologicalGrid(
+    { ...input, layout: chronoLayout },
+    chronoLayout,
+  );
+}
 
+/** Explicit multi-column grid resolver — retained for tests / non-agent use. */
+export function resolveExplicitGridPlan(
+  input: ResolveGridPlanInput & { layout: GridLayoutSpec },
+): ResolveGridPlanResult {
   const diagnostics: string[] = [];
   const workingLayout: GridLayoutSpec = input.layout;
 

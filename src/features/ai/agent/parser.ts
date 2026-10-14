@@ -1468,8 +1468,8 @@ export function describeOperationPlan(
         [
           'CHRONOLOGICAL GRID LAYOUT',
           `   Group placement: ${formatPlacementLine(L.placement, 'short')}`,
-          L.columns !== undefined ? `   Columns hint: ${L.columns}` : '   Columns: (app-calculated)',
-          '   Cell grouping: via operation layout_cell (consecutive ops; max 4)',
+          '   Columns: 1 (single vertical column — app-owned)',
+          '   Order: creation-operation order (top → bottom)',
         ].join('\n'),
       );
     } else {

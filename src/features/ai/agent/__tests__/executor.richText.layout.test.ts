@@ -103,7 +103,7 @@ describe('executeCanvasOperations — rich text + grid wrap', () => {
 
     const result = executeCanvasOperations(plan, createLiveAgentExecutorTarget());
     expect(result.createdIds.length).toBeGreaterThanOrEqual(3);
-    expect(result.layoutDebug?.maxColumns).toBe(2);
+    expect(result.layoutDebug?.columns).toBe(1);
     expect(result.layoutDebug?.collisionFree).toBe(true);
 
     const textEl = useCanvasStore
@@ -139,9 +139,9 @@ describe('executeCanvasOperations — rich text + grid wrap', () => {
     };
 
     const result = executeCanvasOperations(plan, createLiveAgentExecutorTarget());
-    expect(result.layoutDebug?.maxColumns).toBe(3);
-    expect(result.layoutDebug?.wrapped).toBe(true);
-    expect(result.layoutDebug?.columns).toBeLessThanOrEqual(3);
+    // Agent placement ignores multi-column requests and stacks vertically.
+    expect(result.layoutDebug?.columns).toBe(1);
+    expect(result.layoutDebug?.rows).toBe(7);
     expect(result.createdIds).toHaveLength(7);
 
     useCanvasStore.getState().undo();

@@ -50,8 +50,9 @@ export type GridLayoutItemSpec = {
 };
 
 /**
- * Multi-element grid layout. The LLM assigns cells; the app computes geometry.
- * `placement` positions the whole group (not individual items).
+ * Explicit multi-column grid layout (legacy / non-agent).
+ * Agent responses should use chronological_grid; explicit grid geometry is
+ * ignored by resolveGridPlan for agent placement.
  */
 export type GridLayoutSpec = {
   type: 'grid';
@@ -62,15 +63,14 @@ export type GridLayoutSpec = {
 };
 
 /**
- * Chronological multi-object cell layout (High-mode default).
- * Creation-operation order is authoritative. Optional `layout_cell` on create
- * ops groups consecutive objects into the same grid cell (1–4 per cell).
- * The application assigns rows/columns and stacks members vertically.
+ * Chronological multi-object layout (High-mode default).
+ * Creation-operation order is the vertical reading order. The application
+ * always stacks auto-placed creates in a single column.
  */
 export type ChronologicalGridLayoutSpec = {
   type: 'chronological_grid';
   placement: Placement;
-  /** Optional column hint; clamped by dynamic max_columns(N). */
+  /** Legacy column hint — ignored for agent geometry (always 1 column). */
   columns?: number;
 };
 
@@ -108,12 +108,11 @@ export type CreationLayoutFields = {
   /** Temporary ref for layout / chronological ordering. */
   ref?: OperationRef;
   /**
-   * Optional cell id — consecutive creates with the same id share one grid cell
-   * (max depends on output_type; oversized groups are auto-split).
-   * Non-contiguous reuse is rejected.
+   * Legacy cell id — accepted for backward compatibility but does not control
+   * agent geometry (always a single vertical column).
    */
   layout_cell?: string;
-  /** Optional column span for the containing cell (defaults to 1; lesson grid). */
+  /** Legacy column span — ignored for agent geometry. */
   column_span?: number;
   /** Optional presentation role — does not change operation order. */
   layout_role?: LayoutRole;
@@ -416,14 +415,14 @@ export type CanvasAgentResponse = {
   operations: CanvasOperation[];
   /**
    * Output preset selected by the LLM from the user request.
-   * Defaults to `lesson` when omitted. Controls max objects/cell and
-   * in-cell arrangement (lesson vertical stack vs step_by_step horizontal pair).
+   * Defaults to `lesson` when omitted. Selects educational structure only —
+   * both presets use the same single-column vertical geometry.
    */
   output_type?: AgentOutputType;
   /**
    * Required when creating multiple related objects with viewport_default.
-   * Prefer `chronological_grid` (operation order + optional layout_cell);
-   * use explicit `grid` only when the user demands a specific arrangement.
+   * Use `chronological_grid` (operation order = vertical reading order).
+   * Explicit multi-column `grid` from the LLM is ignored for geometry.
    */
   layout?: AnyLayoutSpec;
 };
@@ -449,10 +448,9 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
       enum: ['lesson', 'step_by_step'],
     },
     layout: {
-      oneOf: [
-        { $ref: '#/$defs/chronologicalGridLayout' },
-        { $ref: '#/$defs/gridLayout' },
-      ],
+      // Agent-facing: chronological_grid only. Explicit grid is still parsed
+      // for legacy documents but must not be offered to the LLM.
+      $ref: '#/$defs/chronologicalGridLayout',
     },
     operations: {
       type: 'array',
@@ -520,9 +518,7 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
                 },
               },
               ref: { type: 'string', minLength: 1 },
-              layout_cell: { type: 'string', minLength: 1 },
               layout_role: { $ref: '#/$defs/layoutRole' },
-              column_span: { type: 'integer', minimum: 1, maximum: 4 },
               placement: { $ref: '#/$defs/placement' },
             },
           },
@@ -534,9 +530,7 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               type: { const: 'create_equation' },
               latex: { type: 'string', minLength: 1 },
               ref: { type: 'string', minLength: 1 },
-              layout_cell: { type: 'string', minLength: 1 },
               layout_role: { $ref: '#/$defs/layoutRole' },
-              column_span: { type: 'integer', minimum: 1, maximum: 4 },
               placement: { $ref: '#/$defs/placement' },
             },
           },
@@ -559,9 +553,7 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               type: { const: 'create_structured_note' },
               structure_id: { type: 'string', minLength: 1 },
               ref: { type: 'string', minLength: 1 },
-              layout_cell: { type: 'string', minLength: 1 },
               layout_role: { $ref: '#/$defs/layoutRole' },
-              column_span: { type: 'integer', minimum: 1, maximum: 4 },
               fields: {
                 type: 'object',
                 additionalProperties: {
@@ -616,9 +608,7 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
               viewport: { $ref: '#/$defs/graphViewport' },
               settings: { $ref: '#/$defs/graphSettings' },
               ref: { type: 'string', minLength: 1 },
-              layout_cell: { type: 'string', minLength: 1 },
               layout_role: { $ref: '#/$defs/layoutRole' },
-              column_span: { type: 'integer', minimum: 1, maximum: 4 },
               placement: { $ref: '#/$defs/placement' },
             },
           },
@@ -1444,10 +1434,11 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
       required: ['type', 'placement'],
       properties: {
         type: { const: 'chronological_grid' },
-        columns: { type: 'integer', minimum: 1, maximum: 4 },
         placement: { $ref: '#/$defs/placement' },
       },
     },
+    // Retained for documentation / non-agent tooling. Not offered in the
+    // agent-facing `layout` property (see properties.layout above).
     gridLayout: {
       type: 'object',
       additionalProperties: false,
@@ -1586,18 +1577,18 @@ Shape:
   "layout": { /* REQUIRED when creating 2+ related objects — see LAYOUT */ }
 }
 
-OUTPUT TYPE:
-- "lesson" — comprehensive topic coverage; chronological multi-column grid; up to 4 objects per layout_cell (vertical stack).
-- "step_by_step" — derivations / worked solutions; ONE vertical column of cells; up to 2 objects per layout_cell. Text+Equation always vertical (never beside); text+Graph may pair horizontally.
+OUTPUT TYPE (educational structure only — NOT columns or grid geometry):
+- "lesson" — comprehensive topic coverage.
+- "step_by_step" — derivations / worked solutions.
 Select from the user request (derive/solve/work through → step_by_step; explain/teach topic → lesson). Ambiguous → lesson. Respect explicit user requests.
+
+ALL auto-placed creates stack in ONE vertical column in operation order. Never emit row/column/layout_cell/column_span or side-by-side geometry.
 
 create_text (general prose / main textbox — prefer create_text_component for textbook parts):
 {
   "type": "create_text",
   "ref": "<temp id — required for multi-create layout>",
-  "layout_cell": "<optional shared cell id — consecutive ops only>",
   "layout_role": "introduction"|"explanation"|"mathematical_step"|"visualisation"|"given_information"|"final_result"|"verification",
-  "column_span": 1|2|3|4,  /* optional; lesson grid only */
   "text": "<plain string — optional if rich_text provided>",
   "rich_text": { /* optional structured formatting — see RICH TEXT */ },
   "placement":  /* omit when using response-level layout */
@@ -1610,7 +1601,6 @@ create_equation — CANONICAL EquationElement constructor (not legacy; peer of c
 {
   "type": "create_equation",
   "ref": "<temp id for layout>",
-  "layout_cell": "<optional shared cell id>",
   "layout_role": "mathematical_step"|"final_result"|…,
   "latex": "<LaTeX body without surrounding $$> — use \\begin{aligned}…\\end{aligned} for multi-line; never put & inside \\boxed{…} unless the boxed body is itself aligned",
   "placement": /* omit when using response-level layout */
@@ -1671,7 +1661,7 @@ GRAPH TEXTBOOK COMPONENTS (optional — app owns style and placement; reuse exis
   Prefer updating an existing point at the same coordinates over creating a duplicate.
 - add_text_to_graph: attach a textbook TextElement to an existing GraphElement (or create_graph target_ref).
   { "type":"add_text_to_graph", "target_element_id":"<graph id>"|"target_ref":"<plan ref>", "component":"main_text"|"definition"|"example"|"warning"|"exercise", "content":"…" }
-  App owns style, size, and placement (may place explanation beside the graph when space allows; exercises after explanations).
+  App owns style, size, and placement (explanations and exercises stack below the graph in one vertical column).
   Prefer this over create_text / create_text_component when the user asks to explain, define, exemplify, warn about, or quiz an existing graph.
   Do NOT supply x/y/width/height/font/colours. Do not associate graph-attached text with the graph's parent TextElement.
   Specialised ops remain preferred when they fit: add_graph_caption, add_graph_observation, add_graph_comment, set_graph_title.
@@ -1734,15 +1724,10 @@ Textbook derivation pattern (app formats; you supply content + order only):
 - Do NOT invent coordinates, font sizes, colours, margins, or alignment.
 ALL AI-GENERATED CONTENT MUST USE TEXT ELEMENTS, GRAPH ELEMENTS OR EQUATION ELEMENTS AND THEIR SUPPORTED COMPONENTS. Never shapes, arrows, freehand, or decorative objects.
 
-GRID COLUMN LIMIT:
-For N created objects: columns must satisfy 1 <= columns <= min(4, ceil(sqrt(N))).
-Examples: 1→1, 2–4→2, 5–9→3, 10+→4. The app reflows/wraps if exceeded.
-
 create_structured_note (ONLY when a note structure is selected):
 {
   "type": "create_structured_note",
   "ref": "<temp id for layout>",
-  "layout_cell": "<optional shared cell id>",
   "structure_id": "<exact selected structure id>",
   "fields": {
     "<field_id>": { "content": "<text for TEXT fields>" }
@@ -1757,7 +1742,6 @@ create_graph (new interactive GraphElement):
 {
   "type": "create_graph",
   "ref": "<temp id for layout>",
-  "layout_cell": "<optional shared cell id>",
   "expressions": [
     { "expression": "x**2", "visible": true, "domain_min": null, "domain_max": null }
   ],
@@ -1772,59 +1756,26 @@ create_graph (new interactive GraphElement):
 
 LAYOUT (mandatory for 2+ related creates that would otherwise all use viewport_default):
 
-PREFERRED — chronological_grid (operation order is reading order; geometry depends on output_type):
+Always use chronological_grid. The app stacks every create in ONE vertical column in operation order.
+Do NOT emit layout_cell, column_span, row, column, or multi-column grid items — they are ignored for placement.
 
-LESSON example:
-{
-  "output_type": "lesson",
-  "layout": { "type": "chronological_grid", "placement": { "mode": "viewport_default" } },
-  "operations": [
-    { "type": "create_text", "ref": "intro", "layout_cell": "cell_1", "layout_role": "introduction", "text": "…" },
-    { "type": "create_equation", "ref": "eq", "layout_cell": "cell_1", "layout_role": "mathematical_step", "latex": "E=F/q" },
-    { "type": "create_graph", "ref": "graph", "layout_cell": "cell_2", "layout_role": "visualisation", … }
-  ]
-}
-
-STEP BY STEP example (explanation left, math/graph right; cells stack top→bottom):
+Example:
 {
   "output_type": "step_by_step",
   "layout": { "type": "chronological_grid", "placement": { "mode": "viewport_default" } },
   "operations": [
-    { "type": "create_text", "ref": "s1e", "layout_cell": "step_1", "layout_role": "explanation", "text": "Restoring force obeys Hooke's law." },
-    { "type": "create_equation", "ref": "s1m", "layout_cell": "step_1", "layout_role": "mathematical_step", "latex": "F=-kx" },
-    { "type": "create_text", "ref": "s2e", "layout_cell": "step_2", "layout_role": "explanation", "text": "Apply Newton's second law." },
-    { "type": "create_equation", "ref": "s2m", "layout_cell": "step_2", "layout_role": "mathematical_step", "latex": "m\\\\frac{d^2x}{dt^2}=-kx" },
-    { "type": "create_equation", "ref": "final", "layout_cell": "result", "layout_role": "final_result", "latex": "x(t)=A\\\\cos(\\\\omega t+\\\\phi)" }
+    { "type": "create_text", "ref": "s1e", "layout_role": "explanation", "text": "Restoring force obeys Hooke's law." },
+    { "type": "create_equation", "ref": "s1m", "layout_role": "mathematical_step", "latex": "F=-kx" },
+    { "type": "create_text", "ref": "s2e", "layout_role": "explanation", "text": "Apply Newton's second law." },
+    { "type": "create_equation", "ref": "s2m", "layout_role": "mathematical_step", "latex": "m\\\\frac{d^2x}{dt^2}=-kx" },
+    { "type": "create_equation", "ref": "final", "layout_role": "final_result", "latex": "x(t)=A\\\\cos(\\\\omega t+\\\\phi)" }
   ]
 }
 Rules:
-- Emit creation operations in the order the learner should read them.
-- Optional layout_cell groups consecutive creates into one cell (lesson max 4 vertical; step_by_step max 2 horizontal).
-- Contiguous layout_cell members only — non-contiguous reuse is rejected.
-- Omit layout_cell for a solo cell. Single-object step_by_step cells may be full-width (e.g. final_result).
-- Prefer explanation + equation / explanation + graph pairs in step_by_step; do not invent filler objects.
+- Emit creation operations in the order the learner should read them (that is the vertical sequence).
 - Optional layout_role is presentation metadata only — never reorder by role.
-- Do NOT assign row/column or world coordinates. relationship_grid is rejected.
-
-EXPLICIT grid (only when the user demands a specific arrangement):
-{
-  "layout": {
-    "type": "grid",
-    "columns": 1|2|3|4,
-    "placement": { "mode": "viewport_default" } | relative | absolute,
-    "items": [
-      { "ref": "<matches operation.ref>", "row": 0, "column": 0, "column_span": 2 }
-    ]
-  }
-}
-Rules for explicit grid:
-- Zero-based row/column. column_span defaults to 1; must not exceed columns.
-- No two items may occupy the same cell. No nested grids. No row spanning. No per-item x/y.
-- Column limit: 1 <= columns <= min(4, ceil(sqrt(N))); app reflows if exceeded.
-
-Shared layout rules:
-- The application measures sizes, computes positions, avoids overlaps, and places the WHOLE group.
-- Do NOT put viewport_default on every child to bypass the layout.
+- Do NOT assign row/column/layout_cell/world coordinates. relationship_grid is rejected.
+- The application measures sizes, stacks top→bottom, centres equations, avoids overlaps, and places the WHOLE group.
 - Single independent create may omit layout and use placement as before.
 - Explicit relative_to_element / absolute on a single create remains valid without a layout.
 
@@ -1859,7 +1810,7 @@ NODE_SECTION fields:
 Rules:
 - Never invent element IDs, node IDs, connector IDs, structure IDs, graph expression IDs, or point IDs.
 - Prefer relative_to_element over absolute for "next to / below / above / left / right" of ONE object.
-- Prefer chronological_grid for educational multi-element plans; use explicit grid only for user-specified arrangements.
+- Prefer chronological_grid for educational multi-element plans; the app always uses one vertical column.
 - Never invent world coordinates to avoid overlaps — the application guarantees geometric validity.
 - When a structure is selected and the user asks for new structured content, use create_structured_note — do NOT recreate the layout with create_text/create_equation/create_connector.
 - Omit or null optional structure fields when there is no meaningful content.

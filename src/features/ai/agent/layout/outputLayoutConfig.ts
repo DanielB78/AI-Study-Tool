@@ -1,6 +1,7 @@
 /**
  * Application-defined layout presets for LLM output types.
- * The LLM selects the output type; the app owns geometry parameters.
+ * The LLM selects the output type (lesson vs step_by_step) for educational
+ * structure only — geometry is always a single vertical column owned by the app.
  */
 
 export const AGENT_OUTPUT_TYPES = ['lesson', 'step_by_step'] as const;
@@ -15,9 +16,9 @@ export type OutputLayoutConfig = {
   maxObjectsPerCell: number;
   cellArrangement: CellArrangement;
   gridArrangement: GridArrangement;
-  /** Horizontal gap between paired objects (step_by_step). */
+  /** Horizontal gap between paired objects (unused when always vertical). */
   pairGap: number;
-  /** Soft cap on paired-cell content width (world units). */
+  /** Soft cap on content column width (world units). */
   maxPairWidth: number;
   /** Human-readable labels for debug UI. */
   labels: {
@@ -27,32 +28,37 @@ export type OutputLayoutConfig = {
   };
 };
 
+/**
+ * Shared geometry for all agent-generated multi-element responses:
+ * one vertical column, operation order = reading order, never side-by-side.
+ */
+const SINGLE_COLUMN_GEOMETRY = {
+  maxObjectsPerCell: 8,
+  cellArrangement: 'vertical_stack' as const,
+  gridArrangement: 'vertical_sequence' as const,
+  pairGap: 28,
+  maxPairWidth: 720,
+  labels: {
+    layout: 'Single vertical column',
+    cellArrangement: 'Vertical stack',
+  },
+};
+
 export const LESSON_OUTPUT_LAYOUT: OutputLayoutConfig = {
   outputType: 'lesson',
-  maxObjectsPerCell: 4,
-  cellArrangement: 'vertical_stack',
-  gridArrangement: 'chronological_grid',
-  pairGap: 28,
-  maxPairWidth: 960,
+  ...SINGLE_COLUMN_GEOMETRY,
   labels: {
     outputType: 'Lesson',
-    layout: 'Chronological grid',
-    cellArrangement: 'Vertical stack',
+    ...SINGLE_COLUMN_GEOMETRY.labels,
   },
 };
 
 export const STEP_BY_STEP_OUTPUT_LAYOUT: OutputLayoutConfig = {
   outputType: 'step_by_step',
-  maxObjectsPerCell: 2,
-  cellArrangement: 'horizontal_pair',
-  gridArrangement: 'vertical_sequence',
-  pairGap: 28,
-  /** Keep paired steps readable; wider content falls back to vertical stack. */
-  maxPairWidth: 920,
+  ...SINGLE_COLUMN_GEOMETRY,
   labels: {
     outputType: 'Step by Step',
-    layout: 'Vertical sequence',
-    cellArrangement: 'Horizontal pair',
+    ...SINGLE_COLUMN_GEOMETRY.labels,
   },
 };
 

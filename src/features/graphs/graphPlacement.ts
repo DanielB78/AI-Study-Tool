@@ -187,28 +187,7 @@ export function resolveGraphAttachPlacement(opts: {
     );
   }
 
-  // Prefer side-by-side for a second graph when room exists
-  if (existingGraphs.length === 1) {
-    const first = existingGraphs[0]!;
-    const firstPres = measureGraphPresentation(first, opts.elements);
-    const side: Rect = {
-      x: firstPres.x + firstPres.width + GRAPH_COMPONENT_LAYOUT.graphSideGap,
-      y: firstPres.y,
-      width,
-      height,
-    };
-    const viewportRight =
-      opts.camera.x + opts.viewport.width / Math.max(opts.camera.zoom, 0.01);
-    if (side.x + side.width < viewportRight - 40 && !overlaps(side, opts.elements)) {
-      return {
-        ...side,
-        reason: 'graph_beside_existing',
-        associatedElementId: opts.targetText.id,
-        order,
-      };
-    }
-  }
-
+  // Always stack additional graphs vertically in the content column.
   const preferred: Rect = {
     x: opts.targetText.x,
     y: stackBottom,
@@ -260,9 +239,6 @@ const GRAPH_TEXT_STACK_RANK: Partial<Record<TextComponentType, number>> = {
   warning: 5,
   exercise: 6,
 };
-
-const MIN_SIDE_GRAPH_WIDTH = 280;
-const MIN_SIDE_TEXT_WIDTH = 220;
 
 export type GraphChromePlacementDecision = {
   x: number;
@@ -343,39 +319,8 @@ export function resolveGraphChromePlacement(opts: {
 
   const rank = GRAPH_TEXT_STACK_RANK[opts.componentType] ?? 50;
 
-  // Prefer explanation beside the graph when both keep comfortable widths.
-  if (opts.componentType === 'main_text') {
-    const viewportRight =
-      opts.camera.x + opts.viewport.width / Math.max(opts.camera.zoom, 0.01);
-    const sideX =
-      opts.graph.x + opts.graph.width + GRAPH_COMPONENT_LAYOUT.graphSideGap;
-    const room = viewportRight - sideX - 40;
-    if (
-      opts.graph.width >= MIN_SIDE_GRAPH_WIDTH &&
-      room >= MIN_SIDE_TEXT_WIDTH
-    ) {
-      const w = Math.min(
-        Math.max(size.width, MIN_SIDE_TEXT_WIDTH),
-        TEXT_COMPONENT_STYLES.main_text.defaultWidth,
-        room,
-      );
-      const sideSize = measureTextComponent({
-        componentType: 'main_text',
-        text: opts.text,
-        meta: opts.meta,
-        availableWidth: w,
-      });
-      const preferred: Rect = {
-        x: sideX,
-        y: opts.graph.y,
-        width: w,
-        height: sideSize.height,
-      };
-      if (!overlaps(preferred, opts.elements)) {
-        return { ...preferred, reason: 'graph_explanation_beside' };
-      }
-    }
-  }
+  // Explanations and other textbook components always stack below the graph
+  // (single vertical reading column — never beside).
 
   const presentation = measureGraphPresentation(opts.graph, opts.elements);
   let y =
@@ -413,21 +358,18 @@ export function resolveGraphChromePlacement(opts: {
     return elType === 'exercise' && rank < exerciseRank;
   });
 
-  const dy =
-    toShift.length > 0
-      ? height + GRAPH_COMPONENT_LAYOUT.observationGap
-      : 0;
-
-  if (toShift.length > 0 && rank < exerciseRank) {
+  // Insert into the vertical column before higher-rank siblings (e.g. exercises).
+  // Take their slot, then push them down by the measured height + gap.
+  let dy = 0;
+  if (toShift.length > 0) {
     const topShiftY = Math.min(...toShift.map((e) => e.y));
-    if (preferred.y + preferred.height + 4 > topShiftY) {
-      preferred.y = Math.max(
-        presentation.y +
-          presentation.height +
-          GRAPH_COMPONENT_LAYOUT.captionGap,
-        topShiftY,
-      );
+    if (preferred.y + height + GRAPH_COMPONENT_LAYOUT.observationGap > topShiftY) {
+      preferred.y = Math.min(preferred.y, topShiftY);
     }
+    dy = Math.max(
+      0,
+      preferred.y + height + GRAPH_COMPONENT_LAYOUT.observationGap - topShiftY,
+    );
   }
 
   const obstacles = opts.elements.filter(

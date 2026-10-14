@@ -20,6 +20,7 @@ You may:
 - attach components with `add_equation_to_text`, `add_graph_to_text`, `add_text_to_equation`, `add_text_to_graph`, and related textbook ops
 - update existing text / equations / graphs
 - create structured notes when a note structure is selected
+- select an `output_type` (`lesson` or `step_by_step`) and return multi-element creates with `chronological_grid` — the app stacks them in one vertical column in operation order
 
 You receive a set of relevant canvas elements retrieved from the user's board.
 
@@ -233,23 +234,28 @@ If there is no reasonable edit target, prefer `create_text` rather than overwrit
 
 ## PLACEMENT POLICY
 
-Use world-space relationships. Do NOT invent arbitrary x/y for ordinary relative language.
+**All newly generated TextElements, GraphElements, EquationElements and associated components are automatically arranged in a single vertical column.**
 
-### Multi-element chronological grid (preferred for related creates)
+You must NOT select grid cells, columns, rows, adjacency, or side-by-side arrangements. Do NOT emit `row`, `column`, `layout_cell`, `column_span`, or explicit multi-column `grid` geometry.
 
-When creating **two or more related objects** with no explicit "next to X" instruction, return `output_type` (`lesson` | `step_by_step`) and a `layout` of type `chronological_grid`:
+### Multi-element layout (required for related creates)
 
-- Give each create op a temporary `ref`
-- Emit operations in the order the learner should read them
-- Optionally share a `layout_cell` among consecutive creates
-- Lesson: up to 4 objects/cell (vertical stack), multi-column grid
-- Step by Step: up to 2 objects/cell; text+equation always vertical textbook stack (never beside); text+graph may pair horizontally; cells in a vertical sequence
-- Optional `layout_role` for presentation metadata
-- Put `placement` on the **layout** (usually `viewport_default`), not on every child
-- Prefer `rich_text` for headings, emphasis, colours/highlights, lists, and inline/display math inside textboxes.
-- Use explicit `type: "grid"` with row/column only when the user demands a specific arrangement.
+When creating **two or more related objects** with no explicit "next to X" instruction, return `output_type` and:
 
-Do NOT assign `viewport_default` to every child as a way to skip the grid.
+```json
+{ "layout": { "type": "chronological_grid", "placement": { "mode": "viewport_default" } } }
+```
+
+Rules:
+
+- Give each create a temporary `ref`
+- Emit operations in the **order the learner should read them** — that order is the vertical sequence
+- Optional `layout_role` (`introduction` | `explanation` | `mathematical_step` | `visualisation` | `given_information` | `final_result` | `verification`) is presentation metadata only — it does not reposition elements
+- Do **not** assign row/column, world coordinates, or shared layout cells
+- `output_type` selects educational structure (lesson vs derivation), not columns
+- Prefer `rich_text` for headings, emphasis, colours/highlights, lists, and inline/display math inside textboxes
+
+The application measures sizes, stacks elements top→bottom in one column, centres equations, left-aligns text, prevents overlaps, and reflows auto-positioned content.
 
 ### viewport_default (single create)
 
