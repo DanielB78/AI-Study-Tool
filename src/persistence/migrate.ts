@@ -460,6 +460,26 @@ function migrateImage(raw: Record<string, unknown>, z: number): ImageElement {
 }
 
 function migrateEquation(raw: Record<string, unknown>, z: number): EquationElement {
+  const associationRaw = isObject(raw.association) ? raw.association : null;
+  const association =
+    associationRaw &&
+    (typeof associationRaw.associatedElementId === 'string' ||
+      associationRaw.placementMode === 'auto' ||
+      associationRaw.placementMode === 'manual')
+      ? {
+          associatedElementId:
+            typeof associationRaw.associatedElementId === 'string' &&
+            associationRaw.associatedElementId.trim()
+              ? associationRaw.associatedElementId.trim()
+              : undefined,
+          placementMode:
+            associationRaw.placementMode === 'manual' ? ('manual' as const) : ('auto' as const),
+          ...(typeof associationRaw.order === 'number' &&
+          Number.isFinite(associationRaw.order)
+            ? { order: associationRaw.order }
+            : {}),
+        }
+      : undefined;
   return {
     ...migrateBase(raw, z),
     type: 'equation',
@@ -467,6 +487,7 @@ function migrateEquation(raw: Record<string, unknown>, z: number): EquationEleme
     fontSize: num(raw.fontSize, 28),
     color: str(raw.color, DEFAULT_STYLE.textColor),
     displayMode: raw.displayMode === 'inline' ? 'inline' : 'display',
+    ...(association ? { association } : {}),
   };
 }
 
@@ -656,6 +677,7 @@ export function migrateDocument(raw: unknown): CanvasDocument | null {
     version !== 6 &&
     version !== 7 &&
     version !== 8 &&
+    version !== 9 &&
     version !== DOCUMENT_VERSION
   ) {
     return null;

@@ -506,7 +506,10 @@ export function InfiniteCanvas() {
             },
           };
         }
-        if (el.type === 'graph' && el.association) {
+        if (
+          (el.type === 'graph' || el.type === 'equation') &&
+          el.association
+        ) {
           if (el.association.placementMode === 'manual') return el;
           return {
             ...el,
@@ -516,7 +519,7 @@ export function InfiniteCanvas() {
             },
           };
         }
-        if (el.type === 'graph') {
+        if (el.type === 'graph' || el.type === 'equation') {
           return {
             ...el,
             association: { placementMode: 'manual' as const },
@@ -545,9 +548,11 @@ export function InfiniteCanvas() {
           if (!o) return el;
           return markManual({ ...el, x: o.x + dx, y: o.y + dy });
         });
-        // Auto-placed related components follow a moved text or graph.
+        // Auto-placed related components follow a moved text, graph, or equation.
         if (
-          (primary?.type === 'text' || primary?.type === 'graph') &&
+          (primary?.type === 'text' ||
+            primary?.type === 'graph' ||
+            primary?.type === 'equation') &&
           (dx !== 0 || dy !== 0)
         ) {
           const related = useCanvasStore
@@ -576,7 +581,9 @@ export function InfiniteCanvas() {
         const dy = before ? y - before.y : 0;
         updateElement(id, (el) => markManual({ ...el, x, y }));
         if (
-          (before?.type === 'text' || before?.type === 'graph') &&
+          (before?.type === 'text' ||
+            before?.type === 'graph' ||
+            before?.type === 'equation') &&
           (dx !== 0 || dy !== 0)
         ) {
           const related = useCanvasStore

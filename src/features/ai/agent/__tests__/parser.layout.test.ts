@@ -142,6 +142,33 @@ describe('parseCanvasAgentResponse — grid layout', () => {
     });
   });
 
+  it('repairs \\boxed{…&=…} inside aligned create_equation latex', () => {
+    const latex =
+      "\\begin{aligned}c^2t'^2-x'^2&=\\gamma^2(c^2t^2-x^2)\\\\[5pt]\\boxed{c^2t'^2-x'^2-y'^2-z'^2&=c^2t^2-x^2-y^2-z^2}\\end{aligned}";
+    const res = parseCanvasAgentResponse(
+      JSON.stringify({
+        operations: [
+          {
+            type: 'create_equation',
+            latex,
+            placement: { mode: 'viewport_default' },
+          },
+        ],
+      }),
+      ctx,
+    );
+    const op = res.operations[0]!;
+    expect(op.type).toBe('create_equation');
+    if (op.type === 'create_equation') {
+      expect(op.latex).toContain(
+        "\\boxed{c^2t'^2-x'^2-y'^2-z'^2=c^2t^2-x^2-y^2-z^2}",
+      );
+      expect(op.latex).not.toContain(
+        "\\boxed{c^2t'^2-x'^2-y'^2-z'^2&=",
+      );
+    }
+  });
+
   it('rejects column span past grid width', () => {
     expect(() =>
       parseCanvasAgentResponse(

@@ -16,6 +16,7 @@ import {
 } from '../../features/text/textComponentUi';
 import { getComponentType } from '../../features/text/textComponents';
 import { uiAddGraphToText } from '../../features/graphs/graphComponentUi';
+import { uiAddEquationToText } from '../../features/equations/equationComponentUi';
 
 type Props = {
   element: TextElement;
@@ -202,6 +203,22 @@ export function TextFeaturesMenu({ element }: Props) {
             }}
           >
             Add graph
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="ctx-features-item"
+            onClick={() => {
+              const latex = window.prompt(
+                'Equation LaTeX (multiline OK — use aligned)',
+                '\\begin{aligned}\nF &= -kx \\\\\nm\\ddot{x} &= -kx\n\\end{aligned}',
+              );
+              if (!latex?.trim()) return;
+              uiAddEquationToText(associateId, latex.trim());
+              close();
+            }}
+          >
+            Add equation
           </button>
         </div>
       )}

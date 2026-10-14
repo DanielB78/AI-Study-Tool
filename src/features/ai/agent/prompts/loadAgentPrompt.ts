@@ -93,24 +93,32 @@ Pair each important mathematical step with a short explanation (\`layout_cell\` 
 
 ## AVAILABLE ACTIONS
 
-1. \`create_text\` — create a new TextElement (optional \`title\`, \`notes\`, \`comments\`, \`rich_text\` with inline/display math)
-2. \`create_equation\` — create a standalone EquationElement (LaTeX) only when a separate movable equation object is needed
-3. \`update_text\` — replace the COMPLETE text of an existing TextElement
-4. TextElement features: \`set_text_title\`, \`remove_text_title\`, \`insert_text_heading\`, \`highlight_text\`, \`add_text_comment\`, \`update_text_comment\`, \`remove_text_comment\`, \`add_text_note\`, \`update_text_note\`, \`remove_text_note\`
-5. Text math inside a TextElement: \`insert_inline_math\`, \`insert_display_math\`, \`update_text_math\`, \`remove_text_math\`, \`convert_text_math\`
-6. \`create_graph\` — create a new interactive GraphElement
-7. Graph edits (context graphs only): \`add_graph_expression\`, \`update_graph_expression\`, \`remove_graph_expression\`, \`set_graph_expression_visibility\`, \`update_graph_viewport\`, \`update_graph_settings\`, \`add_graph_point\`, \`update_graph_point\`, \`remove_graph_point\`
-8. \`layout\` (response-level) — \`chronological_grid\` (default) or explicit \`grid\` for multi-element creation
+**PRIMARY ELEMENT TYPES — create ONLY these canvas objects:**
+1. **TextElement** — prose, definitions, examples, warnings, exercises; short math via inline LaTeX
+2. **GraphElement** — plotted functions, points, native graph annotations
+3. **EquationElement** — prominent / multiline / textbook-style mathematical working
 
-### Mathematics in TextElements vs standalone equations
+Plus their supported associated components. Never create shapes, arrows, freehand strokes, or decorative objects as substitutes.
 
-- **Inline Math** (\`inline_math\` span or \`insert_inline_math\`): expression is part of a sentence ("The restoring force is F=-kx.").
-- **Display Math** (\`display_math\` block or \`insert_display_math\`): important / derivation equations on their own centred line inside the textbox.
-- **Standalone \`create_equation\`**: only when the user wants a separate movable equation object, or when pairing explanation|equation side-by-side in step_by_step cells.
-- Prefer embedding math in \`rich_text\` for a single explanatory textbox. Do NOT duplicate the same formula as both TextElement math and a standalone EquationElement.
-- Never invent \`math_id\` / block ids for existing nodes — use ids from context. Omit ids for new math nodes.
+### Available operations
 
-Do NOT emit: delete, move, resize, style, shape, connector, or group operations.
+1. \`create_text\` — TextElement (optional \`rich_text\` with inline math)
+2. \`create_equation\` / \`add_equation_to_text\` — EquationElement (prefer multiline \`\\begin{aligned}…\\end{aligned}\` for derivations; never put alignment \`&\` inside \`\\boxed{…}\` unless the boxed body is itself \`\\begin{aligned}…\\end{aligned}\`)
+3. \`update_text\` / \`update_equation\`
+4. Text features & components; text math (\`insert_inline_math\`, …) for in-sentence formulas
+5. Equation components: \`add_text_to_equation\` (title|lead_in|step_explanation|symbol_definitions|interpretation|warning), \`set_equation_title\`, \`add_equation_symbol_definitions\`, \`add_equation_interpretation\`
+6. \`create_graph\` / graph edits / graph textbook components (\`add_graph_to_text\`, \`add_text_to_graph\`, …)
+7. \`layout\` (response-level) — \`chronological_grid\` or explicit \`grid\`
+
+### Mathematics decision rules
+
+- **Inline Math** inside TextElement: short expressions in sentences ("The restoring force is F=-kx.").
+- **EquationElement**: substantial centred working, consecutive algebraic steps, derivations. Group consecutive lines in ONE multiline EquationElement. Start a new EquationElement when explanatory prose interrupts.
+- **display_math inside TextElement**: supported for compatibility — prefer EquationElement for textbook-style derivations.
+- Do NOT invent coordinates, font sizes, colours, or layout geometry for equation/text components.
+- Never invent ids for existing nodes. Use \`ref\` / \`target_ref\` for newly created equations.
+
+Do NOT emit: delete, move, resize, style, shape, connector, freehand, or group operations.
 
 Graphs are NOT semantically retrieved. Graph context comes only from explicit selection or spatial proximity to a semantic anchor.
 

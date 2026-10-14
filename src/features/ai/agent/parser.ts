@@ -67,6 +67,11 @@ import {
   type TextMathOperation,
 } from './textMathOperations';
 import {
+  isEquationComponentOperationType,
+  parseEquationComponentOperation,
+  type EquationComponentOperation,
+} from './equationComponentOperations';
+import {
   isTextComponentOperationType,
   parseTextComponentOperation,
   type TextComponentOperation,
@@ -663,6 +668,9 @@ function parseOperation(raw: unknown): CanvasOperation {
   if (isTextMathOperationType(raw.type)) {
     return parseTextMathOperation(raw);
   }
+  if (isEquationComponentOperationType(raw.type)) {
+    return parseEquationComponentOperation(raw);
+  }
   throw new CanvasAgentParseError(
     'unknown_operation',
     `Unsupported operation type "${raw.type}".`,
@@ -1051,6 +1059,28 @@ function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
   }
   if (isTextMathOperationType(op.type)) {
     validateTextTarget((op as TextMathOperation).target_element_id, ctx);
+  }
+  if (isEquationComponentOperationType(op.type)) {
+    const eop = op as EquationComponentOperation;
+    if (eop.type === 'add_equation_to_text') {
+      validateTextTarget(eop.target_element_id, ctx);
+    } else if (
+      'target_element_id' in eop &&
+      eop.target_element_id &&
+      !eop.target_element_id.startsWith('ref:') &&
+      !('target_ref' in eop && eop.target_ref)
+    ) {
+      // Real equation ids validated loosely — plan refs resolve at execute.
+      if (ctx.allowedElementIds.size > 0 && ctx.elementTypes?.has(eop.target_element_id)) {
+        const t = ctx.elementTypes.get(eop.target_element_id);
+        if (t && t !== 'equation' && t !== 'text') {
+          throw new CanvasAgentParseError(
+            'missing_target',
+            `Target "${eop.target_element_id}" is not an EquationElement.`,
+          );
+        }
+      }
+    }
   }
   if (op.type === 'create_text' || op.type === 'create_equation' || op.type === 'create_graph') {
     validateRelativePlacement(op.placement, ctx);
