@@ -76,7 +76,13 @@ export type AddEquationSymbolDefinitionsOperation = {
   type: 'add_equation_symbol_definitions';
   target_element_id?: string;
   target_ref?: string;
-  symbols: SymbolDefinitionSpec[];
+  /** Preferred structured form. */
+  symbols?: SymbolDefinitionSpec[];
+  /**
+   * Free-form "where …" prose. LLMs often emit this instead of `symbols`;
+   * accepted as a fallback and rendered with the same symbol-definition style.
+   */
+  content?: string;
 };
 
 export type AddEquationInterpretationOperation = {
@@ -273,36 +279,53 @@ export function parseEquationComponentOperation(
           'add_equation_symbol_definitions needs target_element_id or target_ref.',
         );
       }
-      if (!Array.isArray(raw.symbols) || raw.symbols.length === 0) {
-        throw new CanvasAgentParseError(
-          'schema',
-          'add_equation_symbol_definitions.symbols must be a non-empty array.',
-        );
+      const content =
+        typeof raw.content === 'string' && raw.content.trim()
+          ? raw.content.trim()
+          : undefined;
+      if (Array.isArray(raw.symbols) && raw.symbols.length > 0) {
+        const symbols: SymbolDefinitionSpec[] = raw.symbols.map((item, i) => {
+          if (!isRecord(item)) {
+            throw new CanvasAgentParseError(
+              'schema',
+              `symbols[${i}] must be an object.`,
+            );
+          }
+          const symbol =
+            typeof item.symbol === 'string' ? item.symbol.trim() : '';
+          const definition =
+            typeof item.definition === 'string' ? item.definition.trim() : '';
+          if (!symbol || !definition) {
+            throw new CanvasAgentParseError(
+              'empty_text',
+              `symbols[${i}] needs symbol and definition.`,
+            );
+          }
+          const unit =
+            typeof item.unit === 'string' && item.unit.trim()
+              ? item.unit.trim()
+              : undefined;
+          return { symbol, definition, ...(unit ? { unit } : {}) };
+        });
+        return {
+          type: 'add_equation_symbol_definitions',
+          ...ids,
+          symbols,
+          ...(content ? { content } : {}),
+        };
       }
-      const symbols: SymbolDefinitionSpec[] = raw.symbols.map((item, i) => {
-        if (!isRecord(item)) {
-          throw new CanvasAgentParseError(
-            'schema',
-            `symbols[${i}] must be an object.`,
-          );
-        }
-        const symbol =
-          typeof item.symbol === 'string' ? item.symbol.trim() : '';
-        const definition =
-          typeof item.definition === 'string' ? item.definition.trim() : '';
-        if (!symbol || !definition) {
-          throw new CanvasAgentParseError(
-            'empty_text',
-            `symbols[${i}] needs symbol and definition.`,
-          );
-        }
-        const unit =
-          typeof item.unit === 'string' && item.unit.trim()
-            ? item.unit.trim()
-            : undefined;
-        return { symbol, definition, ...(unit ? { unit } : {}) };
-      });
-      return { type: 'add_equation_symbol_definitions', ...ids, symbols };
+      // LLM fallback: free-form "where …" prose instead of a symbols array.
+      if (content) {
+        return {
+          type: 'add_equation_symbol_definitions',
+          ...ids,
+          content,
+        };
+      }
+      throw new CanvasAgentParseError(
+        'schema',
+        'add_equation_symbol_definitions needs a non-empty symbols array or content string.',
+      );
     }
     case 'add_equation_interpretation': {
       const ids = resolveTargetIds(raw);
@@ -628,7 +651,21 @@ export function executeAddEquationSymbolDefinitions(
 ): { createdId: string; updatedId?: string } {
   const equationId = resolveEquationId(op, ctx);
   const equation = requireEquation(equationId, ctx.getElements());
-  const content = formatSymbolDefinitions(op.symbols);
+  const fromSymbols =
+    op.symbols && op.symbols.length > 0
+      ? formatSymbolDefinitions(op.symbols)
+      : '';
+  // Prefer structured symbols; fall back to free-form content (strip a leading
+  // "where" so it does not duplicate the component label).
+  let content = fromSymbols || (op.content ?? '').trim();
+  if (!fromSymbols && content) {
+    content = content.replace(/^where[:\s]+/i, '').trim();
+  }
+  if (!content) {
+    throw new Error(
+      'add_equation_symbol_definitions produced empty definition text.',
+    );
+  }
   const existing = findChrome(
     ctx.getElements(),
     equation.id,

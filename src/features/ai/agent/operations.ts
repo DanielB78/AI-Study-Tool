@@ -1281,12 +1281,13 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
           {
             type: 'object',
             additionalProperties: false,
-            required: ['type', 'symbols'],
+            required: ['type'],
             properties: {
               type: { const: 'add_equation_symbol_definitions' },
               target_element_id: { type: 'string', minLength: 1 },
               target_id: { type: 'string', minLength: 1 },
               target_ref: { type: 'string', minLength: 1 },
+              /** Preferred structured form. */
               symbols: {
                 type: 'array',
                 minItems: 1,
@@ -1301,6 +1302,8 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
                   },
                 },
               },
+              /** Free-form "where …" prose fallback (accepted by the parser). */
+              content: { type: 'string', minLength: 1 },
             },
           },
           {
@@ -1723,7 +1726,9 @@ EQUATION TEXTBOOK COMPONENTS (EquationElement + associated TextElement chrome):
 Textbook derivation pattern (app formats; you supply content + order only):
   lead_in → multiline EquationElement → optional symbol_definitions (smaller "where" text) → step_explanation → next EquationElement → interpretation
 - Group consecutive algebraic lines in ONE aligned EquationElement; start a new EquationElement when prose interrupts.
-- Symbol definitions: ONE associated TextElement for all symbols (add_equation_symbol_definitions) — never separate boxes per variable.
+- Symbol definitions: ONE associated TextElement for all symbols — never separate boxes per variable.
+  Preferred: { "type":"add_equation_symbol_definitions", "target_ref":"eq1", "symbols":[{ "symbol":"γ", "definition":"Lorentz factor" }] }
+  Also accepted: { "type":"add_equation_symbol_definitions", "target_ref":"eq1", "content":"γ is the Lorentz factor, v is relative velocity, c is the speed of light." }
 - Explanations are normal left-aligned paragraphs; equations are always centred at a fixed mathematical font size by the app.
 - LaTeX: do not put alignment \`&\` inside \`\\boxed{…}\` unless the boxed body is itself \`\\begin{aligned}…\\end{aligned}\` (e.g. use \`\\boxed{E=mc^2}\`, not \`\\boxed{E&=mc^2}\`).
 - Do NOT invent coordinates, font sizes, colours, margins, or alignment.
