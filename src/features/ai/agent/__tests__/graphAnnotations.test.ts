@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createEmptyDocument,
   DEFAULT_STYLE,
+  DOCUMENT_VERSION,
   type GraphElement,
   type TextElement,
 } from '../../../../types/canvas';
@@ -547,6 +548,6 @@ describe('migration', () => {
     expect(g.expressions[0]!.label).toBe('');
     expect(g.settings.legendVisibility).toBe('auto');
     expect(g.regions).toEqual([]);
-    expect(doc!.version).toBe(8);
+    expect(doc!.version).toBe(DOCUMENT_VERSION);
   });
 });

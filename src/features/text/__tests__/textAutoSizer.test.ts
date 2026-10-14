@@ -284,7 +284,7 @@ describe('TextElementAutoSizer', () => {
     expect(top.textAutoSize?.rowExpanded || top.height > 100).toBeTruthy();
   });
 
-  it('Test H — textbox beside graph does not overlap', () => {
+  it('Test H — textbox above graph stacks without overlap', () => {
     resetCanvas();
     const long =
       'Electric fields are vector fields that describe forces on charges. '.repeat(6);
@@ -322,27 +322,21 @@ describe('TextElementAutoSizer', () => {
         },
       ],
       layout: {
-        type: 'grid',
-        columns: 2,
+        type: 'chronological_grid',
         placement: { mode: 'viewport_default' },
-        items: [
-          { ref: 'note', row: 0, column: 0 },
-          { ref: 'g', row: 0, column: 1 },
-          { ref: 'footer', row: 1, column: 0, column_span: 2 },
-        ],
       },
     };
     const result = executeCanvasOperations(plan, createLiveAgentExecutorTarget());
     expect(result.layoutDebug?.collisionFree).toBe(true);
+    expect(result.layoutDebug?.columns).toBe(1);
     const els = useCanvasStore.getState().document.elements;
     const note = els.find((e) => e.type === 'text' && e.text.startsWith('Electric'));
     const graph = els.find((e) => e.type === 'graph');
     const footer = els.find((e) => e.type === 'text' && e.text === 'Footer row');
     expect(note && graph && footer).toBeTruthy();
     if (note && graph && footer) {
-      const noteRight = note.x + note.width;
-      expect(noteRight).toBeLessThanOrEqual(graph.x + 1);
-      expect(footer.y).toBeGreaterThanOrEqual(Math.max(note.y + note.height, graph.y + graph.height) - 1);
+      expect(graph.y).toBeGreaterThanOrEqual(note.y + note.height - 1);
+      expect(footer.y).toBeGreaterThanOrEqual(graph.y + graph.height - 1);
     }
   });
 

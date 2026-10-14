@@ -1,8 +1,8 @@
 /**
  * Chronological multi-object cell layout.
- * Lesson: vertical stacks in a multi-column chronological grid (max 4/cell).
- * Step by Step: horizontal pairs in a single vertical sequence (max 2/cell).
- * No semantic relationship optimisation.
+ * Agent-generated content uses a single vertical column (vertical_sequence +
+ * vertical_stack). horizontal_pair / multi-column paths remain for non-agent
+ * callers and tests. No semantic relationship optimisation.
  */
 
 import type { Rect } from '../../canvas/placement';

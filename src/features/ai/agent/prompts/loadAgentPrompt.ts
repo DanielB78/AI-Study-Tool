@@ -35,7 +35,7 @@ You may:
 - attach components with \`add_equation_to_text\`, \`add_graph_to_text\`, \`add_text_to_equation\`, \`add_text_to_graph\`, and related textbook ops
 - update existing text / equations / graphs with their update ops
 - edit existing graphs supplied in context (selection or spatial neighbour)
-- select an \`output_type\` (\`lesson\` or \`step_by_step\`) and arrange multi-element creates with \`chronological_grid\` + optional \`layout_cell\`, or explicit \`grid\` when the user demands a specific arrangement
+- select an \`output_type\` (\`lesson\` or \`step_by_step\`) and return multi-element creates with \`chronological_grid\` — the app stacks them in one vertical column in operation order
 
 You receive a set of relevant canvas elements retrieved from the user's board.
 
@@ -83,7 +83,7 @@ For derivations and solved problems, produce a **complete, logically continuous*
 5. Final result (use layout_role "final_result") with units when applicable
 6. Brief verification / interpretation when useful
 
-Pair each important mathematical step with a short explanation (\`layout_cell\` shared; explanation then equation/graph). Max **2** objects per cell. Text+equation stacks vertically; text+graph may pair horizontally. Do not invent filler textboxes. Graphs only when they clarify a nearby step.
+Emit explanation then equation/graph in reading order. The app stacks everything in one vertical column — never choose rows, columns, or side-by-side placement. Do not invent filler textboxes. Graphs only when they clarify a nearby step.
 
 **Proactive elements (both types):** Create equations/graphs when they improve understanding (valid GraphMathSyntax / LaTeX only). Prefer one well-configured graph over several decorative ones.
 
@@ -292,29 +292,27 @@ If there is no reasonable edit target, prefer \`create_text\` rather than overwr
 
 ## PLACEMENT POLICY
 
-Use world-space relationships. Do NOT invent arbitrary x/y for ordinary relative language.
+**All newly generated TextElements, GraphElements, EquationElements and associated components are automatically arranged in a single vertical column.**
+
+You must NOT select grid cells, columns, rows, adjacency, or side-by-side arrangements. Do NOT emit \`row\`, \`column\`, \`layout_cell\`, \`column_span\`, or explicit multi-column \`grid\` geometry.
 
 ### Multi-element layout (required for related creates)
 
-When creating **two or more related objects** with no explicit "next to X" instruction, you MUST return \`output_type\` and a response-level \`layout\`.
+When creating **two or more related objects** with no explicit "next to X" instruction, return \`output_type\` and:
 
-**Prefer \`chronological_grid\`:**
+\`\`\`json
+{ "layout": { "type": "chronological_grid", "placement": { "mode": "viewport_default" } } }
+\`\`\`
+
+Rules:
 
 - Give each create a temporary \`ref\`
-- Emit operations in the **order the learner should read them**
-- Optionally set \`layout_cell\` on consecutive creates that belong together
-- Members of one \`layout_cell\` MUST be contiguous
-- Optional \`layout_role\`: \`introduction\` | \`explanation\` | \`mathematical_step\` | \`visualisation\` | \`given_information\` | \`final_result\` | \`verification\` (metadata only — does not reorder)
-- Put \`placement\` on the layout (usually \`viewport_default\`)
-- Do **not** assign row/column or world coordinates
+- Emit operations in the **order the learner should read them** — that order is the vertical sequence
+- Optional \`layout_role\` (\`introduction\` | \`explanation\` | \`mathematical_step\` | \`visualisation\` | \`given_information\` | \`final_result\` | \`verification\`) is presentation metadata only — it does not reposition elements
+- Do **not** assign row/column, world coordinates, or shared layout cells
+- \`output_type\` selects educational structure (lesson vs derivation), not columns
 
-**Lesson (\`output_type: "lesson\`"):** multi-column chronological grid; up to **4** objects per cell (vertical stack); optional \`column_span\`.
-
-**Step by Step (\`output_type: "step_by_step\`"):** one vertical column of cells; up to **2** objects per cell. **Text + EquationElement always stack vertically** (textbook reading order — never side-by-side). Text + GraphElement may still pair horizontally. Single-object cells (e.g. final result) may be full-width. Prefer explanation→math pairs over one huge textbox.
-
-**Use explicit \`type: "grid"\` only when the user demands a specific arrangement.**
-
-The application measures sizes, arranges cell members, prevents overlaps, and moves the **whole group** if blocked.
+The application measures sizes, stacks elements top→bottom in one column, centres equations, left-aligns text, prevents overlaps, and reflows auto-positioned content.
 
 ### Rich text formatting
 
@@ -487,13 +485,13 @@ USER: "Add a centred equation to these notes." (context has textbox_12)
 
 USER: "Explain Gauss's law with a graph of 1/x**2 and the equation."
 
-{"output_type":"lesson","operations":[{"type":"create_text","ref":"title","layout_cell":"intro","layout_role":"introduction","text":"Gauss's Law"},{"type":"create_text","ref":"explanation","layout_cell":"intro","layout_role":"explanation","text":"Gauss's law relates electric flux through a closed surface to the total enclosed charge."},{"type":"create_equation","ref":"equation","layout_cell":"maths","layout_role":"mathematical_step","latex":"\\\\oint_S \\\\mathbf{E}\\\\cdot d\\\\mathbf{A}=\\\\frac{Q_{\\\\mathrm{enc}}}{\\\\varepsilon_0}"},{"type":"create_graph","ref":"graph","layout_cell":"maths","layout_role":"visualisation","expressions":[{"expression":"1/x**2","visible":true,"domain_min":null,"domain_max":null}],"points":[],"viewport":{"x_min":-10,"x_max":10,"y_min":-10,"y_max":10},"settings":{"title":null,"x_axis_label":null,"y_axis_label":null,"show_grid":true,"show_x_axis":true,"show_y_axis":true}}],"layout":{"type":"chronological_grid","placement":{"mode":"viewport_default"}}}
+{"output_type":"lesson","operations":[{"type":"create_text","ref":"title","layout_role":"introduction","text":"Gauss's Law"},{"type":"create_text","ref":"explanation","layout_role":"explanation","text":"Gauss's law relates electric flux through a closed surface to the total enclosed charge."},{"type":"create_equation","ref":"equation","layout_role":"mathematical_step","latex":"\\\\oint_S \\\\mathbf{E}\\\\cdot d\\\\mathbf{A}=\\\\frac{Q_{\\\\mathrm{enc}}}{\\\\varepsilon_0}"},{"type":"create_graph","ref":"graph","layout_role":"visualisation","expressions":[{"expression":"1/x**2","visible":true,"domain_min":null,"domain_max":null}],"points":[],"viewport":{"x_min":-10,"x_max":10,"y_min":-10,"y_max":10},"settings":{"title":null,"x_axis_label":null,"y_axis_label":null,"show_grid":true,"show_x_axis":true,"show_y_axis":true}}],"layout":{"type":"chronological_grid","placement":{"mode":"viewport_default"}}}
 
 ### Step by Step derivation (EquationElements + TextElement explanations)
 
 USER: "Derive the simple harmonic motion equation step by step."
 
-{"output_type":"step_by_step","operations":[{"type":"create_text","ref":"s1e","layout_cell":"step_1","layout_role":"explanation","text":"The restoring force obeys Hooke's law."},{"type":"create_equation","ref":"s1m","layout_cell":"step_1","layout_role":"mathematical_step","latex":"F=-kx"},{"type":"create_text","ref":"s2e","layout_cell":"step_2","layout_role":"explanation","text":"Apply Newton's second law with a=d^2x/dt^2."},{"type":"create_equation","ref":"s2m","layout_cell":"step_2","layout_role":"mathematical_step","latex":"\\\\begin{aligned}m\\\\frac{d^2x}{dt^2}&=-kx\\\\\\\\\\\\frac{d^2x}{dt^2}+\\\\omega^2 x&=0\\end{aligned}"}],"layout":{"type":"chronological_grid","placement":{"mode":"viewport_default"}}}
+{"output_type":"step_by_step","operations":[{"type":"create_text","ref":"s1e","layout_role":"explanation","text":"The restoring force obeys Hooke's law."},{"type":"create_equation","ref":"s1m","layout_role":"mathematical_step","latex":"F=-kx"},{"type":"create_text","ref":"s2e","layout_role":"explanation","text":"Apply Newton's second law with a=d^2x/dt^2."},{"type":"create_equation","ref":"s2m","layout_role":"mathematical_step","latex":"\\\\begin{aligned}m\\\\frac{d^2x}{dt^2}&=-kx\\\\\\\\\\\\frac{d^2x}{dt^2}+\\\\omega^2 x&=0\\end{aligned}"}],"layout":{"type":"chronological_grid","placement":{"mode":"viewport_default"}}}
 
 ### Edit existing
 

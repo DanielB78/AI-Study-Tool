@@ -12,7 +12,7 @@ import {
   normalizeGridLayout,
   reflowGridToMaxColumns,
 } from '../gridReflow';
-import { resolveGridPlan } from '../resolveGridPlan';
+import { resolveExplicitGridPlan, resolveGridPlan } from '../resolveGridPlan';
 import { GRID_LAYOUT_CONFIG } from '../gridConfig';
 
 function resetCanvas() {
@@ -98,49 +98,71 @@ describe('grid row wrapping normalisation', () => {
     },
   );
 
-  it('Test A — seven elements in one row wrap to 3 columns', () => {
+  it('Test A — agent path stacks seven elements in one column (explicit grid ignored)', () => {
     const plan: CanvasAgentResponse = {
       operations: textOps(7),
       layout: singleRowLayout(7, 7),
     };
-    // Parser must accept columns > 4 so reflow can run.
+    // Parser still accepts legacy multi-column grid for compatibility.
     const parsed = parseCanvasAgentResponse(JSON.stringify(plan), {
       allowedElementIds: new Set(),
       elementTypes: new Map(),
     });
-    expect(parsed.layout?.columns).toBe(7);
+    expect(parsed.layout?.type).toBe('grid');
+    if (parsed.layout?.type === 'grid') {
+      expect(parsed.layout.columns).toBe(7);
+    }
 
     const result = executeCanvasOperations(parsed, createLiveAgentExecutorTarget());
-    expect(result.layoutDebug?.maxColumns).toBe(3);
-    expect(result.layoutDebug?.columns).toBe(3);
-    expect(result.layoutDebug?.wrapped).toBe(true);
-    expect(result.layoutDebug?.wrapReason).toBe('exceeded_max_columns');
-    expect(result.layoutDebug?.rows).toBeGreaterThanOrEqual(3);
+    expect(result.layoutDebug?.columns).toBe(1);
+    expect(result.layoutDebug?.rows).toBe(7);
 
     const els = useCanvasStore.getState().document.elements.filter((e) => e.type === 'text');
     expect(els).toHaveLength(7);
     const ys = [...new Set(els.map((e) => Math.round(e.y)))].sort((a, b) => a - b);
-    expect(ys.length).toBeGreaterThanOrEqual(3);
+    expect(ys.length).toBe(7);
+
+    // Underlying multi-column engine retained for non-agent use.
+    const explicit = resolveExplicitGridPlan({
+      layout: singleRowLayout(7, 7),
+      operations: textOps(7),
+      camera: { x: 0, y: 0, zoom: 1 },
+      elements: [],
+      style: DEFAULT_STYLE,
+    });
+    expect(explicit.debug.columns).toBe(3);
+    expect(explicit.debug.wrapped).toBe(true);
+    expect(explicit.debug.wrapReason).toBe('exceeded_max_columns');
   });
 
-  it('Test B — four columns for five objects clamps to three', () => {
+  it('Test B — agent path ignores four-column request; explicit engine still clamps', () => {
+    const layout: GridLayoutSpec = {
+      type: 'grid',
+      columns: 4,
+      placement: { mode: 'viewport_default' },
+      items: textOps(5).map((op, i) => ({
+        ref: op.ref!,
+        row: Math.floor(i / 4),
+        column: i % 4,
+      })),
+    };
     const plan: CanvasAgentResponse = {
       operations: textOps(5),
-      layout: {
-        type: 'grid',
-        columns: 4,
-        placement: { mode: 'viewport_default' },
-        items: textOps(5).map((op, i) => ({
-          ref: op.ref!,
-          row: Math.floor(i / 4),
-          column: i % 4,
-        })),
-      },
+      layout,
     };
     const result = executeCanvasOperations(plan, createLiveAgentExecutorTarget());
     expect(maxColumnsForObjectCount(5)).toBe(3);
-    expect(result.layoutDebug?.columns).toBeLessThanOrEqual(3);
-    expect(result.layoutDebug?.wrapped).toBe(true);
+    expect(result.layoutDebug?.columns).toBe(1);
+
+    const explicit = resolveExplicitGridPlan({
+      layout,
+      operations: textOps(5),
+      camera: { x: 0, y: 0, zoom: 1 },
+      elements: [],
+      style: DEFAULT_STYLE,
+    });
+    expect(explicit.debug.columns).toBeLessThanOrEqual(3);
+    expect(explicit.debug.wrapped).toBe(true);
   });
 
   it('Test C — full-width heading spans allowed columns', () => {
@@ -239,9 +261,20 @@ describe('grid row wrapping normalisation', () => {
         ],
       },
     };
-    // Narrow viewport → physical width reflow.
-    const resolved = resolveGridPlan({
+    // Agent path always uses one column.
+    const agent = resolveGridPlan({
       layout: plan.layout!,
+      operations: plan.operations,
+      camera: { x: 0, y: 0, zoom: 1 },
+      elements: [],
+      style: DEFAULT_STYLE,
+      viewport: { width: 500, height: 800 },
+    });
+    expect(agent.debug.columns).toBe(1);
+
+    // Narrow viewport → physical width reflow (explicit multi-column engine).
+    const resolved = resolveExplicitGridPlan({
+      layout: plan.layout as GridLayoutSpec,
       operations: plan.operations,
       camera: { x: 0, y: 0, zoom: 1 },
       elements: [],
@@ -355,10 +388,13 @@ describe('grid row wrapping normalisation', () => {
     expect(maxColumnsForObjectCount(3)).toBe(2);
     const result = executeCanvasOperations(plan, createLiveAgentExecutorTarget());
     expect(result.layoutDebug?.objectCount).toBe(3);
-    expect(result.layoutDebug?.maxColumns).toBe(2);
-    expect(result.layoutDebug?.columns).toBeLessThanOrEqual(2);
-    expect(result.layoutDebug?.wrapped).toBe(true);
+    expect(result.layoutDebug?.columns).toBe(1);
     expect(result.createdIds.length).toBeGreaterThanOrEqual(3);
+    const byRef = Object.fromEntries(
+      (result.layoutDebug?.items ?? []).map((i) => [i.ref, i]),
+    );
+    expect(byRef.e!.localY).toBeGreaterThan(byRef.a!.localY);
+    expect(byRef.g!.localY).toBeGreaterThan(byRef.e!.localY);
   });
 
   it('Test H — atomic undo restores wrapped arrangement', () => {
@@ -485,14 +521,12 @@ describe('grid row wrapping normalisation', () => {
 
     const result = executeCanvasOperations(plan, createLiveAgentExecutorTarget());
     expect(result.layoutDebug?.objectCount).toBe(9);
-    expect(result.layoutDebug?.maxColumns).toBe(3);
-    expect(result.layoutDebug?.columns).toBeLessThanOrEqual(3);
-    expect(result.layoutDebug?.wrapped).toBe(true);
-    expect(result.layoutDebug?.rows).toBeGreaterThanOrEqual(3);
+    expect(result.layoutDebug?.columns).toBe(1);
+    expect(result.layoutDebug?.rows).toBe(9);
     expect(result.layoutDebug?.collisionFree).toBe(true);
 
     for (const it of result.layoutDebug?.items ?? []) {
-      expect(it.column + it.columnSpan).toBeLessThanOrEqual(3);
+      expect(it.column).toBe(0);
     }
 
     // Zoom must not mutate stored geometry / fonts.

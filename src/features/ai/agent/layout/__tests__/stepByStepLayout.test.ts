@@ -115,14 +115,15 @@ function lessonPlan(operations: CanvasOperation[]): CanvasAgentResponse {
 }
 
 describe('output layout config', () => {
-  it('lesson and step_by_step have distinct max objects and arrangements', () => {
-    expect(LESSON_OUTPUT_LAYOUT.maxObjectsPerCell).toBe(4);
+  it('lesson and step_by_step share single-column vertical geometry', () => {
+    expect(LESSON_OUTPUT_LAYOUT.maxObjectsPerCell).toBe(8);
     expect(LESSON_OUTPUT_LAYOUT.cellArrangement).toBe('vertical_stack');
-    expect(LESSON_OUTPUT_LAYOUT.gridArrangement).toBe('chronological_grid');
-    expect(STEP_BY_STEP_OUTPUT_LAYOUT.maxObjectsPerCell).toBe(2);
-    expect(STEP_BY_STEP_OUTPUT_LAYOUT.cellArrangement).toBe('horizontal_pair');
+    expect(LESSON_OUTPUT_LAYOUT.gridArrangement).toBe('vertical_sequence');
+    expect(STEP_BY_STEP_OUTPUT_LAYOUT.maxObjectsPerCell).toBe(8);
+    expect(STEP_BY_STEP_OUTPUT_LAYOUT.cellArrangement).toBe('vertical_stack');
     expect(STEP_BY_STEP_OUTPUT_LAYOUT.gridArrangement).toBe('vertical_sequence');
     expect(getOutputLayoutConfig(undefined).outputType).toBe('lesson');
+    expect(getOutputLayoutConfig('step_by_step').outputType).toBe('step_by_step');
   });
 
   it('Test J — classifyOutputTypeHint selects lesson vs step_by_step', () => {
@@ -142,21 +143,20 @@ describe('output layout config', () => {
   });
 });
 
-describe('step_by_step grouping limits', () => {
-  it('Test E — more than two objects in one cell auto-splits at max 2', () => {
+describe('single-column grouping limits', () => {
+  it('Test E — oversized shared cell auto-splits at maxObjectsPerCell', () => {
+    const ops = Array.from({ length: 9 }, (_, i) =>
+      textOp(`t${i}`, `T${i}`, { layout_cell: 's' }),
+    );
     const grouped = groupCreationOpsIntoCells(
-      [
-        textOp('a', 'A', { layout_cell: 's' }),
-        textOp('b', 'B', { layout_cell: 's' }),
-        textOp('c', 'C', { layout_cell: 's' }),
-      ],
+      ops,
       STEP_BY_STEP_OUTPUT_LAYOUT.maxObjectsPerCell,
     );
+    expect(grouped.maxObjectsPerCell).toBe(8);
     expect(grouped.cells).toHaveLength(2);
-    expect(grouped.cells[0]!.members.map((m) => m.ref)).toEqual(['a', 'b']);
-    expect(grouped.cells[1]!.members.map((m) => m.ref)).toEqual(['c']);
+    expect(grouped.cells[0]!.members).toHaveLength(8);
+    expect(grouped.cells[1]!.members).toHaveLength(1);
     expect(grouped.splits).toHaveLength(1);
-    expect(grouped.maxObjectsPerCell).toBe(2);
   });
 });
 
@@ -169,7 +169,7 @@ describe('step_by_step + lesson integration', () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it('Test A — lesson unchanged: 4-object cell + multi-column grid', () => {
+  it('Test A — lesson: multi-create stacks in one vertical column', () => {
     const ops = [
       textOp('a', 'A', { layout_cell: 'c' }),
       textOp('b', 'B', { layout_cell: 'c' }),
@@ -183,18 +183,24 @@ describe('step_by_step + lesson integration', () => {
     ];
     const result = executeCanvasOperations(lessonPlan(ops), createLiveAgentExecutorTarget());
     expect(result.layoutDebug?.outputType).toBe('lesson');
-    expect(result.layoutDebug?.chronologicalCells?.maxObjectsPerCell).toBe(4);
+    expect(result.layoutDebug?.chronologicalCells?.maxObjectsPerCell).toBe(8);
     expect(result.layoutDebug?.chronologicalCells?.cellArrangement).toBe('vertical_stack');
     expect(result.layoutDebug?.chronologicalCells?.gridArrangement).toBe(
-      'chronological_grid',
+      'vertical_sequence',
     );
     const big = result.layoutDebug!.chronologicalCells!.cells.find(
       (c) => c.cellId === 'c',
     )!;
     expect(big.refs).toHaveLength(4);
     expect(big.arrangement).toBe('vertical_stack');
-    expect(result.layoutDebug!.columns).toBeGreaterThan(1);
+    expect(result.layoutDebug!.columns).toBe(1);
     expect(result.layoutDebug?.collisionFree).toBe(true);
+    const byRef = Object.fromEntries(
+      result.layoutDebug!.items.map((i) => [i.ref, i]),
+    );
+    expect(byRef.b!.localY).toBeGreaterThan(byRef.a!.localY);
+    expect(byRef.e!.localY).toBeGreaterThan(byRef.d!.localY);
+    expect(byRef.i!.localY).toBeGreaterThan(byRef.h!.localY);
   });
 
   it('Test B — three explanation/equation pairs stack vertically (never beside)', () => {
@@ -238,7 +244,7 @@ describe('step_by_step + lesson integration', () => {
     expect(byRef.e3!.localY).toBeGreaterThan(byRef.e2!.localY);
   });
 
-  it('Test C — explanation beside graph', () => {
+  it('Test C — explanation and graph stack vertically (never beside)', () => {
     const plan = stepPlan([
       textOp('exp', 'Potential is quadratic.', {
         layout_cell: 'g',
@@ -248,13 +254,15 @@ describe('step_by_step + lesson integration', () => {
     ]);
     const result = executeCanvasOperations(plan, createLiveAgentExecutorTarget());
     const cell = result.layoutDebug!.chronologicalCells!.cells[0]!;
-    expect(cell.arrangement).toBe('horizontal_pair');
+    expect(cell.arrangement).toBe('vertical_stack');
     expect(cell.objectTypes).toEqual(['text', 'graph']);
     const byRef = Object.fromEntries(
       result.layoutDebug!.items.map((i) => [i.ref, i]),
     );
-    expect(byRef.graph!.localX).toBeGreaterThan(byRef.exp!.localX);
-    expect(byRef.graph!.width).toBeGreaterThan(byRef.exp!.width);
+    expect(byRef.graph!.localY).toBeGreaterThanOrEqual(
+      byRef.exp!.localY + byRef.exp!.height,
+    );
+    expect(result.layoutDebug?.columns).toBe(1);
     expect(result.layoutDebug?.collisionFree).toBe(true);
   });
 
