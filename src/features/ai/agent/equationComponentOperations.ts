@@ -447,12 +447,27 @@ function createChromeComponent(
   });
 
   if (decision.reflow) {
-    const { elementIds, dy } = decision.reflow;
-    for (const id of elementIds) {
-      ctx.updateElement(id, (el) => {
-        if (el.type !== 'text' && el.type !== 'equation') return el;
-        return { ...el, y: el.y + dy };
-      });
+    const applied = new Set<string>();
+    if (decision.reflow.shifts?.length) {
+      for (const { id, dy } of decision.reflow.shifts) {
+        if (dy === 0 || applied.has(id)) continue;
+        applied.add(id);
+        ctx.updateElement(id, (el) => {
+          if (el.type !== 'text' && el.type !== 'equation') return el;
+          return { ...el, y: el.y + dy };
+        });
+      }
+    }
+    if (decision.reflow.elementIds?.length && decision.reflow.dy) {
+      const dy = decision.reflow.dy;
+      for (const id of decision.reflow.elementIds) {
+        if (applied.has(id)) continue;
+        applied.add(id);
+        ctx.updateElement(id, (el) => {
+          if (el.type !== 'text' && el.type !== 'equation') return el;
+          return { ...el, y: el.y + dy };
+        });
+      }
     }
   }
 

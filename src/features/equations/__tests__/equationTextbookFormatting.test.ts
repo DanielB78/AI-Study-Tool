@@ -285,6 +285,61 @@ describe('equation textbook formatting', () => {
     }
   });
 
+  it('coefficient/symbol defs stay directly under the equation and above step text', () => {
+    executeCanvasOperations(
+      parseCanvasAgentResponse(
+        JSON.stringify({
+          operations: [
+            {
+              type: 'create_equation',
+              ref: 'eq1',
+              latex: 'E=mc^2',
+              placement: { mode: 'viewport_default' },
+            },
+            // Intentionally add step explanation BEFORE symbols — packing must
+            // still insert coefficient text between equation and step text.
+            {
+              type: 'add_text_to_equation',
+              target_ref: 'eq1',
+              component: 'step_explanation',
+              content: 'This relates energy to mass.',
+            },
+            {
+              type: 'add_equation_symbol_definitions',
+              target_ref: 'eq1',
+              content:
+                'E is energy, m is mass, and c is the speed of light.',
+            },
+          ],
+        }),
+        { allowedElementIds: new Set() },
+      ),
+      createLiveAgentExecutorTarget(),
+    );
+
+    const els = useCanvasStore.getState().document.elements;
+    const eq = els.find((e): e is EquationElement => e.type === 'equation')!;
+    const symbols = els.find(
+      (e) =>
+        e.type === 'text' &&
+        e.componentMeta?.role === 'equation_symbol_definitions',
+    ) as TextElement;
+    const step = els.find(
+      (e) =>
+        e.type === 'text' &&
+        e.componentMeta?.role === 'equation_step_explanation',
+    ) as TextElement;
+
+    expect(symbols).toBeTruthy();
+    expect(step).toBeTruthy();
+    // Order: equation → coefficient defs → step explanation
+    expect(symbols.y).toBeGreaterThanOrEqual(eq.y + eq.height - 1);
+    expect(step.y).toBeGreaterThanOrEqual(symbols.y + symbols.height - 1);
+    expect(rectsOverlap(eq, symbols)).toBe(false);
+    expect(rectsOverlap(eq, step)).toBe(false);
+    expect(rectsOverlap(symbols, step)).toBe(false);
+  });
+
   it('manually inserted step explanation uses identical styling and reflows next equation', () => {
     executeCanvasOperations(
       parseCanvasAgentResponse(
