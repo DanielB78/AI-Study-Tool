@@ -93,6 +93,12 @@ def test_system_prompt_loads() -> None:
     assert "create_text" in text
     assert "update_text" in text
     assert "create_graph" in text
+    assert "create_equation" in text
+    assert (
+        "ALL AI-GENERATED CONTENT MUST USE TEXT ELEMENTS, GRAPH ELEMENTS OR EQUATION ELEMENTS"
+        in text
+    )
+    assert "not a legacy pathway" in text.lower()
     assert "GRAPH EXPRESSIONS ARE NOT LATEX" in text
 
 

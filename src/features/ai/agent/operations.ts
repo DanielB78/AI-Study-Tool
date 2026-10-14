@@ -206,11 +206,22 @@ export type CreateTextOperation = {
   placement: Placement;
 } & CreationLayoutFields;
 
+/**
+ * Canonical EquationElement constructor (peer of create_text / create_graph).
+ * Not a legacy pathway — this is the agent-facing create op for centred maths.
+ */
 export type CreateEquationOperation = {
   type: 'create_equation';
   latex: string;
   placement: Placement;
 } & CreationLayoutFields;
+
+/** Primary canvas object constructors the agent may use for new content. */
+export const CANONICAL_PRIMARY_CREATE_OPS = [
+  'create_text',
+  'create_equation',
+  'create_graph',
+] as const;
 
 export type UpdateTextOperation = {
   type: 'update_text';
@@ -1592,7 +1603,7 @@ create_text (general prose / main textbox — prefer create_text_component for t
     | { "mode": "absolute", "x": <number>, "y": <number> }
 }
 
-create_equation:
+create_equation — CANONICAL EquationElement constructor (not legacy; peer of create_text / create_graph):
 {
   "type": "create_equation",
   "ref": "<temp id for layout>",
@@ -1601,6 +1612,7 @@ create_equation:
   "latex": "<LaTeX body without surrounding $$> — use \\begin{aligned}…\\end{aligned} for multi-line; never put & inside \\boxed{…} unless the boxed body is itself aligned",
   "placement": /* omit when using response-level layout */
 }
+Use create_equation (or add_equation_to_text when attaching to existing notes) for ALL centred / multiline / derivation maths. Do NOT put a standalone centred equation in a TextElement.
 
 update_text:
 {
@@ -1698,19 +1710,19 @@ Display math block: { "type":"display_math", "latex":"..." } — centred equatio
 Use formatting intentionally — not every sentence needs colour/highlight.
 Prefer one textbox with headings/lists/math over many tiny textboxes for emphasis.
 
-TEXT MATH (short expressions inside TextElement prose — prefer over EquationElement for in-sentence math):
+TEXT MATH (in-sentence expressions inside TextElement — NOT a substitute for EquationElement):
 - insert_inline_math: { "type":"insert_inline_math", "target_element_id":"<id>", "latex":"F=-kx", "after_text":"The restoring force is " }
-- insert_display_math / update_text_math / remove_text_math / convert_text_math — supported for manual compatibility; prefer EquationElement for substantial centred working.
+- insert_display_math / update_text_math / remove_text_math / convert_text_math — retained for editing existing TextElement math; when the agent creates NEW centred / textbook maths, use create_equation or add_equation_to_text instead.
 
-EQUATION TEXTBOOK COMPONENTS (preferred for derivations / multiline working):
-- add_equation_to_text: { "type":"add_equation_to_text", "target_element_id":"<text id>", "ref":"eq1", "latex":"\\begin{aligned}F&=-kx\\\\m\\ddot{x}&=-kx\\end{aligned}" }
+EQUATION TEXTBOOK COMPONENTS (EquationElement + associated TextElement chrome):
+- add_equation_to_text: { "type":"add_equation_to_text", "target_element_id":"<text id>", "ref":"eq1", "latex":"\\begin{aligned}F&=-kx\\\\m\\ddot{x}&=-kx\\end{aligned}" } — attach a new EquationElement to existing notes
 - add_text_to_equation: { "type":"add_text_to_equation", "target_ref":"eq1", "component":"lead_in"|"step_explanation"|"title"|"symbol_definitions"|"interpretation"|"warning", "content":"…" }
 - set_equation_title / add_equation_symbol_definitions / add_equation_interpretation / update_equation
-- create_equation — standalone EquationElement when not attaching to existing text
+- create_equation — CANONICAL standalone EquationElement create (same role as create_text / create_graph)
 Group consecutive algebraic steps in ONE multiline EquationElement (aligned). Use another EquationElement when prose interrupts.
 LaTeX: do not put alignment \`&\` inside \`\\boxed{…}\` unless the boxed body is itself \`\\begin{aligned}…\\end{aligned}\` (e.g. use \`\\boxed{E=mc^2}\`, not \`\\boxed{E&=mc^2}\`).
 Do NOT invent coordinates, font sizes, or layout cells for equation components.
-PRIMARY ELEMENT TYPES ONLY: TextElement, GraphElement, EquationElement (+ their supported components). Never shapes, arrows, freehand, or decorative objects.
+ALL AI-GENERATED CONTENT MUST USE TEXT ELEMENTS, GRAPH ELEMENTS OR EQUATION ELEMENTS AND THEIR SUPPORTED COMPONENTS. Never shapes, arrows, freehand, or decorative objects.
 
 GRID COLUMN LIMIT:
 For N created objects: columns must satisfy 1 <= columns <= min(4, ceil(sqrt(N))).
@@ -1842,7 +1854,9 @@ Rules:
 - When a structure is selected and the user asks for new structured content, use create_structured_note — do NOT recreate the layout with create_text/create_equation/create_connector.
 - Omit or null optional structure fields when there is no meaningful content.
 - Use create_graph when the user asks to create a new graph/plot.
-- Use create_equation for standalone LaTeX (not for graphing).
+- Use create_equation (canonical) for centred / multiline EquationElements — never a plain TextElement or insert_display_math for new standalone maths.
+- Use create_text for ordinary prose; use insert_inline_math / rich_text inline_math for in-sentence formulas.
+- Prefer add_text_to_graph / add_text_to_equation over unrelated create_text when explaining an existing graph or equation.
 - Edit existing graphs only when that graph_id appears in supplied context (selection or spatial).
 - Put multiple new curves in ONE create_graph unless the user asks for separate graphs.
 - Defaults for create_graph: viewport ±10, show_grid/axes true, empty title/labels.
