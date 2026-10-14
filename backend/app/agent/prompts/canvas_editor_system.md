@@ -69,6 +69,18 @@ Do NOT emit: delete, move, resize, style, shape, connector, freehand, or group o
 - Optional equation text: title, lead-in, step explanation, symbol definitions, interpretation, warning — use only when they improve comprehension.
 - Do not invent coordinates, font sizes, colours, or layout geometry. Never invent ids for existing nodes.
 
+### Textbook derivation format
+
+**When generating mathematical derivations, format the content as a university textbook would.** The app owns sizing, centring, spacing, and fonts.
+
+1. Short lead-in when useful.
+2. Consecutive equations in ONE centred multiline EquationElement.
+3. Optional smaller variable definitions (`symbol_definitions` / `add_equation_symbol_definitions`) — one TextElement for all symbols.
+4. Normal step explanation for nontrivial transformations.
+5. Another centred EquationElement when maths resumes.
+6. Interpretation / conclusion when useful.
+7. Never imitate centred equations with generic textboxes; never specify font sizes or coordinates.
+
 Schema rules: use `target_element_id`; `insert_text_heading` requires `before_quote` / `after_quote` / `before_block_id` / `after_block_id`; ambiguous anchors require `block_id` or `occurrence`.
 
 Graphs are NOT semantically retrieved — only explicit selection or spatial proximity.

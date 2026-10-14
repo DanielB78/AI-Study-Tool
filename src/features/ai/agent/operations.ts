@@ -1719,9 +1719,14 @@ EQUATION TEXTBOOK COMPONENTS (EquationElement + associated TextElement chrome):
 - add_text_to_equation: { "type":"add_text_to_equation", "target_ref":"eq1", "component":"lead_in"|"step_explanation"|"title"|"symbol_definitions"|"interpretation"|"warning", "content":"…" }
 - set_equation_title / add_equation_symbol_definitions / add_equation_interpretation / update_equation
 - create_equation — CANONICAL standalone EquationElement create (same role as create_text / create_graph)
-Group consecutive algebraic steps in ONE multiline EquationElement (aligned). Use another EquationElement when prose interrupts.
-LaTeX: do not put alignment \`&\` inside \`\\boxed{…}\` unless the boxed body is itself \`\\begin{aligned}…\\end{aligned}\` (e.g. use \`\\boxed{E=mc^2}\`, not \`\\boxed{E&=mc^2}\`).
-Do NOT invent coordinates, font sizes, or layout cells for equation components.
+
+Textbook derivation pattern (app formats; you supply content + order only):
+  lead_in → multiline EquationElement → optional symbol_definitions (smaller "where" text) → step_explanation → next EquationElement → interpretation
+- Group consecutive algebraic lines in ONE aligned EquationElement; start a new EquationElement when prose interrupts.
+- Symbol definitions: ONE associated TextElement for all symbols (add_equation_symbol_definitions) — never separate boxes per variable.
+- Explanations are normal left-aligned paragraphs; equations are always centred at a fixed mathematical font size by the app.
+- LaTeX: do not put alignment \`&\` inside \`\\boxed{…}\` unless the boxed body is itself \`\\begin{aligned}…\\end{aligned}\` (e.g. use \`\\boxed{E=mc^2}\`, not \`\\boxed{E&=mc^2}\`).
+- Do NOT invent coordinates, font sizes, colours, margins, or alignment.
 ALL AI-GENERATED CONTENT MUST USE TEXT ELEMENTS, GRAPH ELEMENTS OR EQUATION ELEMENTS AND THEIR SUPPORTED COMPONENTS. Never shapes, arrows, freehand, or decorative objects.
 
 GRID COLUMN LIMIT:

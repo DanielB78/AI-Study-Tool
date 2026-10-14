@@ -78,22 +78,25 @@ export function equationComponentMapping(kind: EquationComponentKind): {
         defaultLabel: null,
       };
     case 'step_explanation':
+      // Normal textbook paragraph (~15px, left, no chrome).
       return {
         componentType: 'main_text',
         role: 'equation_step_explanation',
         defaultLabel: null,
       };
     case 'symbol_definitions':
+      // Smaller muted "where …" clarifications (~13px), not bordered cards.
       return {
-        componentType: 'definition',
+        componentType: 'caption',
         role: 'equation_symbol_definitions',
         defaultLabel: 'where',
       };
     case 'interpretation':
+      // Closing textbook paragraph — same body style as step explanations.
       return {
-        componentType: 'key_observation',
+        componentType: 'main_text',
         role: 'equation_interpretation',
-        defaultLabel: 'Interpretation',
+        defaultLabel: null,
       };
     case 'warning':
       return {
@@ -384,6 +387,8 @@ export function formatSymbolDefinitions(
       return unit ? `${sym} — ${def} (${unit})` : `${sym} — ${def}`;
     })
     .filter(Boolean);
+  if (lines.length === 0) return '';
+  // Single associated TextElement — never one box per variable.
   return lines.join('\n');
 }
 

@@ -10,7 +10,11 @@ import 'katex/dist/katex.min.css';
 export const EQUATION_MIN_WIDTH = 48;
 export const EQUATION_MIN_HEIGHT = 36;
 export const EQUATION_MAX_INITIAL_WIDTH = 720;
-export const EQUATION_DEFAULT_FONT_SIZE = 28;
+/**
+ * Fixed world-space display size for all EquationElements.
+ * Bounding-box resize must not change this; camera zoom scales visually only.
+ */
+export const EQUATION_DEFAULT_FONT_SIZE = 20;
 export const EQUATION_PADDING = 12;
 
 export interface LatexValidationResult {

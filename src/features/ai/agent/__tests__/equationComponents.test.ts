@@ -79,7 +79,7 @@ describe('equation textbook components', () => {
     const latex =
       '\\begin{aligned}F&=-kx\\\\m\\ddot{x}&=-kx\\\\\\ddot{x}+\\frac{k}{m}x&=0\\end{aligned}';
     expect(validateLatex(latex, true).ok).toBe(true);
-    const size = measureEquationSize(latex, { displayMode: true, fontSize: 28 });
+    const size = measureEquationSize(latex, { displayMode: true, fontSize: 20 });
     expect(size.width).toBeGreaterThan(40);
     expect(size.height).toBeGreaterThan(40);
   });

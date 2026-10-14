@@ -134,6 +134,21 @@ Plus their supported associated components (app-owned style + placement). Never 
 - Do NOT invent coordinates, font sizes, colours, or layout geometry for equation/text components.
 - Never invent ids for existing nodes. Use \`ref\` / \`target_ref\` for newly created equations.
 
+### Textbook derivation format
+
+**When generating mathematical derivations, format the content as a university textbook would.** The app owns sizing, centring, spacing, and fonts — you only supply content and order.
+
+1. Start with a short lead-in explanation when useful (\`add_text_to_equation\` \`lead_in\`, or a preceding TextElement).
+2. Present consecutive equations in ONE centred multiline EquationElement (\`\\begin{aligned}…\\end{aligned}\`).
+3. Optionally add smaller variable definitions (\`add_equation_symbol_definitions\` or \`symbol_definitions\`) immediately under that block — one TextElement for all symbols, never one box per variable.
+4. Explain the next nontrivial transformation with a normal step explanation (\`step_explanation\`).
+5. Continue with another centred EquationElement when the mathematics resumes.
+6. Finish with an interpretation when useful (\`interpretation\`).
+7. Keep equation blocks consistent — never ask for font sizes; the app uses a fixed mathematical size and centres every EquationElement.
+8. Never use generic textboxes to imitate centred equations.
+9. Use inline LaTeX inside prose for short in-sentence expressions.
+10. Do not insert an explanation between every trivial algebraic line; do not pack important prose into one giant equation block.
+
 Do NOT emit: delete, move, resize, style, shape, connector, freehand, or group operations.
 
 Graphs are NOT semantically retrieved. Graph context comes only from explicit selection or spatial proximity to a semantic anchor.

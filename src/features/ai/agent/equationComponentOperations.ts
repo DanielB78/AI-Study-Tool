@@ -23,6 +23,7 @@ import {
 } from '../../text/textComponents';
 import {
   EQUATION_COMPONENT_LAYOUT,
+  computeSiblingEquationReflow,
   resolveEquationAttachPlacement,
   resolveEquationChromePlacement,
 } from '../../equations/equationPlacement';
@@ -426,7 +427,7 @@ function createChromeComponent(
     const { elementIds, dy } = decision.reflow;
     for (const id of elementIds) {
       ctx.updateElement(id, (el) => {
-        if (el.type !== 'text') return el;
+        if (el.type !== 'text' && el.type !== 'equation') return el;
         return { ...el, y: el.y + dy };
       });
     }
@@ -532,6 +533,7 @@ export function executeUpdateEquation(
     displayMode: prev.displayMode !== 'inline',
     maxWidth: Math.max(prev.width, EQUATION_COMPONENT_LAYOUT.attachedMaxWidth),
   });
+  const heightDelta = size.height - prev.height;
   ctx.updateElement(id, (el) => {
     if (el.type !== 'equation') return el;
     return {
@@ -539,8 +541,44 @@ export function executeUpdateEquation(
       latex: op.latex,
       width: size.width,
       height: size.height,
+      // fontSize is intentionally unchanged — resize/edit must not rescale maths.
     };
   });
+  // Grow/shrink pushes later sibling equations in the same derivation.
+  if (heightDelta !== 0) {
+    const updated = requireEquation(id, ctx.getElements());
+    const siblingReflow = computeSiblingEquationReflow(
+      updated,
+      ctx.getElements(),
+      heightDelta,
+    );
+    if (siblingReflow) {
+      for (const shiftId of siblingReflow.elementIds) {
+        ctx.updateElement(shiftId, (el) => {
+          if (el.type !== 'text' && el.type !== 'equation') return el;
+          return { ...el, y: el.y + siblingReflow.dy };
+        });
+      }
+    }
+    // Shift below-chrome on this equation when height changes.
+    for (const el of ctx.getElements()) {
+      if (el.type !== 'text') continue;
+      if (el.componentMeta?.associatedElementId !== id) continue;
+      if (el.componentMeta.placementMode === 'manual') continue;
+      const role = el.componentMeta.role;
+      if (
+        role === 'equation_symbol_definitions' ||
+        role === 'equation_step_explanation' ||
+        role === 'equation_interpretation' ||
+        role === 'equation_warning'
+      ) {
+        ctx.updateElement(el.id, (prevEl) => ({
+          ...prevEl,
+          y: prevEl.y + heightDelta,
+        }));
+      }
+    }
+  }
   return { updatedId: id };
 }
 
