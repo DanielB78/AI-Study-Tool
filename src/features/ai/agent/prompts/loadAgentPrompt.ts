@@ -83,7 +83,7 @@ For derivations and solved problems, produce a **complete, logically continuous*
 5. Final result (use layout_role "final_result") with units when applicable
 6. Brief verification / interpretation when useful
 
-Pair each important mathematical step with a short explanation (\`layout_cell\` shared; explanation then equation/graph). Max **2** objects per cell. Do not invent filler textboxes. Graphs only when they clarify a nearby step.
+Pair each important mathematical step with a short explanation (\`layout_cell\` shared; explanation then equation/graph). Max **2** objects per cell. Text+equation stacks vertically; text+graph may pair horizontally. Do not invent filler textboxes. Graphs only when they clarify a nearby step.
 
 **Proactive elements (both types):** Create equations/graphs when they improve understanding (valid GraphMathSyntax / LaTeX only). Prefer one well-configured graph over several decorative ones.
 
