@@ -1598,7 +1598,7 @@ create_equation:
   "ref": "<temp id for layout>",
   "layout_cell": "<optional shared cell id>",
   "layout_role": "mathematical_step"|"final_result"|…,
-  "latex": "<LaTeX body without surrounding $$>",
+  "latex": "<LaTeX body without surrounding $$> — use \\begin{aligned}…\\end{aligned} for multi-line; never put & inside \\boxed{…} unless the boxed body is itself aligned",
   "placement": /* omit when using response-level layout */
 }
 
@@ -1708,6 +1708,7 @@ EQUATION TEXTBOOK COMPONENTS (preferred for derivations / multiline working):
 - set_equation_title / add_equation_symbol_definitions / add_equation_interpretation / update_equation
 - create_equation — standalone EquationElement when not attaching to existing text
 Group consecutive algebraic steps in ONE multiline EquationElement (aligned). Use another EquationElement when prose interrupts.
+LaTeX: do not put alignment \`&\` inside \`\\boxed{…}\` unless the boxed body is itself \`\\begin{aligned}…\\end{aligned}\` (e.g. use \`\\boxed{E=mc^2}\`, not \`\\boxed{E&=mc^2}\`).
 Do NOT invent coordinates, font sizes, or layout cells for equation components.
 PRIMARY ELEMENT TYPES ONLY: TextElement, GraphElement, EquationElement (+ their supported components). Never shapes, arrows, freehand, or decorative objects.
 

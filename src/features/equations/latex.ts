@@ -23,7 +23,81 @@ export interface EquationRenderMetrics {
   height: number;
 }
 
-/** Strip accidental $ / $$ / code fences from LLM output. */
+/** Environments where bare `&` is a valid alignment tab. */
+const ALIGNMENT_ENV_RE =
+  /\\begin\{(?:aligned|align\*?|gathered|gather\*?|array|cases|matrix|pmatrix|bmatrix|vmatrix|Vmatrix|smallmatrix)\}/;
+
+/**
+ * Find the matching `}` for an opening `{` at `openBraceIndex`, respecting
+ * nested braces and skipping escaped characters.
+ */
+function findMatchingBrace(source: string, openBraceIndex: number): number {
+  let depth = 0;
+  for (let i = openBraceIndex; i < source.length; i++) {
+    const ch = source[i]!;
+    if (ch === '\\') {
+      i += 1; // skip escaped character
+      continue;
+    }
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Strip bare alignment tabs (`&`) inside `\boxed{…}` when the boxed body is
+ * not itself an alignment environment. LLMs often emit
+ * `\boxed{lhs&=rhs}` inside an outer `aligned`, which KaTeX rejects.
+ * Nested `\boxed{\begin{aligned}…\end{aligned}}` is left unchanged.
+ */
+export function repairLatexForKatex(source: string): string {
+  const boxedCmd = '\\boxed';
+  let result = '';
+  let i = 0;
+  while (i < source.length) {
+    const start = source.indexOf(boxedCmd, i);
+    if (start === -1) {
+      result += source.slice(i);
+      break;
+    }
+    result += source.slice(i, start);
+    const afterCmd = start + boxedCmd.length;
+    // Optional whitespace before `{`
+    let braceAt = afterCmd;
+    while (braceAt < source.length && /\s/.test(source[braceAt]!)) braceAt += 1;
+    if (source[braceAt] !== '{') {
+      result += source.slice(start, afterCmd);
+      i = afterCmd;
+      continue;
+    }
+    const closeAt = findMatchingBrace(source, braceAt);
+    if (closeAt === -1) {
+      result += source.slice(start);
+      break;
+    }
+    const inner = source.slice(braceAt + 1, closeAt);
+    let repairedInner: string;
+    if (ALIGNMENT_ENV_RE.test(inner)) {
+      // Keep alignment tabs; still repair nested \boxed bodies.
+      repairedInner = repairLatexForKatex(inner);
+    } else {
+      // Drop alignment tabs; preserve literal ampersands (\&).
+      repairedInner = inner
+        .replace(/\\&/g, '\u0000')
+        .replace(/&/g, '')
+        .replace(/\u0000/g, '\\&');
+    }
+    result += `${boxedCmd}${source.slice(afterCmd, braceAt + 1)}${repairedInner}}`;
+    i = closeAt + 1;
+  }
+  return result;
+}
+
+/** Strip accidental $ / $$ / code fences from LLM output; repair common KaTeX pitfalls. */
 export function sanitizeLatexSource(raw: string): string {
   let text = raw.trim();
   const fence = /^```(?:latex|tex)?\s*([\s\S]*?)\s*```$/i.exec(text);
@@ -38,7 +112,7 @@ export function sanitizeLatexSource(raw: string): string {
   } else if (/^\\\([\s\S]*\\\)$/.test(text)) {
     text = text.slice(2, -2).trim();
   }
-  return text.trim();
+  return repairLatexForKatex(text.trim());
 }
 
 export function validateLatex(

@@ -103,7 +103,7 @@ Plus their supported associated components. Never create shapes, arrows, freehan
 ### Available operations
 
 1. \`create_text\` — TextElement (optional \`rich_text\` with inline math)
-2. \`create_equation\` / \`add_equation_to_text\` — EquationElement (prefer multiline \`\\begin{aligned}…\\end{aligned}\` for derivations)
+2. \`create_equation\` / \`add_equation_to_text\` — EquationElement (prefer multiline \`\\begin{aligned}…\\end{aligned}\` for derivations; never put alignment \`&\` inside \`\\boxed{…}\` unless the boxed body is itself \`\\begin{aligned}…\\end{aligned}\`)
 3. \`update_text\` / \`update_equation\`
 4. Text features & components; text math (\`insert_inline_math\`, …) for in-sentence formulas
 5. Equation components: \`add_text_to_equation\` (title|lead_in|step_explanation|symbol_definitions|interpretation|warning), \`set_equation_title\`, \`add_equation_symbol_definitions\`, \`add_equation_interpretation\`
