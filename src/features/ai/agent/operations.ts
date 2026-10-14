@@ -1585,7 +1585,7 @@ Shape:
 
 OUTPUT TYPE:
 - "lesson" — comprehensive topic coverage; chronological multi-column grid; up to 4 objects per layout_cell (vertical stack).
-- "step_by_step" — derivations / worked solutions; ONE vertical column of cells; up to 2 objects per layout_cell (horizontal: explanation left, math/graph right).
+- "step_by_step" — derivations / worked solutions; ONE vertical column of cells; up to 2 objects per layout_cell. Text+Equation always vertical (never beside); text+Graph may pair horizontally.
 Select from the user request (derive/solve/work through → step_by_step; explain/teach topic → lesson). Ambiguous → lesson. Respect explicit user requests.
 
 create_text (general prose / main textbox — prefer create_text_component for textbook parts):

@@ -243,7 +243,7 @@ When creating **two or more related objects** with no explicit "next to X" instr
 - Emit operations in the order the learner should read them
 - Optionally share a `layout_cell` among consecutive creates
 - Lesson: up to 4 objects/cell (vertical stack), multi-column grid
-- Step by Step: up to 2 objects/cell (horizontal explanation | math/graph), vertical sequence
+- Step by Step: up to 2 objects/cell; text+equation always vertical textbook stack (never beside); text+graph may pair horizontally; cells in a vertical sequence
 - Optional `layout_role` for presentation metadata
 - Put `placement` on the **layout** (usually `viewport_default`), not on every child
 - Prefer `rich_text` for headings, emphasis, colours/highlights, lists, and inline/display math inside textboxes.

@@ -6,15 +6,17 @@
 
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+import { TEXTBOOK_EQUATION_FONT_SIZE } from '../text/textbookTypography';
 
 export const EQUATION_MIN_WIDTH = 48;
 export const EQUATION_MIN_HEIGHT = 36;
 export const EQUATION_MAX_INITIAL_WIDTH = 720;
 /**
  * Fixed world-space display size for all EquationElements.
- * Bounding-box resize must not change this; camera zoom scales visually only.
+ * ≈ 1.13 × textbook body text (15 → 17). Bounding-box resize must not change
+ * this; camera zoom scales visually only.
  */
-export const EQUATION_DEFAULT_FONT_SIZE = 20;
+export const EQUATION_DEFAULT_FONT_SIZE = TEXTBOOK_EQUATION_FONT_SIZE;
 export const EQUATION_PADDING = 12;
 
 export interface LatexValidationResult {

@@ -197,7 +197,7 @@ describe('step_by_step + lesson integration', () => {
     expect(result.layoutDebug?.collisionFree).toBe(true);
   });
 
-  it('Test B — three explanation/equation pairs are vertical cells with horizontal members', () => {
+  it('Test B — three explanation/equation pairs stack vertically (never beside)', () => {
     const plan = stepPlan([
       textOp('e1', 'Hooke', { layout_cell: 's1', layout_role: 'explanation' }),
       equationOp('m1', 'F=-kx', {
@@ -223,16 +223,16 @@ describe('step_by_step + lesson integration', () => {
     expect(result.layoutDebug?.rows).toBe(3);
     for (let i = 0; i < 3; i++) {
       expect(cells[i]!.refs).toHaveLength(2);
-      expect(cells[i]!.arrangement).toBe('horizontal_pair');
+      expect(cells[i]!.arrangement).toBe('vertical_stack');
       expect(cells[i]!.row).toBe(i);
       expect(cells[i]!.column).toBe(0);
     }
     const byRef = Object.fromEntries(
       result.layoutDebug!.items.map((i) => [i.ref, i]),
     );
-    // Horizontal: equation to the right of explanation
-    expect(byRef.m1!.localX).toBeGreaterThan(byRef.e1!.localX);
-    expect(Math.abs(byRef.m1!.localY - byRef.e1!.localY)).toBeLessThan(2);
+    // Vertical textbook: equation below explanation, not beside it
+    expect(byRef.m1!.localY).toBeGreaterThan(byRef.e1!.localY);
+    expect(byRef.m2!.localY).toBeGreaterThan(byRef.e2!.localY);
     // Vertical cell order
     expect(byRef.e2!.localY).toBeGreaterThan(byRef.e1!.localY);
     expect(byRef.e3!.localY).toBeGreaterThan(byRef.e2!.localY);
@@ -301,7 +301,7 @@ describe('step_by_step + lesson integration', () => {
     expect(result.layoutDebug?.collisionFree).toBe(true);
   });
 
-  it('Test G — wide equation remains readable without overlapping explanation', () => {
+  it('Test G — wide equation stacks below explanation without overlapping', () => {
     const plan = stepPlan([
       textOp('exp', 'Rearrange the oscillator equation.', {
         layout_cell: 's',
@@ -314,11 +314,13 @@ describe('step_by_step + lesson integration', () => {
       ),
     ]);
     const result = executeCanvasOperations(plan, createLiveAgentExecutorTarget());
+    const cell = result.layoutDebug!.chronologicalCells!.cells[0]!;
+    expect(cell.arrangement).toBe('vertical_stack');
     const byRef = Object.fromEntries(
       result.layoutDebug!.items.map((i) => [i.ref, i]),
     );
-    expect(byRef.eq!.localX).toBeGreaterThanOrEqual(
-      byRef.exp!.localX + byRef.exp!.width,
+    expect(byRef.eq!.localY).toBeGreaterThanOrEqual(
+      byRef.exp!.localY + byRef.exp!.height,
     );
     expect(result.layoutDebug?.collisionFree).toBe(true);
   });

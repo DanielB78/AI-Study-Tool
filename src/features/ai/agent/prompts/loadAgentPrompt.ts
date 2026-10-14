@@ -144,10 +144,11 @@ Plus their supported associated components (app-owned style + placement). Never 
 4. Explain the next nontrivial transformation with a normal step explanation (\`step_explanation\`).
 5. Continue with another centred EquationElement when the mathematics resumes.
 6. Finish with an interpretation when useful (\`interpretation\`).
-7. Keep equation blocks consistent — never ask for font sizes; the app uses a fixed mathematical size and centres every EquationElement.
-8. Never use generic textboxes to imitate centred equations.
-9. Use inline LaTeX inside prose for short in-sentence expressions.
-10. Do not insert an explanation between every trivial algebraic line; do not pack important prose into one giant equation block.
+7. Keep equation blocks consistent — never ask for font sizes; the app uses a fixed mathematical size (only slightly larger than body text) and centres every EquationElement.
+8. Associated text is always above/below the equation — never beside it. Variable definitions sit immediately below.
+9. Never use generic textboxes to imitate centred equations.
+10. Use inline LaTeX inside prose for short in-sentence expressions.
+11. Do not insert an explanation between every trivial algebraic line; do not pack important prose into one giant equation block.
 
 Do NOT emit: delete, move, resize, style, shape, connector, freehand, or group operations.
 
@@ -309,7 +310,7 @@ When creating **two or more related objects** with no explicit "next to X" instr
 
 **Lesson (\`output_type: "lesson\`"):** multi-column chronological grid; up to **4** objects per cell (vertical stack); optional \`column_span\`.
 
-**Step by Step (\`output_type: "step_by_step\`"):** one vertical column of cells; up to **2** objects per cell, normally **horizontal** (explanation left, equation/graph right). Single-object cells (e.g. final result) may be full-width. Prefer explanation→math pairs over one huge textbox.
+**Step by Step (\`output_type: "step_by_step\`"):** one vertical column of cells; up to **2** objects per cell. **Text + EquationElement always stack vertically** (textbook reading order — never side-by-side). Text + GraphElement may still pair horizontally. Single-object cells (e.g. final result) may be full-width. Prefer explanation→math pairs over one huge textbox.
 
 **Use explicit \`type: "grid"\` only when the user demands a specific arrangement.**
 

@@ -21,6 +21,10 @@ import {
 import { equationComponentMapping } from '../../text/textComponents';
 import { TEXT_COMPONENT_STYLES } from '../../text/textComponents';
 import {
+  TEXTBOOK_BODY_FONT_SIZE,
+  TEXTBOOK_EQUATION_FONT_SIZE,
+} from '../../text/textbookTypography';
+import {
   uiAddTextToEquation,
   uiUpdateEquation,
 } from '../equationComponentUi';
@@ -98,8 +102,16 @@ describe('equation textbook formatting', () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it('uses a fixed default mathematical font size (~20)', () => {
-    expect(EQUATION_DEFAULT_FONT_SIZE).toBe(20);
+  it('uses a fixed default mathematical font size only slightly larger than body text', () => {
+    expect(TEXTBOOK_BODY_FONT_SIZE).toBe(15);
+    expect(TEXTBOOK_EQUATION_FONT_SIZE).toBe(17);
+    expect(EQUATION_DEFAULT_FONT_SIZE).toBe(17);
+    expect(EQUATION_DEFAULT_FONT_SIZE / TEXTBOOK_BODY_FONT_SIZE).toBeGreaterThan(
+      1.05,
+    );
+    expect(EQUATION_DEFAULT_FONT_SIZE / TEXTBOOK_BODY_FONT_SIZE).toBeLessThan(
+      1.2,
+    );
     const size = measureEquationSize('E=mc^2', {
       displayMode: true,
       fontSize: EQUATION_DEFAULT_FONT_SIZE,
