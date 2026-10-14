@@ -1281,12 +1281,13 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
           {
             type: 'object',
             additionalProperties: false,
-            required: ['type', 'symbols'],
+            required: ['type'],
             properties: {
               type: { const: 'add_equation_symbol_definitions' },
               target_element_id: { type: 'string', minLength: 1 },
               target_id: { type: 'string', minLength: 1 },
               target_ref: { type: 'string', minLength: 1 },
+              /** Preferred structured form. */
               symbols: {
                 type: 'array',
                 minItems: 1,
@@ -1301,6 +1302,8 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
                   },
                 },
               },
+              /** Free-form "where …" prose fallback (accepted by the parser). */
+              content: { type: 'string', minLength: 1 },
             },
           },
           {
@@ -1585,7 +1588,7 @@ Shape:
 
 OUTPUT TYPE:
 - "lesson" — comprehensive topic coverage; chronological multi-column grid; up to 4 objects per layout_cell (vertical stack).
-- "step_by_step" — derivations / worked solutions; ONE vertical column of cells; up to 2 objects per layout_cell (horizontal: explanation left, math/graph right).
+- "step_by_step" — derivations / worked solutions; ONE vertical column of cells; up to 2 objects per layout_cell. Text+Equation always vertical (never beside); text+Graph may pair horizontally.
 Select from the user request (derive/solve/work through → step_by_step; explain/teach topic → lesson). Ambiguous → lesson. Respect explicit user requests.
 
 create_text (general prose / main textbox — prefer create_text_component for textbook parts):
@@ -1719,9 +1722,16 @@ EQUATION TEXTBOOK COMPONENTS (EquationElement + associated TextElement chrome):
 - add_text_to_equation: { "type":"add_text_to_equation", "target_ref":"eq1", "component":"lead_in"|"step_explanation"|"title"|"symbol_definitions"|"interpretation"|"warning", "content":"…" }
 - set_equation_title / add_equation_symbol_definitions / add_equation_interpretation / update_equation
 - create_equation — CANONICAL standalone EquationElement create (same role as create_text / create_graph)
-Group consecutive algebraic steps in ONE multiline EquationElement (aligned). Use another EquationElement when prose interrupts.
-LaTeX: do not put alignment \`&\` inside \`\\boxed{…}\` unless the boxed body is itself \`\\begin{aligned}…\\end{aligned}\` (e.g. use \`\\boxed{E=mc^2}\`, not \`\\boxed{E&=mc^2}\`).
-Do NOT invent coordinates, font sizes, or layout cells for equation components.
+
+Textbook derivation pattern (app formats; you supply content + order only):
+  lead_in → multiline EquationElement → optional symbol_definitions (smaller "where" text) → step_explanation → next EquationElement → interpretation
+- Group consecutive algebraic lines in ONE aligned EquationElement; start a new EquationElement when prose interrupts.
+- Symbol definitions: ONE associated TextElement for all symbols — never separate boxes per variable.
+  Preferred: { "type":"add_equation_symbol_definitions", "target_ref":"eq1", "symbols":[{ "symbol":"γ", "definition":"Lorentz factor" }] }
+  Also accepted: { "type":"add_equation_symbol_definitions", "target_ref":"eq1", "content":"γ is the Lorentz factor, v is relative velocity, c is the speed of light." }
+- Explanations are normal left-aligned paragraphs; equations are always centred at a fixed mathematical font size by the app.
+- LaTeX: do not put alignment \`&\` inside \`\\boxed{…}\` unless the boxed body is itself \`\\begin{aligned}…\\end{aligned}\` (e.g. use \`\\boxed{E=mc^2}\`, not \`\\boxed{E&=mc^2}\`).
+- Do NOT invent coordinates, font sizes, colours, margins, or alignment.
 ALL AI-GENERATED CONTENT MUST USE TEXT ELEMENTS, GRAPH ELEMENTS OR EQUATION ELEMENTS AND THEIR SUPPORTED COMPONENTS. Never shapes, arrows, freehand, or decorative objects.
 
 GRID COLUMN LIMIT:

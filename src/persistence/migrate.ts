@@ -484,7 +484,7 @@ function migrateEquation(raw: Record<string, unknown>, z: number): EquationEleme
     ...migrateBase(raw, z),
     type: 'equation',
     latex: str(raw.latex, ''),
-    fontSize: num(raw.fontSize, 28),
+    fontSize: num(raw.fontSize, 17),
     color: str(raw.color, DEFAULT_STYLE.textColor),
     displayMode: raw.displayMode === 'inline' ? 'inline' : 'display',
     ...(association ? { association } : {}),

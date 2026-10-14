@@ -79,7 +79,7 @@ describe('equation textbook components', () => {
     const latex =
       '\\begin{aligned}F&=-kx\\\\m\\ddot{x}&=-kx\\\\\\ddot{x}+\\frac{k}{m}x&=0\\end{aligned}';
     expect(validateLatex(latex, true).ok).toBe(true);
-    const size = measureEquationSize(latex, { displayMode: true, fontSize: 28 });
+    const size = measureEquationSize(latex, { displayMode: true, fontSize: 20 });
     expect(size.width).toBeGreaterThan(40);
     expect(size.height).toBeGreaterThan(40);
   });
@@ -249,5 +249,46 @@ describe('equation textbook components', () => {
     if (after?.type !== 'equation') return;
     expect(after.latex).toContain('aligned');
     expect(after.height).toBeGreaterThanOrEqual(before.height);
+  });
+
+  it('accepts free-form content on add_equation_symbol_definitions (LLM fallback)', () => {
+    executeCanvasOperations(
+      parseCanvasAgentResponse(
+        JSON.stringify({
+          operations: [
+            {
+              type: 'create_equation',
+              ref: 'final_equations',
+              latex:
+                '\\boxed{\\begin{aligned}x\'&=\\gamma(x-vt)\\\\t\'&=\\gamma\\left(t-\\frac{vx}{c^2}\\right)\\end{aligned}}',
+              placement: { mode: 'viewport_default' },
+            },
+            {
+              type: 'add_equation_symbol_definitions',
+              target_ref: 'final_equations',
+              content:
+                'where γ = 1/√(1 − v²/c²) is the Lorentz factor, v is the velocity of S′ relative to S, and c is the speed of light in vacuum.',
+            },
+          ],
+        }),
+        { allowedElementIds: new Set() },
+      ),
+      createLiveAgentExecutorTarget(),
+    );
+
+    const els = useCanvasStore.getState().document.elements;
+    const eq = els.find((e) => e.type === 'equation');
+    const defs = els.find(
+      (e) =>
+        e.type === 'text' &&
+        e.componentMeta?.role === 'equation_symbol_definitions',
+    );
+    expect(eq).toBeTruthy();
+    expect(defs).toBeTruthy();
+    if (defs?.type !== 'text') return;
+    expect(defs.text).toContain('Lorentz factor');
+    // Leading "where" stripped — the component label already provides it.
+    expect(defs.text.toLowerCase().startsWith('where')).toBe(false);
+    expect(defs.componentMeta?.associatedElementId).toBe(eq!.id);
   });
 });

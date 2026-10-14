@@ -23,6 +23,7 @@ import {
 } from '../../text/textComponents';
 import {
   EQUATION_COMPONENT_LAYOUT,
+  computeSiblingEquationReflow,
   resolveEquationAttachPlacement,
   resolveEquationChromePlacement,
 } from '../../equations/equationPlacement';
@@ -75,7 +76,13 @@ export type AddEquationSymbolDefinitionsOperation = {
   type: 'add_equation_symbol_definitions';
   target_element_id?: string;
   target_ref?: string;
-  symbols: SymbolDefinitionSpec[];
+  /** Preferred structured form. */
+  symbols?: SymbolDefinitionSpec[];
+  /**
+   * Free-form "where …" prose. LLMs often emit this instead of `symbols`;
+   * accepted as a fallback and rendered with the same symbol-definition style.
+   */
+  content?: string;
 };
 
 export type AddEquationInterpretationOperation = {
@@ -272,36 +279,53 @@ export function parseEquationComponentOperation(
           'add_equation_symbol_definitions needs target_element_id or target_ref.',
         );
       }
-      if (!Array.isArray(raw.symbols) || raw.symbols.length === 0) {
-        throw new CanvasAgentParseError(
-          'schema',
-          'add_equation_symbol_definitions.symbols must be a non-empty array.',
-        );
+      const content =
+        typeof raw.content === 'string' && raw.content.trim()
+          ? raw.content.trim()
+          : undefined;
+      if (Array.isArray(raw.symbols) && raw.symbols.length > 0) {
+        const symbols: SymbolDefinitionSpec[] = raw.symbols.map((item, i) => {
+          if (!isRecord(item)) {
+            throw new CanvasAgentParseError(
+              'schema',
+              `symbols[${i}] must be an object.`,
+            );
+          }
+          const symbol =
+            typeof item.symbol === 'string' ? item.symbol.trim() : '';
+          const definition =
+            typeof item.definition === 'string' ? item.definition.trim() : '';
+          if (!symbol || !definition) {
+            throw new CanvasAgentParseError(
+              'empty_text',
+              `symbols[${i}] needs symbol and definition.`,
+            );
+          }
+          const unit =
+            typeof item.unit === 'string' && item.unit.trim()
+              ? item.unit.trim()
+              : undefined;
+          return { symbol, definition, ...(unit ? { unit } : {}) };
+        });
+        return {
+          type: 'add_equation_symbol_definitions',
+          ...ids,
+          symbols,
+          ...(content ? { content } : {}),
+        };
       }
-      const symbols: SymbolDefinitionSpec[] = raw.symbols.map((item, i) => {
-        if (!isRecord(item)) {
-          throw new CanvasAgentParseError(
-            'schema',
-            `symbols[${i}] must be an object.`,
-          );
-        }
-        const symbol =
-          typeof item.symbol === 'string' ? item.symbol.trim() : '';
-        const definition =
-          typeof item.definition === 'string' ? item.definition.trim() : '';
-        if (!symbol || !definition) {
-          throw new CanvasAgentParseError(
-            'empty_text',
-            `symbols[${i}] needs symbol and definition.`,
-          );
-        }
-        const unit =
-          typeof item.unit === 'string' && item.unit.trim()
-            ? item.unit.trim()
-            : undefined;
-        return { symbol, definition, ...(unit ? { unit } : {}) };
-      });
-      return { type: 'add_equation_symbol_definitions', ...ids, symbols };
+      // LLM fallback: free-form "where …" prose instead of a symbols array.
+      if (content) {
+        return {
+          type: 'add_equation_symbol_definitions',
+          ...ids,
+          content,
+        };
+      }
+      throw new CanvasAgentParseError(
+        'schema',
+        'add_equation_symbol_definitions needs a non-empty symbols array or content string.',
+      );
     }
     case 'add_equation_interpretation': {
       const ids = resolveTargetIds(raw);
@@ -423,12 +447,27 @@ function createChromeComponent(
   });
 
   if (decision.reflow) {
-    const { elementIds, dy } = decision.reflow;
-    for (const id of elementIds) {
-      ctx.updateElement(id, (el) => {
-        if (el.type !== 'text') return el;
-        return { ...el, y: el.y + dy };
-      });
+    const applied = new Set<string>();
+    if (decision.reflow.shifts?.length) {
+      for (const { id, dy } of decision.reflow.shifts) {
+        if (dy === 0 || applied.has(id)) continue;
+        applied.add(id);
+        ctx.updateElement(id, (el) => {
+          if (el.type !== 'text' && el.type !== 'equation') return el;
+          return { ...el, y: el.y + dy };
+        });
+      }
+    }
+    if (decision.reflow.elementIds?.length && decision.reflow.dy) {
+      const dy = decision.reflow.dy;
+      for (const id of decision.reflow.elementIds) {
+        if (applied.has(id)) continue;
+        applied.add(id);
+        ctx.updateElement(id, (el) => {
+          if (el.type !== 'text' && el.type !== 'equation') return el;
+          return { ...el, y: el.y + dy };
+        });
+      }
     }
   }
 
@@ -532,6 +571,7 @@ export function executeUpdateEquation(
     displayMode: prev.displayMode !== 'inline',
     maxWidth: Math.max(prev.width, EQUATION_COMPONENT_LAYOUT.attachedMaxWidth),
   });
+  const heightDelta = size.height - prev.height;
   ctx.updateElement(id, (el) => {
     if (el.type !== 'equation') return el;
     return {
@@ -539,8 +579,44 @@ export function executeUpdateEquation(
       latex: op.latex,
       width: size.width,
       height: size.height,
+      // fontSize is intentionally unchanged — resize/edit must not rescale maths.
     };
   });
+  // Grow/shrink pushes later sibling equations in the same derivation.
+  if (heightDelta !== 0) {
+    const updated = requireEquation(id, ctx.getElements());
+    const siblingReflow = computeSiblingEquationReflow(
+      updated,
+      ctx.getElements(),
+      heightDelta,
+    );
+    if (siblingReflow) {
+      for (const shiftId of siblingReflow.elementIds) {
+        ctx.updateElement(shiftId, (el) => {
+          if (el.type !== 'text' && el.type !== 'equation') return el;
+          return { ...el, y: el.y + siblingReflow.dy };
+        });
+      }
+    }
+    // Shift below-chrome on this equation when height changes.
+    for (const el of ctx.getElements()) {
+      if (el.type !== 'text') continue;
+      if (el.componentMeta?.associatedElementId !== id) continue;
+      if (el.componentMeta.placementMode === 'manual') continue;
+      const role = el.componentMeta.role;
+      if (
+        role === 'equation_symbol_definitions' ||
+        role === 'equation_step_explanation' ||
+        role === 'equation_interpretation' ||
+        role === 'equation_warning'
+      ) {
+        ctx.updateElement(el.id, (prevEl) => ({
+          ...prevEl,
+          y: prevEl.y + heightDelta,
+        }));
+      }
+    }
+  }
   return { updatedId: id };
 }
 
@@ -590,7 +666,21 @@ export function executeAddEquationSymbolDefinitions(
 ): { createdId: string; updatedId?: string } {
   const equationId = resolveEquationId(op, ctx);
   const equation = requireEquation(equationId, ctx.getElements());
-  const content = formatSymbolDefinitions(op.symbols);
+  const fromSymbols =
+    op.symbols && op.symbols.length > 0
+      ? formatSymbolDefinitions(op.symbols)
+      : '';
+  // Prefer structured symbols; fall back to free-form content (strip a leading
+  // "where" so it does not duplicate the component label).
+  let content = fromSymbols || (op.content ?? '').trim();
+  if (!fromSymbols && content) {
+    content = content.replace(/^where[:\s]+/i, '').trim();
+  }
+  if (!content) {
+    throw new Error(
+      'add_equation_symbol_definitions produced empty definition text.',
+    );
+  }
   const existing = findChrome(
     ctx.getElements(),
     equation.id,

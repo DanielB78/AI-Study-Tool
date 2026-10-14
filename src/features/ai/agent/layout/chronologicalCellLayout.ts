@@ -407,6 +407,16 @@ function sizeHorizontalPair(
   const gap = outputConfig.pairGap;
   const usable = Math.max(80, Math.min(innerW, outputConfig.maxPairWidth));
 
+  // Textbook rule: EquationElements never sit beside their explanatory text.
+  // Keep horizontal pairing for text ↔ graph (and other non-equation pairs).
+  if (leftM.kind === 'equation' || rightM.kind === 'equation') {
+    diagnostics.push(
+      `Cell "${cellId}": equation-associated content uses vertical textbook stack.`,
+    );
+    const stack = sizeVerticalStack(members, measuredByRef, usable);
+    return { ...stack, arrangement: 'vertical_stack' };
+  }
+
   const minLeft = leftM.minWidth;
   const minRight = rightM.minWidth;
   if (minLeft + gap + minRight > usable + 0.5) {
@@ -492,6 +502,16 @@ function preferredCellWidth(
   ) {
     const left = measuredByRef.get(cell.members[0]!.ref)!;
     const right = measuredByRef.get(cell.members[1]!.ref)!;
+    // Equations always stack vertically — use column width, not pair sum.
+    if (left.kind === 'equation' || right.kind === 'equation') {
+      let maxW = 0;
+      for (const mem of cell.members) {
+        const m = measuredByRef.get(mem.ref)!;
+        maxW = Math.max(maxW, Math.max(m.preferredWidth, m.minWidth));
+      }
+      maxW = Math.min(Math.max(maxW, config.defaultTextWidth), outputConfig.maxPairWidth);
+      return maxW + config.cellPadding * 2;
+    }
     const fr = pairWidthFractions(
       left,
       right,
@@ -830,9 +850,16 @@ export function calculateChronologicalCellGrid(input: {
         cursorX += mem.width + gap;
       }
     } else {
+      const innerContentW = Math.max(40, cellW - config.cellPadding * 2);
       let cursorY = cellY + config.cellPadding;
       for (const mem of sc.members) {
-        const localX = cellX + config.cellPadding;
+        // Text left-aligned; equations centred in the content column.
+        const localX =
+          mem.kind === 'equation'
+            ? cellX +
+              config.cellPadding +
+              Math.max(0, (innerContentW - mem.width) / 2)
+            : cellX + config.cellPadding;
         const localY = cursorY;
         const content: Rect = {
           x: localX,

@@ -33,11 +33,13 @@ import {
 
 export const EQUATION_COMPONENT_LAYOUT = {
   titleGap: 10,
-  leadInGap: 8,
-  belowGap: 12,
-  equationStackGap: 28,
+  leadInGap: 10,
+  belowGap: 14,
+  equationStackGap: 32,
   /** Preferred presentation width for attached equations. */
   attachedMaxWidth: EQUATION_MAX_INITIAL_WIDTH,
+  /** Content-column width used when aligning chrome under a parent TextElement. */
+  contentColumnMinWidth: 360,
 } as const;
 
 function asRect(el: CanvasElement): Rect {
@@ -203,8 +205,9 @@ export function resolveEquationAttachPlacement(opts: {
     );
   }
 
+  // Always centre on the parent text column — even when the equation is wider.
   const preferred: Rect = {
-    x: opts.targetText.x + Math.max(0, (opts.targetText.width - width) / 2),
+    x: opts.targetText.x + (opts.targetText.width - width) / 2,
     y: stackBottom,
     width,
     height,
@@ -247,13 +250,99 @@ const ABOVE_ROLES: ReadonlySet<ComponentRole> = new Set([
   'equation_lead_in',
 ]);
 
-/** Stack rank below equation — lower appears closer to the equation. */
+/**
+ * Stack rank below equation — lower appears closer to the equation.
+ * Textbook order: variable defs, then step explanation, then interpretation.
+ */
 const BELOW_STACK_RANK: Partial<Record<ComponentRole, number>> = {
-  equation_step_explanation: 0,
-  equation_symbol_definitions: 1,
+  equation_symbol_definitions: 0,
+  equation_step_explanation: 1,
   equation_interpretation: 2,
   equation_warning: 3,
 };
+
+/** Parent TextElement that an equation is associated with, if any. */
+function parentTextForEquation(
+  equation: EquationElement,
+  elements: CanvasElement[],
+): TextElement | null {
+  const parentId = equation.association?.associatedElementId;
+  if (!parentId) return null;
+  const parent = elements.find((el) => el.id === parentId);
+  return parent?.type === 'text' ? parent : null;
+}
+
+/**
+ * Content column for equation chrome: left-aligned with parent text when
+ * associated; otherwise a column anchored at the equation's left edge.
+ */
+function contentColumnForEquation(
+  equation: EquationElement,
+  elements: CanvasElement[],
+  componentType: TextComponentType,
+): { x: number; width: number } {
+  const parent = parentTextForEquation(equation, elements);
+  const presetWidth = TEXT_COMPONENT_STYLES[componentType].defaultWidth;
+  if (parent) {
+    return {
+      x: parent.x,
+      width: Math.max(
+        parent.width,
+        equation.width,
+        EQUATION_COMPONENT_LAYOUT.contentColumnMinWidth,
+        presetWidth,
+      ),
+    };
+  }
+  return {
+    x: equation.x,
+    width: Math.max(
+      equation.width,
+      EQUATION_COMPONENT_LAYOUT.contentColumnMinWidth,
+      presetWidth,
+    ),
+  };
+}
+
+/**
+ * When chrome under an equation grows, shift later auto-placed sibling
+ * equations (same parent) and their chrome downward.
+ */
+export function computeSiblingEquationReflow(
+  equation: EquationElement,
+  elements: CanvasElement[],
+  dy: number,
+): { elementIds: string[]; dy: number } | null {
+  if (dy === 0) return null;
+  const parentId = equation.association?.associatedElementId;
+  if (!parentId) return null;
+  if (equation.association?.placementMode === 'manual') return null;
+
+  const myOrder = equation.association?.order;
+  const siblings = elements.filter(
+    (el): el is EquationElement =>
+      el.type === 'equation' &&
+      el.id !== equation.id &&
+      el.association?.associatedElementId === parentId &&
+      el.association.placementMode !== 'manual' &&
+      (typeof myOrder === 'number'
+        ? (el.association.order ?? Infinity) > myOrder
+        : el.y > equation.y),
+  );
+  if (siblings.length === 0) return null;
+
+  const ids = new Set<string>();
+  for (const sib of siblings) {
+    ids.add(sib.id);
+    for (const el of elements) {
+      if (el.type !== 'text') continue;
+      if (el.componentMeta?.associatedElementId !== sib.id) continue;
+      if (el.componentMeta.placementMode === 'manual') continue;
+      ids.add(el.id);
+    }
+  }
+  return { elementIds: [...ids], dy };
+}
 
 export type EquationChromePlacementDecision = {
   x: number;
@@ -261,7 +350,16 @@ export type EquationChromePlacementDecision = {
   width: number;
   height: number;
   reason: string;
-  reflow?: { elementIds: string[]; dy: number };
+  /**
+   * Uniform dy (legacy) and/or per-element shifts. Per-element shifts are
+   * preferred when inserting coefficient/symbol text between the equation and
+   * later explanations so nothing overlaps.
+   */
+  reflow?: {
+    elementIds?: string[];
+    dy?: number;
+    shifts?: Array<{ id: string; dy: number }>;
+  };
 };
 
 /**
@@ -277,15 +375,16 @@ export function resolveEquationChromePlacement(opts: {
   camera: Camera;
   viewport: ViewportSize;
 }): EquationChromePlacementDecision {
-  const widthHint = Math.max(
-    opts.equation.width,
-    TEXT_COMPONENT_STYLES[opts.componentType].defaultWidth,
+  const column = contentColumnForEquation(
+    opts.equation,
+    opts.elements,
+    opts.componentType,
   );
   const size = measureTextComponent({
     componentType: opts.componentType,
     text: opts.text,
     meta: opts.meta,
-    availableWidth: widthHint,
+    availableWidth: column.width,
   });
 
   const chrome = opts.elements.filter(
@@ -320,69 +419,161 @@ export function resolveEquationChromePlacement(opts: {
       );
     }
     const preferred: Rect = {
-      x: opts.equation.x,
+      x: column.x,
       y,
       width: size.width,
       height: size.height,
     };
-    const placed = tryPlace(preferred, opts.elements);
+
+    // If lead-in/title would collide with the parent TextElement (or other
+    // obstacles above), keep the content-column x and push the equation
+    // (plus its chrome / later siblings) downward instead of free-floating.
+    const parent = parentTextForEquation(opts.equation, opts.elements);
+    const ignoreIds = new Set<string>([
+      opts.equation.id,
+      ...chrome.map((c) => c.id),
+      ...(parent ? [parent.id] : []),
+    ]);
+    const obstacles = opts.elements.filter((el) => !ignoreIds.has(el.id));
+    let placeY = preferred.y;
+    if (parent) {
+      const parentBottom = parent.y + parent.height + EQUATION_COMPONENT_LAYOUT.leadInGap;
+      if (placeY < parentBottom) {
+        placeY = parentBottom;
+      }
+    }
+    // Still colliding with unrelated obstacles? Nudge down within the column.
+    let guard = 0;
+    while (
+      overlaps(
+        { ...preferred, y: placeY },
+        obstacles,
+      ) &&
+      guard < 40
+    ) {
+      placeY += 12;
+      guard += 1;
+    }
+
+    const neededTop = placeY + size.height + gap;
+    const equationDy = Math.max(0, neededTop - opts.equation.y);
+    const reflowIds: string[] = [];
+    if (equationDy > 0) {
+      reflowIds.push(opts.equation.id);
+      for (const c of chrome) reflowIds.push(c.id);
+      const siblingReflow = computeSiblingEquationReflow(
+        opts.equation,
+        opts.elements,
+        equationDy,
+      );
+      if (siblingReflow) reflowIds.push(...siblingReflow.elementIds);
+    }
+
     return {
-      ...placed,
+      x: column.x,
+      y: placeY,
       width: size.width,
       height: size.height,
       reason: `${opts.role}_above_equation`,
+      ...(reflowIds.length > 0
+        ? { reflow: { elementIds: reflowIds, dy: equationDy } }
+        : {}),
     };
   }
 
-  // Below-equation stack
+  // Below-equation stack (coefficient/symbol defs → step explanation →
+  // interpretation → warning). Coefficient text is always immediately under
+  // the equation and above any other associated explanation text.
   const below = chrome.filter((el) => {
     const role = el.componentMeta?.role as ComponentRole | undefined;
     return role && BELOW_STACK_RANK[role] !== undefined;
   });
   const myRank = BELOW_STACK_RANK[opts.role] ?? 50;
+  const gap = EQUATION_COMPONENT_LAYOUT.belowGap;
 
-  let stackY =
-    opts.equation.y + opts.equation.height + EQUATION_COMPONENT_LAYOUT.belowGap;
-  for (const el of below) {
-    const rank = BELOW_STACK_RANK[el.componentMeta!.role as ComponentRole] ?? 50;
-    if (rank < myRank) {
-      stackY = Math.max(
-        stackY,
-        el.y + el.height + EQUATION_COMPONENT_LAYOUT.belowGap,
-      );
+  const rankOf = (el: TextElement) =>
+    BELOW_STACK_RANK[el.componentMeta!.role as ComponentRole] ?? 50;
+
+  // Pin coefficient/symbol defs directly under the equation. Later roles stack
+  // after every lower-rank chrome block.
+  let stackY = opts.equation.y + opts.equation.height + gap;
+  if (myRank > 0) {
+    for (const el of below) {
+      if (rankOf(el) < myRank) {
+        stackY = Math.max(stackY, el.y + el.height + gap);
+      }
     }
   }
 
+  const placeY = stackY;
   const preferred: Rect = {
-    x: opts.equation.x,
-    y: stackY,
+    x: column.x,
+    y: placeY,
     width: size.width,
     height: size.height,
   };
 
-  // Shift later siblings down
-  const toShift = below
-    .filter((el) => {
-      const rank = BELOW_STACK_RANK[el.componentMeta!.role as ComponentRole] ?? 50;
-      return rank >= myRank && el.y >= stackY - 1;
-    })
-    .sort((a, b) => a.y - b.y);
+  // Always reflow equal/higher-rank chrome — never leave them as obstacles that
+  // would push the new component past them (wrong order / collisions).
+  const toRepack = below
+    .filter((el) => rankOf(el) >= myRank)
+    .sort((a, b) => {
+      const dr = rankOf(a) - rankOf(b);
+      return dr !== 0 ? dr : a.y - b.y;
+    });
 
-  const dy = size.height + EQUATION_COMPONENT_LAYOUT.belowGap;
-  const shiftIds = new Set(toShift.map((e) => e.id));
-  const placed = tryPlace(
-    preferred,
-    opts.elements.filter((el) => !shiftIds.has(el.id)),
+  let cursor = placeY + size.height + gap;
+  const shifts: Array<{ id: string; dy: number }> = [];
+  for (const el of toRepack) {
+    const dy = cursor - el.y;
+    if (Math.abs(dy) > 0.5) shifts.push({ id: el.id, dy });
+    cursor += el.height + gap;
+  }
+
+  const shiftIds = new Set(shifts.map((s) => s.id));
+
+  // Unrelated obstacles only (not the equation, not chrome we're repacking).
+  const ignoreIds = new Set<string>([
+    opts.equation.id,
+    ...chrome.map((c) => c.id),
+    ...shiftIds,
+  ]);
+  const obstacles = opts.elements.filter((el) => !ignoreIds.has(el.id));
+  let finalY = placeY;
+  let guard = 0;
+  while (overlaps({ ...preferred, y: finalY }, obstacles) && guard < 40) {
+    finalY += 12;
+    guard += 1;
+  }
+  if (finalY !== placeY) {
+    const bump = finalY - placeY;
+    for (const s of shifts) s.dy += bump;
+    // Also shift lower-rank? No — finalY bump means unrelated obstacles;
+    // keep coefficient intent: if we had to bump, higher chrome follows.
+  }
+
+  // Downstream sibling equations follow the net growth of this below-stack.
+  const stackGrowth = size.height + gap + (finalY - placeY);
+  const siblingReflow = computeSiblingEquationReflow(
+    opts.equation,
+    opts.elements,
+    stackGrowth,
   );
+  if (siblingReflow) {
+    for (const id of siblingReflow.elementIds) {
+      if (shiftIds.has(id)) continue;
+      shifts.push({ id, dy: siblingReflow.dy });
+      shiftIds.add(id);
+    }
+  }
 
   return {
-    ...placed,
+    x: column.x,
+    y: finalY,
     width: size.width,
     height: size.height,
     reason: `${opts.role}_below_equation`,
-    ...(toShift.length > 0
-      ? { reflow: { elementIds: toShift.map((e) => e.id), dy } }
-      : {}),
+    ...(shifts.length > 0 ? { reflow: { shifts } } : {}),
   };
 }
 
