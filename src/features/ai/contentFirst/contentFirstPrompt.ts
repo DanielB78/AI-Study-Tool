@@ -1,6 +1,10 @@
 /**
  * Short High-mode system prompt for content-first generation.
  * Kept well under the backend system_instruction limit (8000 chars).
+ *
+ * Document id: content_first. Companion to canvas_agent_high (JSON ops).
+ * Keep in sync with: ./content_first_system.md
+ * Backend mirror: backend/app/agent/prompts/content_first_system.md
  */
 
 export const CONTENT_FIRST_SYSTEM_PROMPT = `# Canvas Content Author (High) — content_first
