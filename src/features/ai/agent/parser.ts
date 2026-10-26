@@ -1063,7 +1063,15 @@ function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
   if (isEquationComponentOperationType(op.type)) {
     const eop = op as EquationComponentOperation;
     if (eop.type === 'add_equation_to_text') {
-      validateTextTarget(eop.target_element_id, ctx);
+      // Plan refs (target_ref / unresolved target_element_id) resolve at execute.
+      if (eop.target_element_id && !eop.target_ref) {
+        const looksLikePlanRef =
+          !ctx.elementTypes?.has(eop.target_element_id) &&
+          !ctx.allowedElementIds.has(eop.target_element_id);
+        if (!looksLikePlanRef) {
+          validateTextTarget(eop.target_element_id, ctx);
+        }
+      }
     } else if (
       'target_element_id' in eop &&
       eop.target_element_id &&

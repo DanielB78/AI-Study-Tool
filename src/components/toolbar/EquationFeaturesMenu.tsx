@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import type { EquationElement } from '../../types/canvas';
+import type { EquationElement, TextElement } from '../../types/canvas';
+import { useCanvasStore } from '../../store/canvasStore';
 import {
+  uiAddAnotherEquation,
   uiAddEquationInterpretation,
   uiAddEquationSymbolDefinitions,
   uiAddTextToEquation,
+  uiAttachExistingEquationToText,
+  uiDetachEquationFromText,
   uiSetEquationTitle,
   uiUpdateEquation,
 } from '../../features/equations/equationComponentUi';
@@ -34,6 +38,8 @@ export function EquationFeaturesMenu({ element }: Props) {
     uiAddTextToEquation(element.id, kind, text);
     close();
   };
+
+  const hasParentText = Boolean(element.association?.associatedElementId);
 
   return (
     <div className="ctx-features" ref={rootRef}>
@@ -142,6 +148,73 @@ export function EquationFeaturesMenu({ element }: Props) {
           >
             Add Warning
           </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="ctx-features-item"
+            onClick={() => {
+              const latex = window.prompt(
+                'LaTeX for another equation (multiline OK — use aligned)',
+                '\\begin{aligned}\n\\ddot{x}+\\omega^2 x &= 0\n\\end{aligned}',
+              );
+              if (!latex?.trim()) return;
+              uiAddAnotherEquation(element.id, latex.trim());
+              close();
+            }}
+          >
+            Add Another Equation
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="ctx-features-item"
+            onClick={() => {
+              const texts = useCanvasStore
+                .getState()
+                .document.elements.filter(
+                  (e): e is TextElement =>
+                    e.type === 'text' &&
+                    e.componentMeta?.associatedElementId !== element.id,
+                );
+              if (texts.length === 0) {
+                window.alert('No TextElement on the canvas to attach to.');
+                return;
+              }
+              const choice = window.prompt(
+                `Attach equation to TextElement id:\n${texts
+                  .slice(0, 8)
+                  .map((t) => t.id)
+                  .join('\n')}`,
+                texts[0]!.id,
+              );
+              if (!choice?.trim()) return;
+              const ok = uiAttachExistingEquationToText(
+                element.id,
+                choice.trim(),
+              );
+              if (!ok) {
+                window.alert(
+                  'Could not attach — check the TextElement id or cyclic association.',
+                );
+              }
+              close();
+            }}
+          >
+            Attach equation to text
+          </button>
+          {hasParentText && (
+            <button
+              type="button"
+              role="menuitem"
+              className="ctx-features-item"
+              onClick={() => {
+                uiDetachEquationFromText(element.id);
+                close();
+              }}
+            >
+              Detach from text
+            </button>
+          )}
         </div>
       )}
     </div>
