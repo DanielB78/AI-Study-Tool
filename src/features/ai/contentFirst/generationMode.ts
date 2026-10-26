@@ -1,13 +1,15 @@
 /**
- * Generation mode: structured JSON operations vs content-first Markdown.
+ * Generation mode: content-first Markdown (default on this experimental branch)
+ * vs structured JSON operations (editing / comparison).
  *
- * Default remains `operations` so existing behaviour is preserved.
- * Override with VITE_AI_GENERATION_MODE=content_first for the experiment.
+ * Override with VITE_AI_GENERATION_MODE=operations to restore JSON-ops generation,
+ * or use the RAG debug **Generation format** toggle at runtime.
  */
 
 export type AiGenerationMode = 'operations' | 'content_first';
 
-const DEFAULT_MODE: AiGenerationMode = 'operations';
+/** Experimental default: Markdown authoring → app compiles canvas ops. */
+const DEFAULT_MODE: AiGenerationMode = 'content_first';
 
 function parseMode(raw: string | undefined): AiGenerationMode {
   const v = (raw ?? '').trim().toLowerCase();
@@ -19,9 +21,10 @@ function parseMode(raw: string | undefined): AiGenerationMode {
   ) {
     return 'content_first';
   }
-  if (v === 'operations' || v === 'ops' || v === 'json' || v === '') {
-    return DEFAULT_MODE;
+  if (v === 'operations' || v === 'ops' || v === 'json') {
+    return 'operations';
   }
+  // Unset / unknown → experimental default
   return DEFAULT_MODE;
 }
 

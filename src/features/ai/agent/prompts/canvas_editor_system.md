@@ -4,11 +4,11 @@
 > This markdown file is a human-readable mirror. High mode is the active/default document.
 > Low/Medium profiles are not implemented yet. "High" is a behavioral profile, not an LLM reasoning-effort setting.
 >
-> Experimental alternative for **new lesson generation**: content-first Markdown
-> (`src/features/ai/contentFirst/content_first_system.md`). Toggle via
-> `VITE_AI_GENERATION_MODE=content_first` or the RAG debug **Generation format** control.
-> Keep this JSON-operations document for editing existing elements; do not merge both
-> full prompts into one system instruction.
+> On this experimental branch the **default** generation path is content-first Markdown
+> (`src/features/ai/contentFirst/content_first_system.md`). This JSON-operations document
+> remains available for editing existing elements and comparison via
+> `VITE_AI_GENERATION_MODE=operations` or the RAG debug **JSON ops** toggle.
+> Do not merge both full prompts into one system instruction.
 
 ## ROLE
 

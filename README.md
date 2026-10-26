@@ -57,8 +57,8 @@ Two generation paths share the same canonical canvas elements:
 
 | Mode | Env / UI | LLM output | Use for |
 |------|----------|------------|---------|
-| **operations** (default) | `VITE_AI_GENERATION_MODE=operations` or RAG **JSON ops** | Structured JSON `create_*` / update ops | Editing existing elements; precise targeting |
-| **content_first** (experimental) | `VITE_AI_GENERATION_MODE=content_first` or RAG **Content-first** | Markdown educational prose | New standalone lessons / explanations |
+| **content_first** (default on this branch) | `VITE_AI_GENERATION_MODE=content_first` or RAG **Content-first** | Markdown educational prose | New standalone lessons / explanations |
+| **operations** | `VITE_AI_GENERATION_MODE=operations` or RAG **JSON ops** | Structured JSON `create_*` / update ops | Editing existing elements; precise targeting |
 
 **Operations mode** — the LLM is a planner and returns JSON only (`create_text`, `create_equation`, `create_graph`, updates, associations). Docs: `src/features/ai/agent/prompts/canvas_editor_system.md`.
 

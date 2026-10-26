@@ -2,8 +2,9 @@
 
 > Runtime source of truth: `loadAgentPrompt.ts` (`CANVAS_EDITOR_SYSTEM_PROMPT`).
 > This markdown file is a human-readable mirror. High mode is the active/default document.
-> Experimental content-first Markdown generation: see `content_first_system.md`
-> (`VITE_AI_GENERATION_MODE=content_first`). Keep these prompts separate — do not merge.
+> Default generation on this branch is content-first Markdown (`content_first_system.md`).
+> This JSON-ops document is for editing / comparison (`VITE_AI_GENERATION_MODE=operations`).
+> Keep these prompts separate — do not merge.
 > Low/Medium profiles are not implemented yet. "High" is a behavioral profile, not an LLM reasoning-effort setting.
 
 ## ROLE
