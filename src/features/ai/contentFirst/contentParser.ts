@@ -460,9 +460,9 @@ function pushGraph(
 }
 
 /**
- * Expand :::definition|example|warning|exercise bodies that contain headings /
- * display math / graphs into ordered IR nodes. The first prose block becomes the
- * styled component TextElement; equations stay EquationElements (reading order).
+ * Expand :::definition|example|warning|exercise bodies into ordinary IR nodes.
+ * Feature/component styling is on hold — markers are structural only (prose +
+ * equations + graphs in reading order). Code for components remains elsewhere.
  */
 function expandComponentBody(
   component: ContentComponentKind,
@@ -477,68 +477,32 @@ function expandComponentBody(
     return;
   }
 
-  const hasStructure = inner.some(
-    (b) =>
-      b.kind === 'display_math' ||
-      b.kind === 'heading' ||
-      b.kind === 'graph' ||
-      b.kind === 'component',
-  );
-
-  // Simple body (paragraphs/lists only) → one styled component node.
-  if (!hasStructure) {
-    const spans = parseInlineSpans(body);
-    const text = spansToPlain(spans);
-    if (!text) {
-      warnings.push(`Skipped empty :::${component} block.`);
-      return;
-    }
-    nodes.push({
-      type: 'component',
-      component,
-      spans,
-      text,
-      sectionId,
-    });
-    return;
-  }
-
-  let chromeEmitted = false;
-  const emitChromeFrom = (spans: ContentInlineSpan[], text: string) => {
-    if (!text) return false;
-    if (!chromeEmitted) {
-      nodes.push({
-        type: 'component',
-        component,
-        spans,
-        text,
-        sectionId,
-      });
-      chromeEmitted = true;
-      return true;
-    }
-    nodes.push({
-      type: 'paragraph',
-      spans,
-      text,
-      sectionId,
-    });
-    return true;
-  };
-
+  const before = nodes.length;
   for (const b of inner) {
     switch (b.kind) {
       case 'paragraph': {
         const spans = parseInlineSpans(b.body);
-        emitChromeFrom(spans, spansToPlain(spans));
+        const text = spansToPlain(spans);
+        if (!text) break;
+        nodes.push({
+          type: 'paragraph',
+          spans,
+          text,
+          sectionId,
+        });
         break;
       }
       case 'heading': {
-        // Step headings inside components stay in-section as paragraphs (no new sec_*).
+        // Keep nested step headings as paragraphs (do not open new sections).
         const spans = parseInlineSpans(b.body);
         const plain = spansToPlain(spans);
         if (!plain) break;
-        emitChromeFrom(spans, plain);
+        nodes.push({
+          type: 'paragraph',
+          spans,
+          text: plain,
+          sectionId,
+        });
         break;
       }
       case 'list': {
@@ -546,24 +510,12 @@ function expandComponentBody(
           const spans = parseInlineSpans(item);
           return { spans, text: spansToPlain(spans) };
         });
-        const text = items.map((it) => it.text).join('\n');
-        if (!chromeEmitted) {
-          nodes.push({
-            type: 'component',
-            component,
-            spans: [{ type: 'text', text }],
-            text,
-            sectionId,
-          });
-          chromeEmitted = true;
-        } else {
-          nodes.push({
-            type: 'list',
-            ordered: b.ordered,
-            items,
-            sectionId,
-          });
-        }
+        nodes.push({
+          type: 'list',
+          ordered: b.ordered,
+          items,
+          sectionId,
+        });
         break;
       }
       case 'display_math':
@@ -574,27 +526,24 @@ function expandComponentBody(
         break;
       case 'code': {
         const text = b.body.trim();
-        if (text) emitChromeFrom([{ type: 'text', text }], text);
+        if (text) {
+          nodes.push({
+            type: 'paragraph',
+            spans: [{ type: 'text', text }],
+            text,
+            sectionId,
+          });
+        }
         break;
       }
       case 'component':
-        // Nested markers: recurse with same section (no new outer chrome required).
         expandComponentBody(b.component, b.body, sectionId, nodes, warnings);
         break;
     }
   }
 
-  if (!chromeEmitted && nodes.length === 0) {
+  if (nodes.length === before) {
     warnings.push(`Skipped empty :::${component} block.`);
-  } else if (!chromeEmitted) {
-    // Structure-only body (e.g. only equations): still emit a labelled chrome node first.
-    nodes.unshift({
-      type: 'component',
-      component,
-      spans: [{ type: 'text', text: '' }],
-      text: '',
-      sectionId,
-    });
   }
 }
 
@@ -685,15 +634,6 @@ export function parseContentDocument(raw: string): ContentDocument {
         }
         break;
       }
-    }
-  }
-
-  // Drop empty chrome components that only existed as labels for equation-only bodies
-  // when they have empty text — compiler still wants a label; keep with placeholder.
-  for (const n of nodes) {
-    if (n.type === 'component' && !n.text.trim()) {
-      n.text = n.component.charAt(0).toUpperCase() + n.component.slice(1);
-      n.spans = [{ type: 'text', text: n.text }];
     }
   }
 

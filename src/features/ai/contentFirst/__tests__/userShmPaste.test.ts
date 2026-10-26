@@ -60,7 +60,7 @@ describe('user SHM ChatGPT paste', () => {
         }
       }
     }
-    expect(doc.nodes.some((n) => n.type === 'component')).toBe(true);
+    expect(doc.nodes.some((n) => n.type === 'component')).toBe(false);
     expect(doc.nodes.filter((n) => n.type === 'equation').length).toBeGreaterThan(
       10,
     );
@@ -74,8 +74,20 @@ describe('user SHM ChatGPT paste', () => {
     const els = useCanvasStore.getState().document.elements;
     expect(els.some((e) => e.type === 'equation')).toBe(true);
     expect(els.some((e) => e.type === 'graph')).toBe(true);
+    const featureTypes = new Set([
+      'definition',
+      'example',
+      'warning',
+      'exercise',
+      'linked_comment',
+    ]);
     expect(
-      els.some((e) => e.type === 'text' && e.componentType === 'example'),
+      els.every(
+        (e) =>
+          e.type !== 'text' || !featureTypes.has(String(e.componentType)),
+      ),
     ).toBe(true);
+    const textXs = els.filter((e) => e.type === 'text').map((e) => e.x);
+    expect(Math.max(...textXs) - Math.min(...textXs)).toBeLessThan(1);
   });
 });

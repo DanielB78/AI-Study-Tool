@@ -51,6 +51,27 @@ Do **not** emit \`create_text\`, \`create_equation\`, \`create_graph\`, \`operat
 - Lists when helpful
 - Logical reading order (app stacks content in one vertical column)
 
+### Paragraph spacing — critical
+
+- Write each paragraph as **continuous prose** (one block of sentences).
+- Soft line wraps inside a paragraph are fine **without** a blank line between them.
+- Use a blank line **only** between distinct paragraphs, or before/after headings, \`$$\` equations, and \`:::graph\` markers.
+- Do **not** put a blank line after every sentence.
+- Do **not** put a blank line after every wrapped line of the same paragraph.
+- Bad (creates fragmented text):
+
+\`\`\`
+This is sentence one.
+
+This is sentence two of the same idea.
+\`\`\`
+
+- Good (one paragraph):
+
+\`\`\`
+This is sentence one. This is sentence two of the same idea.
+\`\`\`
+
 ### Inline mathematics — strict
 
 Use **only** paired dollar delimiters for in-sentence math:
@@ -127,27 +148,11 @@ y_label: Normalised value
 - GraphMathSyntax only (\`cos(x)\`, \`x**2\`) — **not** LaTeX
 - Marker must open with \`:::graph\` and close with \`:::\` alone on a line
 
-### Optional components
+### Markers to avoid for now
 
-\`\`\`
-:::definition
-...
-:::
-
-:::example
-...
-:::
-
-:::warning
-...
-:::
-
-:::exercise
-...
-:::
-\`\`\`
-
-Each opens with \`:::name\` and **must** close with \`:::\`. Ordinary paragraphs need no marker.
+Do **not** use \`:::definition\`, \`:::example\`, \`:::warning\`, or \`:::exercise\`.
+Write that material as ordinary headings and paragraphs instead.
+(Only \`:::graph\` markers are used for plots.)
 
 ## Educational quality
 
@@ -156,15 +161,17 @@ Each opens with \`:::name\` and **must** close with \`:::\`. Ordinary paragraphs
 
 ## What the application does
 
-Creates Text / Equation / Graph elements, keeps reading order, centres equations, associates sections from headings, handles sizing, spacing, undo and persistence.
+Creates Text / Equation / Graph elements, keeps reading order, centres equations, handles sizing, spacing, undo and persistence.
 `;
 
 export const CONTENT_FIRST_RESPONSE_INSTRUCTIONS = [
   'Wrap the entire lesson in one ```markdown ... ``` fence so it stays copyable as raw text.',
   'Put no commentary outside that fence.',
   'Do not emit canvas-operation JSON or create_* operations.',
+  'Write paragraphs as continuous prose — do not insert a blank line after every sentence or wrapped line.',
   'Display math: opening $$ on its own line, LaTeX body, closing $$ on its own line — always paired.',
   'Inline math: paired $...$ only. Prefer braces in superscripts/subscripts and \\frac{a}{b}.',
+  'Do not use :::definition / :::example / :::warning / :::exercise markers.',
   'Do not invent coordinates, sizes, parent IDs, or layout instructions.',
 ].join(' ');
 

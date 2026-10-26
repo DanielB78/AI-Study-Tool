@@ -192,7 +192,8 @@ describe('SHM content-first lesson', () => {
     expect(types[0]).toBe('heading');
     expect(types.filter((t) => t === 'equation').length).toBeGreaterThanOrEqual(6);
     expect(types.filter((t) => t === 'graph')).toHaveLength(3);
-    expect(types.filter((t) => t === 'component').length).toBeGreaterThanOrEqual(3);
+    // Feature markers expand to ordinary paragraphs (components on hold)
+    expect(types.filter((t) => t === 'component')).toHaveLength(0);
     // Reading order: first graph after a displacement equation, not at the top
     const firstGraph = types.indexOf('graph');
     const firstEq = types.indexOf('equation');
@@ -210,7 +211,7 @@ describe('SHM content-first lesson', () => {
       'create_graph',
       'create_text',
     ]);
-    expect(associationPlan.length).toBeGreaterThan(0);
+    expect(associationPlan).toHaveLength(0);
   });
 
   it('applies the lesson: correct element kinds, order, associations, no overlap', () => {
@@ -241,19 +242,27 @@ describe('SHM content-first lesson', () => {
     const graphYs = graphs.map((e) => e.y).sort((a, b) => a - b);
     expect(eqYs[0]!).toBeLessThan(graphYs[0]!);
 
-    // Section associations on equations
+    // No textbook feature chrome / auto associations
+    const featureTypes = new Set([
+      'definition',
+      'example',
+      'warning',
+      'exercise',
+      'linked_comment',
+    ]);
+    expect(
+      texts.every(
+        (t) => t.type === 'text' && !featureTypes.has(String(t.componentType)),
+      ),
+    ).toBe(true);
     for (const eq of eqs) {
       if (eq.type !== 'equation') continue;
-      expect(eq.association?.associatedElementId).toBeTruthy();
+      expect(eq.association?.associatedElementId).toBeFalsy();
     }
 
-    // Components styled
-    const componentTypes = texts
-      .map((t) => (t.type === 'text' ? t.componentType : null))
-      .filter(Boolean);
-    expect(componentTypes).toContain('definition');
-    expect(componentTypes).toContain('example');
-    expect(componentTypes).toContain('exercise');
+    // Text shares one left column (equations may be centred within it)
+    const textXs = ordered.filter((e) => e.type === 'text').map((e) => e.x);
+    expect(Math.max(...textXs) - Math.min(...textXs)).toBeLessThan(1);
 
     // Crude collision check: successive y + height leave a gap or abut without large overlap
     for (let i = 1; i < ordered.length; i += 1) {

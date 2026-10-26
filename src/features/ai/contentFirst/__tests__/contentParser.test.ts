@@ -61,7 +61,7 @@ x_max: 12.57
     }
   });
 
-  it('parses optional component markers', () => {
+  it('treats optional component markers as ordinary prose (features on hold)', () => {
     const doc = parseContentDocument(`:::definition
 SHM is oscillation with $a \\propto -x$.
 :::
@@ -70,9 +70,9 @@ SHM is oscillation with $a \\propto -x$.
 Explain why $a=0$ at equilibrium.
 :::
 `);
-    expect(doc.nodes.map((n) => n.type)).toEqual(['component', 'component']);
-    expect(doc.nodes[0]).toMatchObject({ type: 'component', component: 'definition' });
-    expect(doc.nodes[1]).toMatchObject({ type: 'component', component: 'exercise' });
+    expect(doc.nodes.every((n) => n.type === 'paragraph')).toBe(true);
+    expect(doc.nodes).toHaveLength(2);
+    expect(doc.nodes.some((n) => n.type === 'component')).toBe(false);
   });
 
   it('preserves reading order across mixed blocks', () => {
@@ -214,11 +214,12 @@ $$
 :::
 `);
     const types = doc.nodes.map((n) => n.type);
-    expect(types[0]).toBe('component');
+    expect(types[0]).toBe('paragraph');
     expect(types).toContain('equation');
     expect(doc.nodes.filter((n) => n.type === 'equation')).toHaveLength(2);
+    expect(doc.nodes.some((n) => n.type === 'component')).toBe(false);
     for (const n of doc.nodes) {
-      if (n.type === 'component' || n.type === 'paragraph') {
+      if (n.type === 'paragraph') {
         for (const s of n.spans) {
           if (s.type === 'inline_math') {
             expect(s.latex).not.toMatch(/#/);

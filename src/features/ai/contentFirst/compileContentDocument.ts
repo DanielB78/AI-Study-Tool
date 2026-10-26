@@ -1,6 +1,10 @@
 /**
  * Compile ContentDocument → CanvasAgentResponse (existing operation schema).
  * Reading order = node order. Layout = chronological single column.
+ *
+ * Adjacent paragraphs/lists are merged into one TextElement (multiple rich-text
+ * blocks) so blank-line-per-sentence LLM output does not create one object per line.
+ * Textbook feature components / auto associations are intentionally not applied.
  */
 
 import type {
@@ -30,31 +34,19 @@ export type ContentAssociationPlan = {
 
 export type CompileContentResult = {
   response: CanvasAgentResponse;
+  /** Kept for API compatibility; content-first currently leaves this empty. */
   associationPlan: ContentAssociationPlan[];
   /** ref → sectionId from IR (for debug / post-association). */
   refSectionIds: Record<string, string | null>;
 };
 
-function spansToAgent(
-  spans: ContentInlineSpan[],
-): AgentRichTextSpan[] {
+function spansToAgent(spans: ContentInlineSpan[]): AgentRichTextSpan[] {
   return spans.map((s) => {
     if (s.type === 'inline_math') {
       return { type: 'inline_math' as const, latex: s.latex };
     }
     return { text: s.text };
   });
-}
-
-function paragraphRichText(spans: ContentInlineSpan[]): AgentRichTextDocument {
-  return {
-    blocks: [
-      {
-        type: 'paragraph',
-        spans: spansToAgent(spans),
-      },
-    ],
-  };
 }
 
 function headingRichText(
@@ -79,24 +71,19 @@ function headingRichText(
   };
 }
 
-function listRichText(
-  ordered: boolean,
-  items: Array<{ spans: ContentInlineSpan[] }>,
-): AgentRichTextDocument {
-  return {
-    blocks: items.map((item) => ({
-      type: ordered ? ('numbered' as const) : ('bullet' as const),
-      spans: spansToAgent(item.spans),
-    })),
-  };
-}
-
-function plainFromSpans(spans: ContentInlineSpan[]): string {
-  return spans
-    .map((s) => (s.type === 'text' ? s.text : s.latex))
-    .join('')
-    .trim();
-}
+type ProseChunk =
+  | {
+      kind: 'paragraph';
+      spans: ContentInlineSpan[];
+      text: string;
+      sectionId: string | null;
+    }
+  | {
+      kind: 'list';
+      ordered: boolean;
+      items: Array<{ spans: ContentInlineSpan[]; text: string }>;
+      sectionId: string | null;
+    };
 
 /**
  * Compile IR nodes into validated-shaped canvas operations.
@@ -108,28 +95,67 @@ export function compileContentDocument(
   const operations: CanvasOperation[] = [];
   const associationPlan: ContentAssociationPlan[] = [];
   const refSectionIds: Record<string, string | null> = {};
-  /** sectionId → heading operation ref */
-  const sectionHeadingRef = new Map<string, string>();
   let seq = 0;
   const nextRef = (prefix: string) => {
     seq += 1;
     return `${prefix}_${seq}`;
   };
 
-  for (const node of doc.nodes) {
-    compileNode(node);
-  }
+  /** Buffer adjacent prose until a structural boundary (heading / eq / graph). */
+  let proseBuf: ProseChunk[] = [];
 
-  function compileNode(node: ContentDocumentNode): void {
+  const flushProse = () => {
+    if (proseBuf.length === 0) return;
+    const sectionId = proseBuf[0]?.sectionId ?? null;
+    const ref = nextRef('p');
+    refSectionIds[ref] = sectionId;
+
+    const blocks: AgentRichTextDocument['blocks'] = [];
+    const plainParts: string[] = [];
+
+    for (const chunk of proseBuf) {
+      if (chunk.kind === 'paragraph') {
+        const text = chunk.text.trim();
+        if (!text) continue;
+        blocks.push({
+          type: 'paragraph',
+          spans: spansToAgent(chunk.spans),
+        });
+        plainParts.push(text);
+      } else {
+        for (const item of chunk.items) {
+          blocks.push({
+            type: chunk.ordered ? 'numbered' : 'bullet',
+            spans: spansToAgent(item.spans),
+          });
+          plainParts.push(item.text);
+        }
+      }
+    }
+
+    proseBuf = [];
+    if (blocks.length === 0) return;
+
+    const op: CreateTextOperation = {
+      type: 'create_text',
+      ref,
+      layout_role: 'explanation',
+      text: plainParts.join('\n\n'),
+      rich_text: { blocks },
+      placement: { mode: 'viewport_default' },
+    };
+    operations.push(op);
+  };
+
+  for (const node of doc.nodes) {
     switch (node.type) {
       case 'heading': {
+        flushProse();
         const ref = nextRef('h');
-        sectionHeadingRef.set(node.sectionId, ref);
         refSectionIds[ref] = node.sectionId;
         const op: CreateTextOperation = {
           type: 'create_text',
           ref,
-          layout_cell: node.sectionId,
           layout_role: node.level === 1 ? 'introduction' : 'explanation',
           text: node.text,
           rich_text: headingRichText(node.level, node.spans),
@@ -139,77 +165,45 @@ export function compileContentDocument(
         break;
       }
       case 'paragraph': {
-        const ref = nextRef('p');
-        refSectionIds[ref] = node.sectionId;
-        const op: CreateTextOperation = {
-          type: 'create_text',
-          ref,
-          ...(node.sectionId ? { layout_cell: node.sectionId } : {}),
-          layout_role: 'explanation',
+        if (!node.text.trim()) break;
+        proseBuf.push({
+          kind: 'paragraph',
+          spans: node.spans,
           text: node.text,
-          rich_text: paragraphRichText(node.spans),
-          placement: { mode: 'viewport_default' },
-        };
-        operations.push(op);
-        if (node.sectionId) {
-          const sectionRef = sectionHeadingRef.get(node.sectionId);
-          if (sectionRef) {
-            associationPlan.push({
-              childRef: ref,
-              sectionRef,
-              kind: 'text',
-            });
-          }
-        }
+          sectionId: node.sectionId,
+        });
         break;
       }
       case 'list': {
-        const ref = nextRef('list');
-        refSectionIds[ref] = node.sectionId;
-        const text = node.items.map((it) => it.text).join('\n');
-        const op: CreateTextOperation = {
-          type: 'create_text',
-          ref,
-          ...(node.sectionId ? { layout_cell: node.sectionId } : {}),
-          layout_role: 'explanation',
-          text,
-          rich_text: listRichText(node.ordered, node.items),
-          placement: { mode: 'viewport_default' },
-        };
-        operations.push(op);
+        proseBuf.push({
+          kind: 'list',
+          ordered: node.ordered,
+          items: node.items,
+          sectionId: node.sectionId,
+        });
         break;
       }
       case 'equation': {
+        flushProse();
         const ref = nextRef('eq');
         refSectionIds[ref] = node.sectionId;
         const op: CreateEquationOperation = {
           type: 'create_equation',
           ref,
-          ...(node.sectionId ? { layout_cell: node.sectionId } : {}),
           layout_role: 'mathematical_step',
           latex: node.latex,
           placement: { mode: 'viewport_default' },
         };
         operations.push(op);
-        if (node.sectionId) {
-          const sectionRef = sectionHeadingRef.get(node.sectionId);
-          if (sectionRef) {
-            associationPlan.push({
-              childRef: ref,
-              sectionRef,
-              kind: 'equation',
-            });
-          }
-        }
         break;
       }
       case 'graph': {
+        flushProse();
         const ref = nextRef('g');
         refSectionIds[ref] = node.sectionId;
         const op: CreateGraphOperation = {
           type: 'create_graph',
           ref,
-          ...(node.sectionId ? { layout_cell: node.sectionId } : {}),
           layout_role: 'visualisation',
           expressions: node.expressions.map((expression) => ({
             expression,
@@ -235,66 +229,22 @@ export function compileContentDocument(
           placement: { mode: 'viewport_default' },
         };
         operations.push(op);
-        if (node.sectionId) {
-          const sectionRef = sectionHeadingRef.get(node.sectionId);
-          if (sectionRef) {
-            associationPlan.push({
-              childRef: ref,
-              sectionRef,
-              kind: 'graph',
-            });
-          }
-        }
         break;
       }
       case 'component': {
-        // Emit as chronological create_text so reading order + layout stay consistent;
-        // textbook component styling is applied after execute via associationPlan.
-        const ref = nextRef(node.component);
-        refSectionIds[ref] = node.sectionId;
-        const label =
-          node.component.charAt(0).toUpperCase() + node.component.slice(1);
-        const op: CreateTextOperation = {
-          type: 'create_text',
-          ref,
-          ...(node.sectionId ? { layout_cell: node.sectionId } : {}),
-          layout_role: 'explanation',
-          text: `${label}\n${node.text}`,
-          rich_text: {
-            blocks: [
-              {
-                type: 'heading',
-                spans: [
-                  {
-                    text: label,
-                    style: { bold: true, font_size: 'subheading' },
-                  },
-                ],
-              },
-              {
-                type: 'paragraph',
-                spans: spansToAgent(node.spans),
-              },
-            ],
-          },
-          placement: { mode: 'viewport_default' },
-        };
-        operations.push(op);
-        const sectionRef = node.sectionId
-          ? sectionHeadingRef.get(node.sectionId)
-          : undefined;
-        associationPlan.push({
-          childRef: ref,
-          sectionRef: sectionRef ?? ref,
-          kind: 'component',
-          componentType: node.component,
+        // Feature components on hold — treat body as ordinary prose in the buffer.
+        if (!node.text.trim()) break;
+        proseBuf.push({
+          kind: 'paragraph',
+          spans: node.spans,
+          text: node.text,
+          sectionId: node.sectionId,
         });
         break;
       }
     }
   }
-
-  void plainFromSpans;
+  flushProse();
 
   const response: CanvasAgentResponse = {
     output_type: 'lesson',

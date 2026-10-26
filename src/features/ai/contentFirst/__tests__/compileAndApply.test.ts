@@ -153,7 +153,7 @@ expression: -cos(x)
     }
   });
 
-  it('F — optional components get textbook component types', () => {
+  it('F — feature markers stay ordinary text (no textbook component types)', () => {
     const raw = `:::definition
 Angular frequency $\\omega$.
 :::
@@ -170,15 +170,22 @@ Find $T$.
     const texts = useCanvasStore
       .getState()
       .document.elements.filter((e) => e.type === 'text');
-    const types = texts.map((e) =>
-      e.type === 'text' ? e.componentType : null,
-    );
-    expect(types).toContain('definition');
-    expect(types).toContain('warning');
-    expect(types).toContain('exercise');
+    expect(texts.length).toBeGreaterThan(0);
+    const featureTypes = new Set([
+      'definition',
+      'example',
+      'warning',
+      'exercise',
+      'linked_comment',
+    ]);
+    expect(
+      texts.every(
+        (e) => e.type === 'text' && !featureTypes.has(String(e.componentType)),
+      ),
+    ).toBe(true);
   });
 
-  it('G — multiple sections associate equations to heading text', () => {
+  it('G — multiple sections keep equations as separate elements in order', () => {
     const raw = `## Restoring Force
 
 Hooke's law:
@@ -196,19 +203,18 @@ x(t)=A\\cos(\\omega t)
 $$
 `;
     const result = handleContentFirstResponse(raw, emptyCtx);
-    expect(result.compile.associationPlan.length).toBeGreaterThan(0);
+    expect(result.compile.associationPlan).toHaveLength(0);
     const els = useCanvasStore.getState().document.elements;
     const eqs = els.filter((e) => e.type === 'equation');
     expect(eqs).toHaveLength(2);
-    for (const eq of eqs) {
-      if (eq.type !== 'equation') continue;
-      expect(eq.association?.associatedElementId).toBeTruthy();
-      const parent = els.find((e) => e.id === eq.association?.associatedElementId);
-      expect(parent?.type).toBe('text');
-    }
+    const ordered = els.slice().sort((a, b) => a.y - b.y);
+    expect(ordered.filter((e) => e.type === 'equation')).toHaveLength(2);
+    // Text shares one left column (equations may be centred within it)
+    const textXs = ordered.filter((e) => e.type === 'text').map((e) => e.x);
+    expect(Math.max(...textXs) - Math.min(...textXs)).toBeLessThan(1);
   });
 
-  it('H — save/reload persists latex and associations', () => {
+  it('H — save/reload persists latex', () => {
     handleContentFirstResponse(
       `## Sec
 
@@ -229,7 +235,31 @@ $$
     expect(eqs).toHaveLength(1);
     if (eqs[0]?.type === 'equation') {
       expect(eqs[0].latex).toContain('E=mc');
-      expect(eqs[0].association?.associatedElementId).toBeTruthy();
+    }
+  });
+
+  it('merges blank-line-separated prose into one TextElement', () => {
+    const raw = `Intro sentence one.
+
+Intro sentence two still the same block.
+
+$$
+F=-kx
+$$
+
+After equation.
+`;
+    handleContentFirstResponse(raw, emptyCtx);
+    const texts = useCanvasStore
+      .getState()
+      .document.elements.filter((e) => e.type === 'text');
+    // One merged intro text + one after-equation text (not one per sentence)
+    expect(texts).toHaveLength(2);
+    const intro = texts.find((t) => t.type === 'text' && t.text.includes('sentence one'));
+    expect(intro?.type).toBe('text');
+    if (intro?.type === 'text') {
+      expect(intro.text).toContain('sentence two');
+      expect(intro.richText?.blocks.length).toBeGreaterThanOrEqual(2);
     }
   });
 
