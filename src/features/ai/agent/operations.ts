@@ -1206,11 +1206,12 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
           {
             type: 'object',
             additionalProperties: false,
-            required: ['type', 'target_element_id', 'latex'],
+            required: ['type', 'latex'],
             properties: {
               type: { const: 'add_equation_to_text' },
               target_element_id: { type: 'string', minLength: 1 },
               target_id: { type: 'string', minLength: 1 },
+              target_ref: { type: 'string', minLength: 1 },
               latex: { type: 'string', minLength: 1 },
               ref: { type: 'string', minLength: 1 },
             },
@@ -1708,7 +1709,7 @@ TEXT MATH (in-sentence expressions inside TextElement — NOT a substitute for E
 - insert_display_math / update_text_math / remove_text_math / convert_text_math — retained for editing existing TextElement math; when the agent creates NEW centred / textbook maths, use create_equation or add_equation_to_text instead.
 
 EQUATION TEXTBOOK COMPONENTS (EquationElement + associated TextElement chrome):
-- add_equation_to_text: { "type":"add_equation_to_text", "target_element_id":"<text id>", "ref":"eq1", "latex":"\\begin{aligned}F&=-kx\\\\m\\ddot{x}&=-kx\\end{aligned}" } — attach a new EquationElement to existing notes
+- add_equation_to_text: { "type":"add_equation_to_text", "target_element_id":"<text id>", "ref":"eq1", "latex":"\\begin{aligned}F&=-kx\\\\m\\ddot{x}&=-kx\\end{aligned}" } — attach a new EquationElement to existing notes (or use target_ref for a create_text plan ref)
 - add_text_to_equation: { "type":"add_text_to_equation", "target_ref":"eq1", "component":"lead_in"|"step_explanation"|"title"|"symbol_definitions"|"interpretation"|"warning", "content":"…" }
 - set_equation_title / add_equation_symbol_definitions / add_equation_interpretation / update_equation
 - create_equation — CANONICAL standalone EquationElement create (same role as create_text / create_graph)

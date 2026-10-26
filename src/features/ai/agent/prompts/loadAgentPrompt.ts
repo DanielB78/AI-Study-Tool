@@ -119,7 +119,7 @@ Plus their supported associated components (app-owned style + placement). Never 
 
 1. \`update_text\` / \`update_equation\` — modify existing primary elements
 2. Text features & components; \`insert_inline_math\` for in-sentence formulas in existing prose
-3. Equation components: \`add_text_to_equation\` (title|lead_in|step_explanation|symbol_definitions|interpretation|warning), \`set_equation_title\`, \`add_equation_symbol_definitions\`, \`add_equation_interpretation\`
+3. Equation components: \`add_equation_to_text\` (\`target_element_id\` or \`target_ref\`), \`add_text_to_equation\` (title|lead_in|step_explanation|symbol_definitions|interpretation|warning), \`set_equation_title\`, \`add_equation_symbol_definitions\`, \`add_equation_interpretation\`
 4. Graph edits / graph textbook components (\`add_graph_to_text\`, \`add_text_to_graph\`, …)
 5. \`layout\` (response-level) — \`chronological_grid\` or explicit \`grid\`
 
