@@ -20,9 +20,51 @@ The angular frequency is $\\omega=\\sqrt{k/m}$.
     }
   });
 
-  it('does not treat currency as inline math', () => {
-    const spans = parseInlineSpans('Costs $5 today');
+  it('does not treat pure currency amounts as inline math', () => {
+    const spans = parseInlineSpans('Costs $5 today and $12.50 total');
     expect(spans.every((s) => s.type === 'text')).toBe(true);
+    expect(spans.map((s) => (s.type === 'text' ? s.text : '')).join('')).toContain(
+      '$5',
+    );
+  });
+
+  it('parses leading-digit physics inline math like $0.50\\,\\mathrm{kg}$', () => {
+    const spans = parseInlineSpans(
+      String.raw`A mass of $0.50\,\mathrm{kg}$ on a spring.`,
+    );
+    const math = spans.filter((s) => s.type === 'inline_math');
+    expect(math).toHaveLength(1);
+    if (math[0]?.type === 'inline_math') {
+      expect(math[0].latex).toContain('mathrm');
+      expect(math[0].latex).toContain('0.50');
+    }
+  });
+
+  it('does not let a runaway $…$ swallow a whole sentence of prose', () => {
+    const spans = parseInlineSpans(
+      String.raw`A mass of $0.50\,\mathrm{kg}isattachedtoanidealhorizontalspringwithspringconstant200\,\mathrm{N/m}.Themassisdisplacedby0.10\,\mathrm{m}$ and released.`,
+    );
+    const math = spans.filter((s) => s.type === 'inline_math');
+    // Should not produce one giant math span containing "isattached"
+    expect(
+      math.every(
+        (s) => s.type === 'inline_math' && !s.latex.includes('isattached'),
+      ),
+    ).toBe(true);
+  });
+
+  it('parses markdown bold and italic into styled text spans', () => {
+    const spans = parseInlineSpans(
+      'The defining feature is **the acceleration** and *directed* towards equilibrium.',
+    );
+    const bold = spans.find(
+      (s) => s.type === 'text' && s.style?.bold && s.text.includes('acceleration'),
+    );
+    const italic = spans.find(
+      (s) => s.type === 'text' && s.style?.italic && s.text.includes('directed'),
+    );
+    expect(bold).toBeTruthy();
+    expect(italic).toBeTruthy();
   });
 
   it('creates one EquationElement node for multiline aligned display math', () => {

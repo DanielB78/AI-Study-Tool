@@ -72,22 +72,31 @@ This is sentence two of the same idea.
 This is sentence one. This is sentence two of the same idea.
 \`\`\`
 
+### Inline emphasis
+
+- Bold: \`**like this**\`
+- Italic: \`*like this*\`
+- Do not use HTML tags for emphasis.
+
 ### Inline mathematics — strict
 
 Use **only** paired dollar delimiters for in-sentence math:
 
 - Correct: \`The frequency is $\\omega=\\sqrt{k/m}$.\`
+- Correct: \`A mass of $0.50\\\\,\\\\mathrm{kg}$ on a spring.\`
 - Incorrect: unmatched \`$\\omega\`, or display math squeezed into a sentence
+- Incorrect: one giant \`$…$\` wrapping a whole English sentence
 
 Rules:
 
+- Close each inline \`$…$\` immediately after the formula — never leave \`$\` open across prose
+- Write units inside math with \`\\\\mathrm{…}\` and thin spaces: \`$200\\\\,\\\\mathrm{N/m}$\`
 - Every opening \`$\` must have a matching closing \`$\` on the **same line** when possible
 - Never use \`$$\` for inline math
 - Prefer \`$...$\` over \`\\\\(...\\\\)\`
-- Do not use bare LaTeX commands outside delimiters (wrong: \`omega = sqrt(k/m)\` as maths; wrong: \`\\omega\` without \`$...$\`)
-- Do not leave currency-style lone dollars in maths contexts; write "5 dollars" in words if needed
+- Do not use bare LaTeX commands outside delimiters
 - Keep inline expressions short; long derivations belong in display math
-
+- For money in prose write "5 dollars" (avoid bare \`$5\` next to maths)
 ### Display mathematics — strict
 
 Standalone equations **must** use a closed \`$$\` block:

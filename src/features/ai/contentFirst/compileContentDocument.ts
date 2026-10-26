@@ -45,7 +45,14 @@ function spansToAgent(spans: ContentInlineSpan[]): AgentRichTextSpan[] {
     if (s.type === 'inline_math') {
       return { type: 'inline_math' as const, latex: s.latex };
     }
-    return { text: s.text };
+    const style =
+      s.style?.bold || s.style?.italic
+        ? {
+            ...(s.style.bold ? { bold: true as const } : {}),
+            ...(s.style.italic ? { italic: true as const } : {}),
+          }
+        : undefined;
+    return style ? { text: s.text, style } : { text: s.text };
   });
 }
 

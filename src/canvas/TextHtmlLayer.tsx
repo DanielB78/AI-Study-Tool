@@ -147,7 +147,9 @@ export function TextHtmlLayer({ texts, camera, editingId }: Props) {
                 ? `inset ${accent * zoom}px 0 0 ${accentColor}`
                 : undefined,
               opacity: el.opacity,
-              overflow: 'hidden',
+              // Visible so tall inline KaTeX (fractions, \mathrm) is not clipped
+              // into a scrollable pocket inside the text box.
+              overflow: 'visible',
               pointerEvents: 'none',
               fontSize: el.fontSize * zoom,
               ['--text-title-gap' as string]: `${TEXT_FEATURE_LAYOUT.titleGap * zoom}px`,

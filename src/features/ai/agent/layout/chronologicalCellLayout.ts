@@ -765,7 +765,7 @@ export function calculateChronologicalCellGrid(input: {
   let y = pad;
   const rowGap =
     outputConfig.gridArrangement === 'vertical_sequence'
-      ? Math.max(config.rowGap, 36)
+      ? Math.max(config.rowGap, 18)
       : config.rowGap;
   for (let r = 0; r < rowHeights.length; r++) {
     rowStarts[r] = y;

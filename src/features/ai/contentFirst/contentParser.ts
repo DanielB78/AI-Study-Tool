@@ -21,26 +21,121 @@ const COMPONENT_KINDS = new Set<ContentComponentKind>([
   'exercise',
 ]);
 
-function isCurrencyContext(source: string, dollarIndex: number): boolean {
-  // "$5" or "USD $12.50" — digit immediately after $ → not math.
-  const next = source[dollarIndex + 1];
-  if (next && /\d/.test(next)) return true;
-  // Escaped \$
-  if (dollarIndex > 0 && source[dollarIndex - 1] === '\\') return true;
-  return false;
+function isEscapedDollar(source: string, dollarIndex: number): boolean {
+  return dollarIndex > 0 && source[dollarIndex - 1] === '\\';
 }
 
-/** Parse inline spans: text + $...$ / \(...\). */
+/** Pure money amounts like `5` / `12.50` — not physics `$0.50\,\mathrm{kg}$`. */
+function isCurrencyAmount(content: string): boolean {
+  return /^\d[\d,]*(?:\.\d+)?$/.test(content.trim());
+}
+
+/**
+ * Reject runaway `$…$` that swallowed prose when the LLM omitted closers.
+ * Allow short latex including leading digits (`0.50\,\mathrm{kg}`).
+ */
+function isPlausibleInlineLatex(content: string): boolean {
+  const t = content.trim();
+  if (!t) return false;
+  if (t.length > 120) return false;
+  if (isCurrencyAmount(t)) return false;
+  const latexCmds = (t.match(/\\[a-zA-Z]+/g) ?? []).length;
+  const spaceCount = (t.match(/ /g) ?? []).length;
+  const wordCount = (t.match(/[A-Za-z]{3,}/g) ?? []).length;
+  // "$5 today and $" style — spaces without TeX commands are prose, not math.
+  if (spaceCount >= 1 && latexCmds === 0) return false;
+  if (wordCount >= 3 && latexCmds === 0) return false;
+  if (wordCount >= 5 && latexCmds < 2) return false;
+  // Glued prose without spaces (ChatGPT stripping spaces inside a bad $…$).
+  if (/[a-z]{16,}/i.test(t) && latexCmds < 2) return false;
+  if (t.length > 80 && latexCmds < 2) return false;
+  return true;
+}
+
+type TextStyle = { bold?: boolean; italic?: boolean };
+
+/** Parse `**bold**`, `*italic*`, `***both***` (and `__` / `_`) inside a text segment. */
+export function parseMarkdownEmphasis(
+  raw: string,
+  baseStyle: TextStyle = {},
+): ContentInlineSpan[] {
+  const spans: ContentInlineSpan[] = [];
+  let i = 0;
+
+  const pushText = (text: string, style: TextStyle) => {
+    if (!text) return;
+    const hasStyle = style.bold || style.italic;
+    spans.push(
+      hasStyle
+        ? { type: 'text', text, style: { ...style } }
+        : { type: 'text', text },
+    );
+  };
+
+  while (i < raw.length) {
+    // ***bold italic***
+    if (raw.startsWith('***', i) || raw.startsWith('___', i)) {
+      const marker = raw.slice(i, i + 3);
+      const end = raw.indexOf(marker, i + 3);
+      if (end !== -1) {
+        pushText(raw.slice(i + 3, end), { ...baseStyle, bold: true, italic: true });
+        i = end + 3;
+        continue;
+      }
+    }
+    // **bold** or __bold__
+    if (raw.startsWith('**', i) || raw.startsWith('__', i)) {
+      const marker = raw.slice(i, i + 2);
+      const end = raw.indexOf(marker, i + 2);
+      if (end !== -1) {
+        pushText(raw.slice(i + 2, end), { ...baseStyle, bold: true });
+        i = end + 2;
+        continue;
+      }
+    }
+    // *italic* or _italic_ (single delimiter; avoid matching mid-word _)
+    if (raw[i] === '*' || raw[i] === '_') {
+      const marker = raw[i]!;
+      // Underscore italic only at clear boundaries (avoid snake_case).
+      if (
+        marker === '_' &&
+        i > 0 &&
+        /[A-Za-z0-9]/.test(raw[i - 1]!) &&
+        i + 1 < raw.length &&
+        /[A-Za-z0-9]/.test(raw[i + 1]!)
+      ) {
+        pushText(marker, baseStyle);
+        i += 1;
+        continue;
+      }
+      const end = raw.indexOf(marker, i + 1);
+      if (end !== -1 && end > i + 1) {
+        pushText(raw.slice(i + 1, end), { ...baseStyle, italic: true });
+        i = end + 1;
+        continue;
+      }
+    }
+
+    // Accumulate plain text until next emphasis marker
+    let j = i + 1;
+    while (j < raw.length && raw[j] !== '*' && raw[j] !== '_') j += 1;
+    pushText(raw.slice(i, j), baseStyle);
+    i = j;
+  }
+
+  return spans.length > 0 ? spans : [{ type: 'text', text: '' }];
+}
+
+/** Parse inline spans: text (+ bold/italic) + $...$ / \(...\). */
 export function parseInlineSpans(raw: string): ContentInlineSpan[] {
   const spans: ContentInlineSpan[] = [];
   let i = 0;
   let textBuf = '';
 
   const flushText = () => {
-    if (textBuf) {
-      spans.push({ type: 'text', text: textBuf });
-      textBuf = '';
-    }
+    if (!textBuf) return;
+    spans.push(...parseMarkdownEmphasis(textBuf));
+    textBuf = '';
   };
 
   while (i < raw.length) {
@@ -53,28 +148,37 @@ export function parseInlineSpans(raw: string): ContentInlineSpan[] {
       }
       flushText();
       const latex = sanitizeLatexSource(raw.slice(i + 2, end));
-      if (latex) spans.push({ type: 'inline_math', latex });
+      if (latex && isPlausibleInlineLatex(latex)) {
+        spans.push({ type: 'inline_math', latex });
+      } else {
+        textBuf += raw.slice(i, end + 2);
+      }
       i = end + 2;
       continue;
     }
 
-    // Display $$ must never start an inline $…$ span (second $ would otherwise
-    // swallow headings / later prose until the next dollar).
+    // Display $$ must never start an inline $…$ span.
     if (raw[i] === '$' && raw[i + 1] === '$') {
       textBuf += '$$';
       i += 2;
       continue;
     }
 
-    // $...$ (not $$ and not currency)
-    if (raw[i] === '$' && !isCurrencyContext(raw, i)) {
+    // Escaped \$
+    if (raw[i] === '$' && isEscapedDollar(raw, i)) {
+      textBuf += '$';
+      i += 1;
+      continue;
+    }
+
+    // $...$ — allow leading digits when LaTeX follows (e.g. $0.50\,\mathrm{kg}$)
+    if (raw[i] === '$') {
       let j = i + 1;
       while (j < raw.length) {
         if (raw[j] === '\\') {
           j += 2;
           continue;
         }
-        // Do not treat the opening half of $$ as a closer.
         if (raw[j] === '$' && raw[j + 1] === '$') {
           j += 2;
           continue;
@@ -83,11 +187,21 @@ export function parseInlineSpans(raw: string): ContentInlineSpan[] {
         j += 1;
       }
       if (j < raw.length && raw[j] === '$') {
-        flushText();
-        const latex = sanitizeLatexSource(raw.slice(i + 1, j));
-        if (latex) spans.push({ type: 'inline_math', latex });
-        i = j + 1;
-        continue;
+        const inner = raw.slice(i + 1, j);
+        if (isCurrencyAmount(inner)) {
+          // Keep `$12.50` as literal text
+          textBuf += `$${inner}$`;
+          i = j + 1;
+          continue;
+        }
+        if (isPlausibleInlineLatex(inner)) {
+          flushText();
+          const latex = sanitizeLatexSource(inner);
+          if (latex) spans.push({ type: 'inline_math', latex });
+          i = j + 1;
+          continue;
+        }
+        // Runaway / prose span — do not swallow; keep opening $ as text.
       }
     }
 

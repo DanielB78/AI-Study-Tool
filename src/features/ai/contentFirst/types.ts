@@ -3,8 +3,13 @@
  * No canvas coordinates — compiled into existing CanvasOperations.
  */
 
+export type ContentTextSpanStyle = {
+  bold?: boolean;
+  italic?: boolean;
+};
+
 export type ContentInlineSpan =
-  | { type: 'text'; text: string }
+  | { type: 'text'; text: string; style?: ContentTextSpanStyle }
   | { type: 'inline_math'; latex: string };
 
 export type ContentHeadingNode = {
