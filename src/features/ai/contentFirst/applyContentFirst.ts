@@ -25,6 +25,7 @@ import {
   executeCanvasOperations,
   type ExecuteAgentOpsResult,
 } from '../agent/executor';
+import { resolveCascadeCollisions } from '../agent/collisionResolver';
 import { parseContentDocument } from './contentParser';
 import {
   compileContentDocument,
@@ -190,6 +191,8 @@ export function handleContentFirstResponse(
     for (const batch of parsed.batches) {
       const result = executeCanvasOperations(batch, target, {
         manageInteraction: false,
+        // Defer cascade until every batch is placed so anchors are complete.
+        resolveCollisions: false,
       });
       merged.createdIds.push(...result.createdIds);
       merged.updatedIds.push(...result.updatedIds);
@@ -199,6 +202,10 @@ export function handleContentFirstResponse(
         merged.planRefMap?.set(k, v);
       }
       if (result.layoutDebug) merged.layoutDebug = result.layoutDebug;
+    }
+    const anchors = new Set([...merged.createdIds, ...merged.updatedIds]);
+    if (anchors.size > 0) {
+      resolveCascadeCollisions(target, anchors);
     }
     committed = true;
   } finally {

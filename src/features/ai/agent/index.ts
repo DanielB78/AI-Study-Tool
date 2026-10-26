@@ -50,6 +50,13 @@ export { executeCanvasOperations, type ExecuteAgentOpsResult } from './executor'
 export { executeAgentOperationsLive, createLiveAgentExecutorTarget } from './liveExecutor';
 export { resolvePlacement, DEFAULT_ELEMENT_GAP } from './placementService';
 export {
+  dominantCollisionPush,
+  resolveCascadeCollisions,
+  type CollisionPush,
+  type CollisionSide,
+  type CascadeCollisionResult,
+} from './collisionResolver';
+export {
   CANVAS_EDITOR_SYSTEM_PROMPT,
   CANVAS_EDITOR_RESPONSE_INSTRUCTIONS,
   CANVAS_AGENT_DOCUMENT_ID,
