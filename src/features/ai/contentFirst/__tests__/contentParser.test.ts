@@ -144,4 +144,35 @@ $$
     expect(looksLikeContentMarkdown('# Hello\n\nWorld')).toBe(true);
     expect(looksLikeContentMarkdown('{"operations":[]}')).toBe(false);
   });
+
+  it('unwraps a ```markdown document fence (ChatGPT pasteable wrapper)', () => {
+    const doc = parseContentDocument(`\`\`\`markdown
+# Title
+
+Hello $\\omega$.
+
+$$
+F=-kx
+$$
+\`\`\`
+`);
+    expect(doc.nodes.map((n) => n.type)).toEqual([
+      'heading',
+      'paragraph',
+      'equation',
+    ]);
+  });
+
+  it('unwraps a markdown fence even with a short ChatGPT preamble', () => {
+    const doc = parseContentDocument(`Here is the document:
+
+\`\`\`markdown
+## Sec
+
+Body text.
+\`\`\`
+`);
+    expect(doc.nodes[0]).toMatchObject({ type: 'heading', text: 'Sec' });
+    expect(doc.nodes[1]).toMatchObject({ type: 'paragraph', text: 'Body text.' });
+  });
 });

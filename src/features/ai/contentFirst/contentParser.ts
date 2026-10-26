@@ -94,11 +94,20 @@ function spansToPlain(spans: ContentInlineSpan[]): string {
 
 function stripFenceAndNormalize(raw: string): string {
   let text = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
-  // Strip a wrapping ```markdown / ```md fence if the whole response is fenced.
-  const wrapped = /^```(?:markdown|md|text)?\s*\n([\s\S]*?)\n```\s*$/i.exec(
-    text.trim(),
+  const trimmed = text.trim();
+  // Preferred: whole response is one ```markdown fence.
+  const whole = /^```(?:markdown|md|text)?\s*\n([\s\S]*?)\n```\s*$/i.exec(
+    trimmed,
   );
-  if (wrapped) text = wrapped[1]!;
+  if (whole) return whole[1]!;
+  // ChatGPT often adds a short preamble ("Here is the document:") before the fence.
+  // Prefer the largest ```markdown / ```md fenced body when present.
+  const fenced =
+    /```(?:markdown|md)\s*\n([\s\S]*?)\n```/i.exec(trimmed) ??
+    /```text\s*\n([\s\S]*?)\n```/i.exec(trimmed);
+  if (fenced?.[1] != null && fenced[1].trim().length > 0) {
+    return fenced[1];
+  }
   return text;
 }
 
