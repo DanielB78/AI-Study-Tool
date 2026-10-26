@@ -175,4 +175,56 @@ Body text.
     expect(doc.nodes[0]).toMatchObject({ type: 'heading', text: 'Sec' });
     expect(doc.nodes[1]).toMatchObject({ type: 'paragraph', text: 'Body text.' });
   });
+
+  it('does not let $$ open an inline math span that swallows headings', () => {
+    const spans = parseInlineSpans(`total energy.
+
+### Step 1: Angular Frequency
+
+$$
+\\omega=1
+$$
+`);
+    expect(spans.every((s) => s.type === 'text' || (s.type === 'inline_math' && !s.latex.includes('###')))).toBe(
+      true,
+    );
+    expect(spans.some((s) => s.type === 'text' && s.text.includes('### Step 1'))).toBe(true);
+  });
+
+  it('expands :::example bodies with display math into equation nodes', () => {
+    const doc = parseContentDocument(String.raw`:::example
+A mass of $0.50\,\mathrm{kg}$ is released.
+
+Calculate total energy.
+
+### Step 1: Angular Frequency
+
+$$
+\begin{aligned}
+\omega&=\sqrt{\frac{k}{m}}\\
+&=20\,\mathrm{rad/s}
+\end{aligned}
+$$
+
+### Step 2: Period
+
+$$
+T=\frac{2\pi}{\omega}
+$$
+:::
+`);
+    const types = doc.nodes.map((n) => n.type);
+    expect(types[0]).toBe('component');
+    expect(types).toContain('equation');
+    expect(doc.nodes.filter((n) => n.type === 'equation')).toHaveLength(2);
+    for (const n of doc.nodes) {
+      if (n.type === 'component' || n.type === 'paragraph') {
+        for (const s of n.spans) {
+          if (s.type === 'inline_math') {
+            expect(s.latex).not.toMatch(/#/);
+          }
+        }
+      }
+    }
+  });
 });

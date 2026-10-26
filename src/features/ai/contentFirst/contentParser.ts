@@ -58,11 +58,24 @@ export function parseInlineSpans(raw: string): ContentInlineSpan[] {
       continue;
     }
 
+    // Display $$ must never start an inline $…$ span (second $ would otherwise
+    // swallow headings / later prose until the next dollar).
+    if (raw[i] === '$' && raw[i + 1] === '$') {
+      textBuf += '$$';
+      i += 2;
+      continue;
+    }
+
     // $...$ (not $$ and not currency)
-    if (raw[i] === '$' && raw[i + 1] !== '$' && !isCurrencyContext(raw, i)) {
+    if (raw[i] === '$' && !isCurrencyContext(raw, i)) {
       let j = i + 1;
       while (j < raw.length) {
         if (raw[j] === '\\') {
+          j += 2;
+          continue;
+        }
+        // Do not treat the opening half of $$ as a closer.
+        if (raw[j] === '$' && raw[j + 1] === '$') {
           j += 2;
           continue;
         }
@@ -401,6 +414,190 @@ export function tokenizeContentBlocks(source: string): Block[] {
   return blocks;
 }
 
+function pushDisplayMath(
+  latexRaw: string,
+  sectionId: string | null,
+  nodes: ContentDocumentNode[],
+  warnings: string[],
+): void {
+  const latex = sanitizeLatexSource(latexRaw);
+  if (!latex) {
+    warnings.push('Skipped empty display-math block.');
+    return;
+  }
+  const check = validateLatex(latex, true);
+  if (!check.ok) {
+    throw new ContentParseError(
+      'invalid_latex',
+      `Invalid display LaTeX: ${check.error ?? 'unknown error'}`,
+    );
+  }
+  nodes.push({
+    type: 'equation',
+    latex,
+    sectionId,
+  });
+}
+
+function pushGraph(
+  body: string,
+  sectionId: string | null,
+  nodes: ContentDocumentNode[],
+): void {
+  const g = parseGraphBody(body);
+  nodes.push({
+    type: 'graph',
+    title: g.title,
+    expressions: g.expressions,
+    xMin: g.xMin,
+    xMax: g.xMax,
+    yMin: g.yMin,
+    yMax: g.yMax,
+    xLabel: g.xLabel,
+    yLabel: g.yLabel,
+    sectionId,
+  });
+}
+
+/**
+ * Expand :::definition|example|warning|exercise bodies that contain headings /
+ * display math / graphs into ordered IR nodes. The first prose block becomes the
+ * styled component TextElement; equations stay EquationElements (reading order).
+ */
+function expandComponentBody(
+  component: ContentComponentKind,
+  body: string,
+  sectionId: string | null,
+  nodes: ContentDocumentNode[],
+  warnings: string[],
+): void {
+  const inner = tokenizeContentBlocks(body);
+  if (inner.length === 0) {
+    warnings.push(`Skipped empty :::${component} block.`);
+    return;
+  }
+
+  const hasStructure = inner.some(
+    (b) =>
+      b.kind === 'display_math' ||
+      b.kind === 'heading' ||
+      b.kind === 'graph' ||
+      b.kind === 'component',
+  );
+
+  // Simple body (paragraphs/lists only) → one styled component node.
+  if (!hasStructure) {
+    const spans = parseInlineSpans(body);
+    const text = spansToPlain(spans);
+    if (!text) {
+      warnings.push(`Skipped empty :::${component} block.`);
+      return;
+    }
+    nodes.push({
+      type: 'component',
+      component,
+      spans,
+      text,
+      sectionId,
+    });
+    return;
+  }
+
+  let chromeEmitted = false;
+  const emitChromeFrom = (spans: ContentInlineSpan[], text: string) => {
+    if (!text) return false;
+    if (!chromeEmitted) {
+      nodes.push({
+        type: 'component',
+        component,
+        spans,
+        text,
+        sectionId,
+      });
+      chromeEmitted = true;
+      return true;
+    }
+    nodes.push({
+      type: 'paragraph',
+      spans,
+      text,
+      sectionId,
+    });
+    return true;
+  };
+
+  for (const b of inner) {
+    switch (b.kind) {
+      case 'paragraph': {
+        const spans = parseInlineSpans(b.body);
+        emitChromeFrom(spans, spansToPlain(spans));
+        break;
+      }
+      case 'heading': {
+        // Step headings inside components stay in-section as paragraphs (no new sec_*).
+        const spans = parseInlineSpans(b.body);
+        const plain = spansToPlain(spans);
+        if (!plain) break;
+        emitChromeFrom(spans, plain);
+        break;
+      }
+      case 'list': {
+        const items = b.items.map((item) => {
+          const spans = parseInlineSpans(item);
+          return { spans, text: spansToPlain(spans) };
+        });
+        const text = items.map((it) => it.text).join('\n');
+        if (!chromeEmitted) {
+          nodes.push({
+            type: 'component',
+            component,
+            spans: [{ type: 'text', text }],
+            text,
+            sectionId,
+          });
+          chromeEmitted = true;
+        } else {
+          nodes.push({
+            type: 'list',
+            ordered: b.ordered,
+            items,
+            sectionId,
+          });
+        }
+        break;
+      }
+      case 'display_math':
+        pushDisplayMath(b.latex, sectionId, nodes, warnings);
+        break;
+      case 'graph':
+        pushGraph(b.body, sectionId, nodes);
+        break;
+      case 'code': {
+        const text = b.body.trim();
+        if (text) emitChromeFrom([{ type: 'text', text }], text);
+        break;
+      }
+      case 'component':
+        // Nested markers: recurse with same section (no new outer chrome required).
+        expandComponentBody(b.component, b.body, sectionId, nodes, warnings);
+        break;
+    }
+  }
+
+  if (!chromeEmitted && nodes.length === 0) {
+    warnings.push(`Skipped empty :::${component} block.`);
+  } else if (!chromeEmitted) {
+    // Structure-only body (e.g. only equations): still emit a labelled chrome node first.
+    nodes.unshift({
+      type: 'component',
+      component,
+      spans: [{ type: 'text', text: '' }],
+      text: '',
+      sectionId,
+    });
+  }
+}
+
 /**
  * Parse a full LLM Markdown response into an ordered ContentDocument.
  * Validates LaTeX and graph expressions; throws ContentParseError on hard failures.
@@ -458,55 +655,21 @@ export function parseContentDocument(raw: string): ContentDocument {
         break;
       }
       case 'display_math': {
-        const latex = sanitizeLatexSource(block.latex);
-        if (!latex) {
-          warnings.push('Skipped empty display-math block.');
-          break;
-        }
-        const check = validateLatex(latex, true);
-        if (!check.ok) {
-          throw new ContentParseError(
-            'invalid_latex',
-            `Invalid display LaTeX: ${check.error ?? 'unknown error'}`,
-          );
-        }
-        nodes.push({
-          type: 'equation',
-          latex,
-          sectionId: currentSectionId,
-        });
+        pushDisplayMath(block.latex, currentSectionId, nodes, warnings);
         break;
       }
       case 'graph': {
-        const g = parseGraphBody(block.body);
-        nodes.push({
-          type: 'graph',
-          title: g.title,
-          expressions: g.expressions,
-          xMin: g.xMin,
-          xMax: g.xMax,
-          yMin: g.yMin,
-          yMax: g.yMax,
-          xLabel: g.xLabel,
-          yLabel: g.yLabel,
-          sectionId: currentSectionId,
-        });
+        pushGraph(block.body, currentSectionId, nodes);
         break;
       }
       case 'component': {
-        const spans = parseInlineSpans(block.body);
-        const text = spansToPlain(spans);
-        if (!text) {
-          warnings.push(`Skipped empty :::${block.component} block.`);
-          break;
-        }
-        nodes.push({
-          type: 'component',
-          component: block.component,
-          spans,
-          text,
-          sectionId: currentSectionId,
-        });
+        expandComponentBody(
+          block.component,
+          block.body,
+          currentSectionId,
+          nodes,
+          warnings,
+        );
         break;
       }
       case 'code': {
@@ -522,6 +685,15 @@ export function parseContentDocument(raw: string): ContentDocument {
         }
         break;
       }
+    }
+  }
+
+  // Drop empty chrome components that only existed as labels for equation-only bodies
+  // when they have empty text — compiler still wants a label; keep with placeholder.
+  for (const n of nodes) {
+    if (n.type === 'component' && !n.text.trim()) {
+      n.text = n.component.charAt(0).toUpperCase() + n.component.slice(1);
+      n.spans = [{ type: 'text', text: n.text }];
     }
   }
 
