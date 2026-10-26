@@ -761,6 +761,8 @@ export function parseContentDocument(raw: string): ContentDocument {
 /** Heuristic: does this look like JSON operations rather than Markdown content? */
 export function looksLikeOperationsJson(raw: string): boolean {
   const t = raw.trim();
+  // :::json directives are content-first Markdown extensions, not ops arrays.
+  if (/^:::json\s*$/m.test(t)) return false;
   if (t.startsWith('{') || t.startsWith('[')) return true;
   if (/```json/i.test(t.slice(0, 80))) return true;
   return false;
@@ -771,10 +773,11 @@ export function looksLikeContentMarkdown(raw: string): boolean {
   if (looksLikeOperationsJson(raw)) return false;
   const t = raw.trim();
   if (!t) return false;
+  if (/^:::json\s*$/m.test(t)) return true;
   if (/^#{1,3}\s+/m.test(t)) return true;
   if (/\$\$/.test(t) || /\\\[[\s\S]*?\\\]/.test(t)) return true;
   if (/^:::(graph|definition|example|warning|exercise)\s*$/m.test(t)) return true;
-  // Multi-paragraph prose without JSON keys
+  // Multi-paragraph prose without JSON operation arrays
   if (!/"operations"\s*:/.test(t) && t.split(/\n\n+/).length >= 2) return true;
   return false;
 }

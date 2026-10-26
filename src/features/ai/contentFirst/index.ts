@@ -3,6 +3,9 @@ export type {
   ContentDocumentNode,
   ContentInlineSpan,
   ContentComponentKind,
+  ContentJsonInstruction,
+  ContentJsonSegment,
+  ContentFirstEnvelope,
 } from './types';
 export { ContentParseError } from './types';
 
@@ -15,10 +18,22 @@ export {
 } from './contentParser';
 
 export {
+  splitContentFirstEnvelope,
+  stripContentFence,
+  hasJsonDirectives,
+} from './jsonDirective';
+
+export {
   compileContentDocument,
   type CompileContentResult,
   type ContentAssociationPlan,
 } from './compileContentDocument';
+
+export {
+  compileJsonSegment,
+  compileJsonSegments,
+  documentToSingleRichText,
+} from './compileJsonInstructions';
 
 export {
   getAiGenerationMode,

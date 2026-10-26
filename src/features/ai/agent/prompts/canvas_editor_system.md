@@ -5,9 +5,10 @@
 > Low/Medium profiles are not implemented yet. "High" is a behavioral profile, not an LLM reasoning-effort setting.
 >
 > On this experimental branch the **default** generation path is content-first Markdown
-> (`src/features/ai/contentFirst/content_first_system.md`). This JSON-operations document
-> remains available for editing existing elements and comparison via
-> `VITE_AI_GENERATION_MODE=operations` or the RAG debug **JSON ops** toggle.
+> (`src/features/ai/contentFirst/content_first_system.md`), including `:::json` for
+> `edit` / `add_text` against existing IDs. This full JSON-operations document
+> remains available for richer editing via `VITE_AI_GENERATION_MODE=operations`
+> or the RAG debug **JSON ops** toggle.
 > Do not merge both full prompts into one system instruction.
 
 ## ROLE

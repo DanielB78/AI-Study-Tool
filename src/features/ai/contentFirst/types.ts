@@ -91,7 +91,13 @@ export class ContentParseError extends Error {
     | 'unclosed_marker'
     | 'invalid_graph'
     | 'invalid_latex'
-    | 'invalid_expression';
+    | 'invalid_expression'
+    | 'invalid_json'
+    | 'unsupported_action'
+    | 'missing_target'
+    | 'wrong_target_type'
+    | 'empty_body'
+    | 'invalid_instruction';
 
   constructor(code: ContentParseError['code'], message: string) {
     super(message);
@@ -99,3 +105,36 @@ export class ContentParseError extends Error {
     this.code = code;
   }
 }
+
+/** JSON directive actions supported in content-first mode. */
+export type ContentJsonEditAction = {
+  action: 'edit';
+  target_id: string;
+};
+
+export type ContentJsonAddTextAction = {
+  action: 'add_text';
+  target_id: string;
+  position: 'above' | 'below';
+};
+
+export type ContentJsonInstruction =
+  | ContentJsonEditAction
+  | ContentJsonAddTextAction;
+
+export type ContentJsonSegment = {
+  instruction: ContentJsonInstruction;
+  /** Markdown body belonging to this instruction (not including the JSON block). */
+  markdown: string;
+};
+
+/**
+ * Top-level split of a content-first response:
+ * optional ordinary Markdown preamble + zero or more :::json segments.
+ */
+export type ContentFirstEnvelope = {
+  preamble: string;
+  segments: ContentJsonSegment[];
+  /** Fence-stripped source preserved for diagnostics. */
+  raw: string;
+};

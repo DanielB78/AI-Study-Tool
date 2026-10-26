@@ -964,12 +964,19 @@ export function createRagDebugStore() {
           if (state.selectedStructureId === null && state.lastBuiltPrompt == null) {
             get().captureStructureSnapshot();
           }
-          const { allowedElementIds, elementTypes, selectedStructure } =
-            buildParseContextFromState(get());
+          const {
+            allowedElementIds,
+            elementTypes,
+            selectedStructure,
+            graphExpressionIds,
+            graphPointIds,
+          } = buildParseContextFromState(get());
           const parsed = parseAgentResponsePlan(state.pastedResponse, {
             allowedElementIds,
             elementTypes,
             selectedStructure,
+            graphExpressionIds,
+            graphPointIds,
           });
           let layoutDebug: LayoutDebugInfo | null = null;
           if (parsed.response.layout) {
@@ -1302,28 +1309,35 @@ export function createRagDebugStore() {
             })),
           });
 
-          const allowedElementIds = new Set(
-            context.allElements.map((e) => e.element_id),
-          );
-          const elementTypes = new Map(
-            context.allElements.map(
-              (e) => [e.element_id, e.element_type] as const,
-            ),
-          );
+          const {
+            allowedElementIds,
+            elementTypes,
+            graphExpressionIds,
+            graphPointIds,
+          } = buildParseContextFromState(get());
+          // Ensure submitted RAG context ids remain allowed even if selection changed.
+          for (const el of context.allElements) {
+            allowedElementIds.add(el.element_id);
+            if (!elementTypes.has(el.element_id)) {
+              elementTypes.set(el.element_id, el.element_type);
+            }
+          }
           let applied;
           try {
             applied = handleAgentResponse(result.text, {
               allowedElementIds,
               elementTypes,
+              graphExpressionIds,
+              graphPointIds,
               selectedStructure: resolveSnapshottedStructure(
                 submitted.selectedStructureId,
               ),
             });
           } catch (err) {
             const message =
-              err instanceof CanvasAgentParseError
+              err instanceof CanvasAgentParseError || err instanceof Error
                 ? err.message
-                : 'LLM response was not valid canvas operations JSON.';
+                : 'LLM response was not valid canvas content.';
             set({ sending: false, error: message });
             useAiStore.setState({
               status: 'error',

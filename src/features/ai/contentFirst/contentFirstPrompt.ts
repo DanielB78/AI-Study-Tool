@@ -163,6 +163,42 @@ Do **not** use \`:::definition\`, \`:::example\`, \`:::warning\`, or \`:::exerci
 Write that material as ordinary headings and paragraphs instead.
 (Only \`:::graph\` markers are used for plots.)
 
+## Editing existing elements (\`:::json\`)
+
+Use \`:::json\` **only** when the user asks to change an existing element or insert text above/below one.
+Keep all educational content in Markdown after the JSON block — never inside the JSON.
+Use stable IDs from CANVAS CONTEXT only — never invent IDs.
+Do **not** put coordinates, sizes, fonts, colours, rows, or columns in JSON.
+
+### Edit (replace content of an existing element)
+
+\`\`\`
+:::json
+{"action":"edit","target_id":"EXISTING_ID"}
+:::
+
+Markdown body matching the target type
+\`\`\`
+
+- TextElement → headings/paragraphs/lists/inline \`$…$\` (display math stays inside the text)
+- EquationElement → exactly one \`$$\` … \`$$\` block
+- GraphElement → one \`:::graph\` … \`:::\` marker (omit unchanged settings)
+
+### Add explanatory text above/below
+
+\`\`\`
+:::json
+{"action":"add_text","target_id":"EXISTING_ID","position":"below"}
+:::
+
+Markdown explanation
+\`\`\`
+
+\`position\` is \`above\` or \`below\`. The app creates and places the TextElement.
+
+Multiple \`:::json\` blocks may appear in one response; each owns the Markdown until the next \`:::json\`.
+Ordinary new lessons still use plain Markdown with **no** \`:::json\`.
+
 ## Educational quality
 
 - Accurate mathematics and physics; define symbols; state assumptions when needed
@@ -170,18 +206,19 @@ Write that material as ordinary headings and paragraphs instead.
 
 ## What the application does
 
-Creates Text / Equation / Graph elements, keeps reading order, centres equations, handles sizing, spacing, undo and persistence.
+Creates Text / Equation / Graph elements, keeps reading order, centres equations, handles sizing, spacing, undo and persistence. Applies \`:::json\` edit/add_text via existing update/create operations.
 `;
 
 export const CONTENT_FIRST_RESPONSE_INSTRUCTIONS = [
   'Wrap the entire lesson in one ```markdown ... ``` fence so it stays copyable as raw text.',
   'Put no commentary outside that fence.',
-  'Do not emit canvas-operation JSON or create_* operations.',
+  'Do not emit canvas-operation JSON arrays or create_* operations for ordinary new content.',
   'Write paragraphs as continuous prose — do not insert a blank line after every sentence or wrapped line.',
   'Display math: opening $$ on its own line, LaTeX body, closing $$ on its own line — always paired.',
   'Inline math: paired $...$ only. Prefer braces in superscripts/subscripts and \\frac{a}{b}.',
   'Do not use :::definition / :::example / :::warning / :::exercise markers.',
   'Do not invent coordinates, sizes, parent IDs, or layout instructions.',
+  'When editing or inserting relative to an existing element, use :::json with action edit or add_text and existing context IDs only.',
 ].join(' ');
 
 /** Soft length check — backend ChatRequest.system_instruction max is 8000. */

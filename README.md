@@ -62,7 +62,7 @@ Two generation paths share the same canonical canvas elements:
 
 **Operations mode** — the LLM is a planner and returns JSON only (`create_text`, `create_equation`, `create_graph`, updates, associations). Docs: `src/features/ai/agent/prompts/canvas_editor_system.md`.
 
-**Content-first mode** — the LLM writes Markdown (`#` headings, paragraphs, `$` / `$$` math, `:::graph`, optional `:::definition|example|warning|exercise`). A deterministic parser compiles that into the same create ops + chronological single-column layout. Docs: `src/features/ai/contentFirst/content_first_system.md` (runtime: `contentFirstPrompt.ts`; mirrored under `backend/app/agent/prompts/`).
+**Content-first mode** — the LLM writes Markdown (`#` headings, paragraphs, `$` / `$$` math, `:::graph`). Optional `:::json` directives support `edit` / `add_text` (above|below) against existing element IDs from context; educational content stays in the Markdown body after each JSON block. A deterministic parser compiles that into the same create/update ops (chronological layout for new content; relative placement for `add_text`). Docs: `src/features/ai/contentFirst/content_first_system.md` (runtime: `contentFirstPrompt.ts`; mirrored under `backend/app/agent/prompts/`).
 
 The app owns IDs, coordinates, collision avoidance, history, and RAG reindex in both modes.
 

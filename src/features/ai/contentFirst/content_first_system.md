@@ -37,4 +37,93 @@ No commentary outside the fence.
 Do **not** use `:::definition`, `:::example`, `:::warning`, or `:::exercise`.
 Use ordinary headings/paragraphs instead.
 
-Do not emit canvas-operation JSON.
+## Editing and relative text (`:::json`)
+
+Use `:::json` **only** for targeted edits or above/below text insertion.
+Educational content stays in Markdown after the JSON — never inside JSON.
+Use existing IDs from CANVAS CONTEXT only. Never invent IDs, coordinates, sizes, fonts, colours, rows, or columns.
+
+### Ordinary generation (no JSON)
+
+```markdown
+# Title
+
+Prose with inline $\omega$.
+
+$$
+F=-kx
+$$
+
+:::graph
+expression: cos(x)
+title: Displacement
+:::
+```
+
+### Edit TextElement
+
+```text
+:::json
+{"action":"edit","target_id":"text_12"}
+:::
+
+## The Restoring Force
+
+A mass on a spring experiences $F=-kx$.
+```
+
+### Edit EquationElement
+
+```text
+:::json
+{"action":"edit","target_id":"equation_5"}
+:::
+
+$$
+m\frac{d^2x}{dt^2}=-kx
+$$
+```
+
+Exactly one `$$` block per equation edit.
+
+### Edit GraphElement
+
+```text
+:::json
+{"action":"edit","target_id":"graph_9"}
+:::
+
+:::graph
+expression: cos(x)
+expression: -sin(x)
+title: Displacement and Velocity
+x_label: Phase
+y_label: Normalised Value
+:::
+```
+
+Omitted graph fields keep their existing values. Expressions in the marker replace the expression set.
+
+### Add text above / below
+
+```text
+:::json
+{"action":"add_text","target_id":"graph_9","position":"above"}
+:::
+
+The following graph compares displacement and velocity.
+```
+
+```text
+:::json
+{"action":"add_text","target_id":"equation_5","position":"below"}
+:::
+
+The negative sign means acceleration acts towards equilibrium.
+```
+
+### Multiple instructions
+
+Several `:::json` blocks may appear in one response; each owns the Markdown until the next `:::json`.
+
+Do **not** emit canvas-operation JSON arrays (`create_text`, `operations`, …) in this mode.

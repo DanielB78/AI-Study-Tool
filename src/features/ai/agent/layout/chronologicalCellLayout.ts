@@ -84,7 +84,18 @@ type CreatableWithLayout = CanvasOperation & {
 };
 
 function creatableOps(operations: readonly CanvasOperation[]): CreatableWithLayout[] {
-  return operations.filter(isGridCreatableOp) as CreatableWithLayout[];
+  // Creates with explicit relative/absolute placement resolve at create time
+  // (e.g. content-first :::json add_text). Keep them out of the chronological grid.
+  return operations.filter((op) => {
+    if (!isGridCreatableOp(op)) return false;
+    if (
+      op.placement.mode === 'relative_to_element' ||
+      op.placement.mode === 'absolute'
+    ) {
+      return false;
+    }
+    return true;
+  }) as CreatableWithLayout[];
 }
 
 /**
