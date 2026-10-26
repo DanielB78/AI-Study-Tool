@@ -104,7 +104,7 @@ y_label: Normalised Value
 
 Omitted graph fields keep their existing values. Expressions in the marker replace the expression set.
 
-### Add text above / below
+### Add content above / below
 
 ```text
 :::json
@@ -119,8 +119,16 @@ The following graph compares displacement and velocity.
 {"action":"add_text","target_id":"equation_5","position":"below"}
 :::
 
+## Why the sign matters
+
 The negative sign means acceleration acts towards equilibrium.
+
+$$
+a=-\omega^{2}x
+$$
 ```
+
+The Markdown body is expanded like ordinary generation into separate Text / Equation / Graph elements and stacked above or below the target — not collapsed into one text box.
 
 ### Multiple instructions
 

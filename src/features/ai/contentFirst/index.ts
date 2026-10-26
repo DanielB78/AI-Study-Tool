@@ -32,6 +32,8 @@ export {
 export {
   compileJsonSegment,
   compileJsonSegments,
+  compileJsonEditSegment,
+  compileAddTextBatch,
   documentToSingleRichText,
 } from './compileJsonInstructions';
 

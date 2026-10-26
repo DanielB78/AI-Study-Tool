@@ -241,27 +241,50 @@ The following graph compares displacement and velocity.
     expect(newText).toBeTruthy();
     expect(g).toBeTruthy();
     if (newText && g) {
-      expect(newText.y + newText.height).toBeLessThanOrEqual(g.y);
+      expect(newText.y + newText.height).toBeLessThanOrEqual(g.y + 1);
       expect(newText.text).toContain('compares displacement');
+      // Stay in the same column — do not slide far right.
+      expect(Math.abs(newText.x - g.x)).toBeLessThan(80);
     }
   });
 
-  it('F — add_text below an EquationElement', () => {
+  it('F — add_text below an EquationElement expands equations separately', () => {
     const eq = seedEquation();
     reset([eq]);
     const raw = `:::json
 {"action":"add_text","target_id":"equation_5","position":"below"}
 :::
 
+## Why the sign matters
+
 The negative sign indicates restoring acceleration.
+
+$$
+a=-\\\\frac{k}{m}x
+$$
+
+Closing prose after the equation.
 `;
     handleContentFirstResponse(raw, ctxFor([eq]));
     const els = useCanvasStore.getState().document.elements;
-    const newText = els.find((e) => e.type === 'text');
     const equation = els.find((e) => e.id === 'equation_5');
-    expect(newText).toBeTruthy();
-    if (newText && equation) {
-      expect(newText.y).toBeGreaterThanOrEqual(equation.y + equation.height);
+    const newEqs = els.filter(
+      (e) => e.type === 'equation' && e.id !== 'equation_5',
+    );
+    const newTexts = els.filter((e) => e.type === 'text');
+    expect(newEqs.length).toBeGreaterThanOrEqual(1);
+    expect(newTexts.length).toBeGreaterThanOrEqual(2);
+    // Not one giant text box — body was split across element types.
+    expect(els.length).toBeGreaterThan(2);
+    if (equation) {
+      const below = els.filter((e) => e.id !== 'equation_5');
+      expect(below.every((e) => e.y >= equation.y + equation.height - 1)).toBe(
+        true,
+      );
+      // Group stays near the target column (equations may be centred within it).
+      const xs = below.map((e) => e.x);
+      expect(Math.min(...xs)).toBeGreaterThan(equation.x - 80);
+      expect(Math.max(...xs)).toBeLessThan(equation.x + equation.width + 80);
     }
   });
 
@@ -288,8 +311,74 @@ Consequence below.
     const original = texts.find((e) => e.id === 'text_12')!;
     const above = texts.find((e) => e.text.includes('Intro above'))!;
     const below = texts.find((e) => e.text.includes('Consequence below'))!;
-    expect(above.y + above.height).toBeLessThanOrEqual(original.y);
-    expect(below.y).toBeGreaterThanOrEqual(original.y + original.height);
+    expect(above.y + above.height).toBeLessThanOrEqual(original.y + 1);
+    expect(below.y).toBeGreaterThanOrEqual(original.y + original.height - 1);
+  });
+
+  it('add_text with mixed Markdown does not collapse into one TextElement', () => {
+    const text = seedText();
+    reset([text]);
+    const raw = `:::json
+{"action":"add_text","target_id":"text_12","position":"below"}
+:::
+
+### Why oscillations?
+
+Hooke's law gives $F=-kx$.
+
+$$
+a=-\\\\omega^{2}x
+$$
+
+Sinusoidal solutions follow.
+`;
+    const result = handleContentFirstResponse(raw, ctxFor([text]));
+    const els = useCanvasStore.getState().document.elements;
+    expect(els.some((e) => e.type === 'equation')).toBe(true);
+    expect(els.filter((e) => e.type === 'text').length).toBeGreaterThanOrEqual(2);
+    expect(
+      result.batches.some(
+        (b) =>
+          b.layout?.type === 'chronological_grid' &&
+          b.layout.placement.mode === 'relative_to_element',
+      ),
+    ).toBe(true);
+  });
+
+  it('edit that grows a text box pushes the overlapping neighbour down', () => {
+    const upper = seedText('text_upper', 'Short.');
+    upper.x = 40;
+    upper.y = 40;
+    upper.width = 320;
+    upper.height = 40;
+    const lower = seedText('text_lower', 'Neighbour below.');
+    lower.x = 40;
+    lower.y = 100;
+    lower.width = 320;
+    lower.height = 60;
+    reset([upper, lower]);
+
+    const raw = `:::json
+{"action":"edit","target_id":"text_upper"}
+:::
+
+## A much longer explanation
+
+This paragraph is intentionally longer so the edited text box grows downward
+and would otherwise cover the neighbour's hit target. Extra sentences keep
+adding height: Hooke's law, Newton's second law, and the resulting differential
+equation of motion for the oscillator all belong in this single TextElement edit.
+`;
+    handleContentFirstResponse(raw, ctxFor([upper, lower]));
+    const els = useCanvasStore.getState().document.elements;
+    const u = els.find((e) => e.id === 'text_upper');
+    const l = els.find((e) => e.id === 'text_lower');
+    expect(u?.type).toBe('text');
+    expect(l?.type).toBe('text');
+    if (u?.type === 'text' && l?.type === 'text') {
+      expect(u.height).toBeGreaterThan(40);
+      expect(l.y).toBeGreaterThanOrEqual(u.y + u.height);
+    }
   });
 
   it('H — multiple instructions pair bodies correctly', () => {

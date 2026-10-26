@@ -4,6 +4,7 @@
  */
 
 import type { Camera, CanvasElement, StyleDefaults, TextElement } from '../../../types/canvas';
+import { getElementBounds, rectsIntersect } from '../../../utils/coordinates';
 import { ragSync } from '../../rag/ragSync';
 import { createAiTextElement } from '../canvas/createAiTextElement';
 import type { RichTextDocument } from '../../text/richText';
@@ -24,7 +25,7 @@ import type {
   CanvasAgentResponse,
   CanvasOperation,
 } from './operations';
-import { resolvePlacement } from './placementService';
+import { DEFAULT_ELEMENT_GAP, resolvePlacement } from './placementService';
 import type { NoteStructure } from '../../structures/types';
 import { isNodeSection, isStructureField } from '../../structures/types';
 import {
@@ -578,6 +579,55 @@ function createOne(
   return { createdIds, structureInstanceIds };
 }
 
+export type ExecuteCanvasOperationsOptions = {
+  /**
+   * When false, caller owns beginInteraction / endInteraction / rollback.
+   * Used to apply several validated plans as one undoable transaction.
+   */
+  manageInteraction?: boolean;
+};
+
+/**
+ * After a text box grows, push overlapping neighbours down so the taller content
+ * does not cover their Konva hit targets (movable-but-not-selectable).
+ */
+function pushOverlappingBelowUpdatedText(
+  target: AgentExecutorTarget,
+  updatedId: string,
+  previousBottom: number,
+): void {
+  const updated = target.getElements().find((el) => el.id === updatedId);
+  if (!updated || updated.type !== 'text') return;
+  const ub = getElementBounds(updated);
+  if (ub.y + ub.height <= previousBottom + 1) return;
+
+  const gap = DEFAULT_ELEMENT_GAP;
+  let obstacleBottom = ub.y + ub.height;
+  const others = target
+    .getElements()
+    .filter((el) => el.id !== updatedId)
+    .slice()
+    .sort((a, b) => a.y - b.y || a.zIndex - b.zIndex);
+
+  for (const el of others) {
+    const b = getElementBounds(el);
+    const overlapsX = !(b.x + b.width <= ub.x || b.x >= ub.x + ub.width);
+    if (!overlapsX) continue;
+    // Skip elements entirely above the pre-edit bottom.
+    if (b.y + b.height <= previousBottom + 1) continue;
+    if (b.y >= obstacleBottom + gap) continue;
+    // If they already clear the grown box, stop cascading.
+    if (!rectsIntersect({ ...ub, height: obstacleBottom - ub.y }, b) && b.y >= obstacleBottom + gap) {
+      continue;
+    }
+    const desiredTop = obstacleBottom + gap;
+    const dy = desiredTop - b.y;
+    if (dy <= 0.5) continue;
+    target.updateElement(el.id, (cur) => ({ ...cur, y: cur.y + dy }));
+    obstacleBottom = Math.max(obstacleBottom, b.y + dy + b.height);
+  }
+}
+
 /**
  * Execute ALL operations atomically after prior validation.
  * Accepts a bare operations list (legacy) or a full CanvasAgentResponse with layout.
@@ -585,7 +635,9 @@ function createOne(
 export function executeCanvasOperations(
   operationsOrPlan: readonly CanvasOperation[] | CanvasAgentResponse,
   target: AgentExecutorTarget,
+  options?: ExecuteCanvasOperationsOptions,
 ): ExecuteAgentOpsResult {
+  const manageInteraction = options?.manageInteraction !== false;
   const plan = asPlan(operationsOrPlan);
   const operations = plan.operations;
   if (operations.length === 0) {
@@ -630,7 +682,7 @@ export function executeCanvasOperations(
   const resolveRef = (ref: string): string | undefined =>
     planRefMap.get(ref) ?? undefined;
 
-  target.beginInteraction();
+  if (manageInteraction) target.beginInteraction();
   let committed = false;
   try {
     for (let opIndex = 0; opIndex < operations.length; opIndex++) {
@@ -638,6 +690,11 @@ export function executeCanvasOperations(
       try {
         if (op.type === 'update_text') {
           const id = op.target_element_id;
+          const before = target.getElements().find((el) => el.id === id);
+          const previousBottom =
+            before && before.type === 'text'
+              ? before.y + before.height
+              : 0;
           target.updateElement(id, (el) => {
             if (el.type !== 'text') return el;
             const richText = op.rich_text as RichTextDocument | undefined;
@@ -680,6 +737,7 @@ export function executeCanvasOperations(
               },
             };
           });
+          pushOverlappingBelowUpdatedText(target, id, previousBottom);
           updatedIds.push(id);
           continue;
         }
@@ -1048,11 +1106,14 @@ export function executeCanvasOperations(
     }
     committed = true;
   } finally {
-    if (committed) {
-      target.endInteraction();
-    } else {
-      target.rollbackInteraction();
+    if (manageInteraction) {
+      if (committed) {
+        target.endInteraction();
+      } else {
+        target.rollbackInteraction();
+      }
     }
+    // When manageInteraction is false, the caller owns commit / rollback.
   }
 
   const latest = target.getElements();

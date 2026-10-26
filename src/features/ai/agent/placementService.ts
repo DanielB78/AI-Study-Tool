@@ -112,8 +112,12 @@ export function findFreeWorldPlacement(
 }
 
 function primaryAxisForRelation(relation: PlacementRelation): 'x' | 'y' | 'both' {
+  // primaryAxis 'y' → prefer small |fx| first (slide vertically / push along the column).
+  // primaryAxis 'x' → prefer small |fy| first (slide horizontally).
+  // For above/below educational stacks, NEVER prefer sideways slides — that shoved
+  // notes far right of the column and made hit-testing feel "unselectable".
   if (relation === 'left_of' || relation === 'right_of') return 'y';
-  if (relation === 'above' || relation === 'below') return 'x';
+  if (relation === 'above' || relation === 'below') return 'y';
   return 'both';
 }
 

@@ -184,17 +184,17 @@ Markdown body matching the target type
 - EquationElement → exactly one \`$$\` … \`$$\` block
 - GraphElement → one \`:::graph\` … \`:::\` marker (omit unchanged settings)
 
-### Add explanatory text above/below
+### Add explanatory content above/below
 
 \`\`\`
 :::json
 {"action":"add_text","target_id":"EXISTING_ID","position":"below"}
 :::
 
-Markdown explanation
+Markdown explanation (headings, paragraphs, \`$$\` equations, \`:::graph\` as usual)
 \`\`\`
 
-\`position\` is \`above\` or \`below\`. The app creates and places the TextElement.
+\`position\` is \`above\` or \`below\`. The app expands the Markdown into normal Text / Equation / Graph elements and stacks them relative to the target (same as ordinary generation — not one giant text box).
 
 Multiple \`:::json\` blocks may appear in one response; each owns the Markdown until the next \`:::json\`.
 Ordinary new lessons still use plain Markdown with **no** \`:::json\`.

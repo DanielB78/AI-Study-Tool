@@ -2,24 +2,26 @@
  * Compile :::json instructions + Markdown bodies into existing CanvasOperations.
  *
  * edit → update_text / update_equation / graph edit ops
- * add_text → create_text with relative_to_element (above|below)
+ * add_text → normal lesson compile (text / equation / graph creates), placed as a
+ *            chronological group relative to the target (above|below)
  */
 
 import type {
   AgentRichTextDocument,
   AgentRichTextSpan,
+  CanvasAgentResponse,
   CanvasOperation,
-  CreateTextOperation,
   UpdateTextOperation,
 } from '../agent/operations';
 import type { ParseContext } from '../agent/parser';
 import { useCanvasStore } from '../../../store/canvasStore';
 import { parseContentDocument } from './contentParser';
+import { compileContentDocument } from './compileContentDocument';
 import type {
   ContentDocument,
   ContentDocumentNode,
   ContentInlineSpan,
-  ContentJsonInstruction,
+  ContentJsonAddTextAction,
   ContentJsonSegment,
 } from './types';
 import { ContentParseError } from './types';
@@ -372,48 +374,70 @@ function compileEditGraph(
   return ops;
 }
 
-function compileAddText(
-  instruction: Extract<ContentJsonInstruction, { action: 'add_text' }>,
+/**
+ * Compile add_text Markdown like ordinary lesson generation (separate text /
+ * equation / graph creates). The caller wraps these in chronological_grid with
+ * relative_to_element placement on the target.
+ */
+export function compileAddTextBatch(
+  instruction: ContentJsonAddTextAction,
   markdown: string,
-): CreateTextOperation {
+  ctx: ParseContext,
+): CanvasAgentResponse {
+  assertTargetAllowed(instruction.target_id, ctx);
+  const elType = resolveElementType(instruction.target_id, ctx);
+  if (elType !== 'text' && elType !== 'equation' && elType !== 'graph') {
+    throw new ContentParseError(
+      'wrong_target_type',
+      `add_text target "${instruction.target_id}" must be a TextElement, EquationElement, or GraphElement.`,
+    );
+  }
   const doc = parseBodyDocument(markdown);
-  const rich_text = documentToSingleRichText(doc);
+  if (doc.nodes.length === 0) {
+    throw new ContentParseError(
+      'empty_body',
+      `add_text on "${instruction.target_id}" produced no content nodes.`,
+    );
+  }
+  const compiled = compileContentDocument(doc);
+  if (compiled.response.operations.length === 0) {
+    throw new ContentParseError(
+      'empty_body',
+      `add_text on "${instruction.target_id}" produced no canvas operations.`,
+    );
+  }
   return {
-    type: 'create_text',
-    text: richTextPlain(rich_text),
-    rich_text,
-    layout_role: 'explanation',
-    placement: {
-      mode: 'relative_to_element',
-      anchor_element_id: instruction.target_id,
-      relation: instruction.position,
+    output_type: 'lesson',
+    layout: {
+      type: 'chronological_grid',
+      placement: {
+        mode: 'relative_to_element',
+        anchor_element_id: instruction.target_id,
+        relation: instruction.position,
+      },
     },
+    operations: compiled.response.operations,
   };
 }
 
 /**
- * Compile one :::json segment into canvas operations.
+ * Compile one :::json edit segment into canvas operations.
  * Validates target against context / live canvas before emitting ops.
  */
-export function compileJsonSegment(
+export function compileJsonEditSegment(
   segment: ContentJsonSegment,
   ctx: ParseContext,
 ): CanvasOperation[] {
   const { instruction, markdown } = segment;
+  if (instruction.action !== 'edit') {
+    throw new ContentParseError(
+      'invalid_instruction',
+      'compileJsonEditSegment only accepts action "edit".',
+    );
+  }
   assertTargetAllowed(instruction.target_id, ctx);
   const elType = resolveElementType(instruction.target_id, ctx);
 
-  if (instruction.action === 'add_text') {
-    if (elType !== 'text' && elType !== 'equation' && elType !== 'graph') {
-      throw new ContentParseError(
-        'wrong_target_type',
-        `add_text target "${instruction.target_id}" must be a TextElement, EquationElement, or GraphElement.`,
-      );
-    }
-    return [compileAddText(instruction, markdown)];
-  }
-
-  // action === 'edit'
   switch (elType) {
     case 'text':
       return [compileEditText(instruction.target_id, markdown)];
@@ -428,7 +452,19 @@ export function compileJsonSegment(
   }
 }
 
-/** Compile all JSON segments in order (validate-all semantics via throwing). */
+/** @deprecated Use compileJsonEditSegment / compileAddTextBatch. */
+export function compileJsonSegment(
+  segment: ContentJsonSegment,
+  ctx: ParseContext,
+): CanvasOperation[] {
+  if (segment.instruction.action === 'add_text') {
+    return compileAddTextBatch(segment.instruction, segment.markdown, ctx)
+      .operations;
+  }
+  return compileJsonEditSegment(segment, ctx);
+}
+
+/** Compile all edit segments (validate-all semantics via throwing). */
 export function compileJsonSegments(
   segments: readonly ContentJsonSegment[],
   ctx: ParseContext,
