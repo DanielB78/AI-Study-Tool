@@ -84,6 +84,13 @@ import type { CanvasAgentResponse } from '../ai/agent/operations';
 import type { LayoutDebugInfo } from '../ai/agent/layout';
 import { previewGridPlan } from '../ai/agent/layout';
 import { CANVAS_EDITOR_SYSTEM_PROMPT } from '../ai/agent/prompts/loadAgentPrompt';
+import {
+  CONTENT_FIRST_SYSTEM_PROMPT,
+  getAiGenerationMode,
+  isContentFirstMode,
+  setAiGenerationModeOverride,
+  type AiGenerationMode,
+} from '../ai/contentFirst';
 import { useStructureStore } from '../structures/structureStore';
 import type { NoteStructure } from '../structures/types';
 
@@ -146,6 +153,8 @@ export interface RagDebugState {
   layoutDebug: LayoutDebugInfo | null;
   parseError: string | null;
   llmExecutionMode: LlmExecutionMode;
+  /** operations (JSON) vs content_first (Markdown). */
+  aiGenerationMode: AiGenerationMode;
   lastCopiedPrompt: string | null;
   lastBuiltPrompt: BuiltLlmPrompt | null;
   lastQueryChunks: number;
@@ -178,6 +187,7 @@ export interface RagDebugState {
   setPreviewOpen: (open: boolean) => void;
   setLlmPromptPreviewOpen: (open: boolean) => void;
   setLlmExecutionMode: (mode: LlmExecutionMode) => void;
+  setAiGenerationMode: (mode: AiGenerationMode) => void;
   toggleAnchor: (elementId: string) => void;
   selectTopN: (n: number) => void;
   clearAnchors: () => void;
@@ -619,6 +629,7 @@ export function createRagDebugStore() {
       layoutDebug: null,
       parseError: null,
       llmExecutionMode: DEFAULT_LLM_EXECUTION_MODE,
+      aiGenerationMode: getAiGenerationMode(),
       lastCopiedPrompt: null,
       lastBuiltPrompt: null,
       lastQueryChunks: 0,
@@ -746,6 +757,11 @@ export function createRagDebugStore() {
       setLlmExecutionMode: (mode) => {
         setLlmExecutionModeOverride(mode);
         set({ llmExecutionMode: mode });
+      },
+
+      setAiGenerationMode: (mode) => {
+        setAiGenerationModeOverride(mode);
+        set({ aiGenerationMode: mode });
       },
 
       toggleAnchor: (elementId) => {
@@ -1272,8 +1288,11 @@ export function createRagDebugStore() {
             lastPrompt: prompt,
           });
 
+          const systemInstruction = isContentFirstMode(get().aiGenerationMode)
+            ? CONTENT_FIRST_SYSTEM_PROMPT
+            : CANVAS_EDITOR_SYSTEM_PROMPT;
           const result = await aiService.sendPrompt(prompt, undefined, {
-            systemInstruction: CANVAS_EDITOR_SYSTEM_PROMPT,
+            systemInstruction,
             canvasContext: [context.serialized, built.noteStructureSection]
               .filter(Boolean)
               .join('\n\n'),

@@ -168,6 +168,7 @@ export function RagDebugPanel() {
   const layoutDebug = useRagDebugStore((s) => s.layoutDebug);
   const parseError = useRagDebugStore((s) => s.parseError);
   const llmExecutionMode = useRagDebugStore((s) => s.llmExecutionMode);
+  const aiGenerationMode = useRagDebugStore((s) => s.aiGenerationMode);
   const lastQueryChunks = useRagDebugStore((s) => s.lastQueryChunks);
   const lastRetrieveMeta = useRagDebugStore((s) => s.lastRetrieveMeta);
   const promptIntent = useRagDebugStore((s) => s.promptIntent);
@@ -199,6 +200,7 @@ export function RagDebugPanel() {
   const setPreviewOpen = useRagDebugStore((s) => s.setPreviewOpen);
   const setLlmPromptPreviewOpen = useRagDebugStore((s) => s.setLlmPromptPreviewOpen);
   const setLlmExecutionMode = useRagDebugStore((s) => s.setLlmExecutionMode);
+  const setAiGenerationMode = useRagDebugStore((s) => s.setAiGenerationMode);
   const copyLlmPrompt = useRagDebugStore((s) => s.copyLlmPrompt);
   const openResponseModal = useRagDebugStore((s) => s.openResponseModal);
   const closeResponseModal = useRagDebugStore((s) => s.closeResponseModal);
@@ -356,6 +358,7 @@ export function RagDebugPanel() {
 
   const busy = retrieving || sending || expanding;
   const manual = llmExecutionMode === 'manual';
+  const contentFirst = aiGenerationMode === 'content_first';
   const canBuildPrompt = prompt.trim().length > 0;
   const canSendAutomatic = canBuildPrompt && !busy && !manual;
 
@@ -411,6 +414,31 @@ export function RagDebugPanel() {
                 Copy the full prompt into ChatGPT, then paste the reply back. Zero paid LLM calls.
               </p>
             )}
+          </section>
+
+          <section className="rag-debug-section rag-debug-mode">
+            <div className="rag-debug-section-title">Generation format</div>
+            <div className="rag-debug-shortcuts">
+              <button
+                type="button"
+                className={`rag-debug-btn ghost${!contentFirst ? ' is-active' : ''}`}
+                onClick={() => setAiGenerationMode('operations')}
+              >
+                JSON ops
+              </button>
+              <button
+                type="button"
+                className={`rag-debug-btn ghost${contentFirst ? ' is-active' : ''}`}
+                onClick={() => setAiGenerationMode('content_first')}
+              >
+                Content-first
+              </button>
+            </div>
+            <p className="rag-debug-meta">
+              {contentFirst
+                ? 'LLM writes Markdown ($$ equations, :::graph). App converts to Text / Equation / Graph elements.'
+                : 'LLM returns structured create_text / create_equation / create_graph JSON operations.'}
+            </p>
           </section>
 
           <StructureSelector

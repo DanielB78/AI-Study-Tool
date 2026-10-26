@@ -333,6 +333,8 @@ export interface ExecuteAgentOpsResult {
   affectedIds: string[];
   structureInstanceIds: string[];
   layoutDebug?: LayoutDebugInfo;
+  /** Temporary operation refs → real element ids (for content-first associations). */
+  planRefMap?: Map<string, string>;
 }
 
 function asPlan(
@@ -448,6 +450,7 @@ function createOne(
         operation: 'create_text',
         autoSize: true,
         ...(op.layout_role ? { layoutRole: op.layout_role } : {}),
+        ...(op.layout_cell ? { layoutCell: op.layout_cell, contentSectionId: op.layout_cell } : {}),
       },
     });
     element.height = height;
@@ -493,6 +496,9 @@ function createOne(
       metadata: {
         ...(op.layout_role ? { layoutRole: op.layout_role } : {}),
         ...(op.layout_role === 'final_result' ? { emphasize: true } : {}),
+        ...(op.layout_cell
+          ? { layoutCell: op.layout_cell, contentSectionId: op.layout_cell }
+          : {}),
       },
     });
     if (forced) {
@@ -558,6 +564,12 @@ function createOne(
       zIndex,
       width,
       height,
+      metadata: {
+        ...(op.layout_role ? { layoutRole: op.layout_role } : {}),
+        ...(op.layout_cell
+          ? { layoutCell: op.layout_cell, contentSectionId: op.layout_cell }
+          : {}),
+      },
     });
     target.addElement(element, false);
     createdIds.push(element.id);
@@ -582,6 +594,7 @@ export function executeCanvasOperations(
       updatedIds: [],
       affectedIds: [],
       structureInstanceIds: [],
+      planRefMap: new Map(),
     };
   }
 
@@ -1062,5 +1075,6 @@ export function executeCanvasOperations(
     affectedIds,
     structureInstanceIds,
     layoutDebug,
+    planRefMap,
   };
 }
