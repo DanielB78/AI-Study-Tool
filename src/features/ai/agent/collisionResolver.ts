@@ -1,11 +1,15 @@
 /**
- * Cascade collision resolver for AI-generated canvas content.
+ * Cascade collision resolver for AI **edits** (not new creates).
  *
- * Generated/updated elements are treated as fixed anchors. Existing unlocked
- * elements that overlap them are pushed away along the dominant collision side
- * (the axis with the larger overlap extent; sign from centre comparison).
- * If that move causes a new overlap, the newly overlapping element is pushed
- * too, and so on.
+ * Updated elements are fixed anchors. Existing unlocked elements that overlap
+ * them are pushed away along the dominant collision side. If that move causes
+ * a new overlap, the newly overlapping element is pushed too.
+ *
+ * If more than `maxMovedElements` would need to move, all pushes are reverted
+ * and the edit is left overlapping (collision ignored).
+ *
+ * New creates must NOT use this path — they resolve placement by trying
+ * alternate orientations / free space without moving neighbours.
  */
 
 import type { CanvasElement } from '../../../types/canvas';
@@ -21,27 +25,33 @@ export type CollisionPush = {
   side: CollisionSide;
   dx: number;
   dy: number;
-  /** Overlap width / height used to choose the dominant axis. */
   overlapWidth: number;
   overlapHeight: number;
 };
 
 export type CascadeCollisionResult = {
-  /** Element ids that were translated. */
   movedIds: string[];
-  /** Per-id total translation applied. */
   deltas: Map<string, { dx: number; dy: number }>;
   iterations: number;
   resolved: boolean;
+  /** True when too many neighbours would move — pushes were reverted. */
+  skipped: boolean;
+  skipReason?: 'too_many_moves' | 'no_anchors';
 };
 
+/** Default cap: if more neighbours than this need moving, ignore collisions. */
+export const DEFAULT_MAX_MOVED_FOR_EDIT = 4;
+
 export type CascadeCollisionOptions = {
-  /** Extra margin around rects when testing overlap (world units). */
   margin?: number;
-  /** Clearance gap after separation (world units). */
   gap?: number;
-  /** Safety cap on cascade iterations. */
   maxIterations?: number;
+  /**
+   * If cascade would move more than this many distinct elements, revert all
+   * moves and leave the edited content overlapping. Defaults to
+   * DEFAULT_MAX_MOVED_FOR_EDIT.
+   */
+  maxMovedElements?: number;
 };
 
 function boundsOf(el: CanvasElement): Rect {
@@ -62,14 +72,8 @@ function overlapExtent(a: Rect, b: Rect): { width: number; height: number } {
 /**
  * Compute how to move `movable` so it clears `fixed`.
  *
- * 1. Choose axis by which overlap extent is larger (most of the collision):
- *    - wider overlap → vertical conflict (stacked) → move up/down
- *    - taller overlap → horizontal conflict (side-by-side) → move left/right
- * 2. Choose sign from where the overlap sits on the movable element:
- *    - overlap in the top half → collision from above → move down
- *    - overlap in the bottom half → move up
- *    - overlap in the left half → move right
- *    - overlap in the right half → move left
+ * Axis = larger overlap extent. Sign = which half of the movable the overlap
+ * sits in (top → down, bottom → up, left → right, right → left).
  */
 export function dominantCollisionPush(
   fixed: Rect,
@@ -93,10 +97,8 @@ export function dominantCollisionPush(
 
   let side: CollisionSide;
   if (overlapW >= overlapH) {
-    // Mostly a vertical stack — resolve up/down.
     side = overlapCy <= movableCy ? 'below' : 'above';
   } else {
-    // Mostly side-by-side — resolve left/right.
     side = overlapCx <= movableCx ? 'right' : 'left';
   }
 
@@ -158,27 +160,47 @@ function isMovable(el: CanvasElement, anchorIds: ReadonlySet<string>): boolean {
   return true;
 }
 
+function revertDeltas(
+  target: CollisionResolveTarget,
+  deltas: Map<string, { dx: number; dy: number }>,
+): void {
+  for (const [id, d] of deltas) {
+    target.updateElement(id, (cur) => ({
+      ...cur,
+      x: cur.x - d.dx,
+      y: cur.y - d.dy,
+    }));
+  }
+}
+
 /**
- * Resolve overlaps caused by `anchorIds` (typically just-created / updated
- * elements). Anchors stay fixed; other unlocked elements are pushed away on the
- * dominant collision side, cascading until clear or the iteration cap.
+ * Resolve overlaps caused by **edited** anchors only.
+ * Returns `skipped: true` (and moves nothing) when too many neighbours would move.
  */
 export function resolveCascadeCollisions(
   target: CollisionResolveTarget,
   anchorIds: ReadonlySet<string>,
   options?: CascadeCollisionOptions,
 ): CascadeCollisionResult {
-  const margin =
-    options?.margin ?? GRID_LAYOUT_CONFIG.collisionMargin;
+  const margin = options?.margin ?? GRID_LAYOUT_CONFIG.collisionMargin;
   const gap = options?.gap ?? DEFAULT_ELEMENT_GAP;
   const maxIterations = options?.maxIterations ?? 64;
+  const maxMoved =
+    options?.maxMovedElements ?? DEFAULT_MAX_MOVED_FOR_EDIT;
 
   const deltas = new Map<string, { dx: number; dy: number }>();
   let iterations = 0;
   let resolved = false;
 
   if (anchorIds.size === 0) {
-    return { movedIds: [], deltas, iterations: 0, resolved: true };
+    return {
+      movedIds: [],
+      deltas,
+      iterations: 0,
+      resolved: true,
+      skipped: true,
+      skipReason: 'no_anchors',
+    };
   }
 
   for (iterations = 1; iterations <= maxIterations; iterations++) {
@@ -186,7 +208,6 @@ export function resolveCascadeCollisions(
     const byId = new Map(elements.map((el) => [el.id, el]));
     let movedThisPass = false;
 
-    // 1) Push non-anchors away from anchors.
     for (const anchorId of anchorIds) {
       const anchor = byId.get(anchorId);
       if (!anchor) continue;
@@ -211,14 +232,23 @@ export function resolveCascadeCollisions(
           dy: prev.dy + push.dy,
         });
         movedThisPass = true;
-        // Refresh local snapshot for subsequent checks in this pass.
         const updated = target.getElements().find((e) => e.id === el.id);
         if (updated) byId.set(el.id, updated);
+
+        if (deltas.size > maxMoved) {
+          revertDeltas(target, deltas);
+          return {
+            movedIds: [],
+            deltas: new Map(),
+            iterations,
+            resolved: false,
+            skipped: true,
+            skipReason: 'too_many_moves',
+          };
+        }
       }
     }
 
-    // 2) Cascade: if two non-anchors now overlap, push the later one (higher y,
-    // then higher zIndex, then id) away from the earlier one.
     const movable = target
       .getElements()
       .filter((el) => isMovable(el, anchorIds))
@@ -230,7 +260,6 @@ export function resolveCascadeCollisions(
 
     for (let i = 0; i < movable.length; i++) {
       const fixedEl = movable[i]!;
-      // Use live bounds (may have been moved in step 1 or earlier in step 2).
       const liveFixed =
         target.getElements().find((e) => e.id === fixedEl.id) ?? fixedEl;
       const fixedBounds = expandRect(boundsOf(liveFixed), margin);
@@ -265,6 +294,18 @@ export function resolveCascadeCollisions(
           x: liveOther.x + push.dx,
           y: liveOther.y + push.dy,
         };
+
+        if (deltas.size > maxMoved) {
+          revertDeltas(target, deltas);
+          return {
+            movedIds: [],
+            deltas: new Map(),
+            iterations,
+            resolved: false,
+            skipped: true,
+            skipReason: 'too_many_moves',
+          };
+        }
       }
     }
 
@@ -275,7 +316,6 @@ export function resolveCascadeCollisions(
   }
 
   if (!resolved) {
-    // Final check — may still be unresolved at cap.
     resolved = !hasAnchorCollisions(target, anchorIds, margin);
   }
 
@@ -284,6 +324,7 @@ export function resolveCascadeCollisions(
     deltas,
     iterations,
     resolved,
+    skipped: false,
   };
 }
 

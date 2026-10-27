@@ -9,7 +9,8 @@ export {
 } from './collision';
 export { collectCanvasObstacles } from './obstacles';
 export { calculateGridLayout } from './gridLayoutEngine';
-export { placeGridOnCanvas, spiralOffsets } from './canvasPlacementEngine';
+export { placeGridOnCanvas } from './canvasPlacementEngine';
+export { spiralOffsets } from './spiral';
 export {
   maxColumnsForObjectCount,
   reflowGridToMaxColumns,

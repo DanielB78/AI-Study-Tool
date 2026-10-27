@@ -1063,15 +1063,10 @@ export function executeCanvasOperations(
         });
       }
     }
-    // Push existing unlocked elements away from newly created/updated anchors.
-    if (
-      shouldResolveCollisions &&
-      (createdIds.length > 0 || updatedIds.length > 0)
-    ) {
-      resolveCascadeCollisions(
-        target,
-        new Set([...createdIds, ...updatedIds]),
-      );
+    // Cascade-push neighbours only for edits. New creates resolve placement
+    // by trying orientations / free space without moving existing elements.
+    if (shouldResolveCollisions && updatedIds.length > 0) {
+      resolveCascadeCollisions(target, new Set(updatedIds));
     }
 
     committed = true;

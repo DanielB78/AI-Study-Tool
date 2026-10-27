@@ -203,9 +203,10 @@ export function handleContentFirstResponse(
       }
       if (result.layoutDebug) merged.layoutDebug = result.layoutDebug;
     }
-    const anchors = new Set([...merged.createdIds, ...merged.updatedIds]);
-    if (anchors.size > 0) {
-      resolveCascadeCollisions(target, anchors);
+    // Only edited elements may push neighbours aside. New creates place
+    // themselves via orientation fallbacks / free space (no cascade).
+    if (merged.updatedIds.length > 0) {
+      resolveCascadeCollisions(target, new Set(merged.updatedIds));
     }
     committed = true;
   } finally {
