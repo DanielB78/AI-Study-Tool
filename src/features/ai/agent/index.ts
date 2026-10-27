@@ -52,6 +52,7 @@ export {
   resolvePlacement,
   resolveRelativePlacement,
   findOpenSpaceAway,
+  findFreeWorldPlacement,
   preferredRelative,
   ORIENTATION_FALLBACKS,
   DEFAULT_ELEMENT_GAP,

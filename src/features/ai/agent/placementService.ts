@@ -118,6 +118,19 @@ export function findOpenSpaceAway(
 }
 
 /**
+ * Compatibility wrapper used by equation/graph/component placers.
+ * `@param _primaryAxis` is retained for call-site compatibility; search is
+ * isotropic via spiral (creates never push neighbours).
+ */
+export function findFreeWorldPlacement(
+  preferred: Rect,
+  elements: CanvasElement[],
+  _primaryAxis: 'x' | 'y' | 'both' = 'both',
+): Rect {
+  return findOpenSpaceAway(preferred, elements);
+}
+
+/**
  * Place a rect relative to an anchor: preferred orientation → other
  * orientations → free space away from existing elements. Never pushes.
  */
