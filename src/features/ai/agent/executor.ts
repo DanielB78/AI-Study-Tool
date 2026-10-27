@@ -25,6 +25,7 @@ import type {
   CanvasOperation,
 } from './operations';
 import { resolvePlacement } from './placementService';
+import { resolveCascadeCollisions } from './collisionResolver';
 import type { NoteStructure } from '../../structures/types';
 import { isNodeSection, isStructureField } from '../../structures/types';
 import {
@@ -333,6 +334,8 @@ export interface ExecuteAgentOpsResult {
   affectedIds: string[];
   structureInstanceIds: string[];
   layoutDebug?: LayoutDebugInfo;
+  /** Temporary operation refs → real element ids (for content-first associations). */
+  planRefMap?: Map<string, string>;
 }
 
 function asPlan(
@@ -448,6 +451,7 @@ function createOne(
         operation: 'create_text',
         autoSize: true,
         ...(op.layout_role ? { layoutRole: op.layout_role } : {}),
+        ...(op.layout_cell ? { layoutCell: op.layout_cell, contentSectionId: op.layout_cell } : {}),
       },
     });
     element.height = height;
@@ -493,6 +497,9 @@ function createOne(
       metadata: {
         ...(op.layout_role ? { layoutRole: op.layout_role } : {}),
         ...(op.layout_role === 'final_result' ? { emphasize: true } : {}),
+        ...(op.layout_cell
+          ? { layoutCell: op.layout_cell, contentSectionId: op.layout_cell }
+          : {}),
       },
     });
     if (forced) {
@@ -558,6 +565,12 @@ function createOne(
       zIndex,
       width,
       height,
+      metadata: {
+        ...(op.layout_role ? { layoutRole: op.layout_role } : {}),
+        ...(op.layout_cell
+          ? { layoutCell: op.layout_cell, contentSectionId: op.layout_cell }
+          : {}),
+      },
     });
     target.addElement(element, false);
     createdIds.push(element.id);
@@ -566,6 +579,19 @@ function createOne(
   return { createdIds, structureInstanceIds };
 }
 
+export type ExecuteCanvasOperationsOptions = {
+  /**
+   * When false, caller owns beginInteraction / endInteraction / rollback.
+   * Used to apply several validated plans as one undoable transaction.
+   */
+  manageInteraction?: boolean;
+  /**
+   * When false, skip the post-apply cascade collision pass (caller may run it
+   * once after several batches). Defaults to true.
+   */
+  resolveCollisions?: boolean;
+};
+
 /**
  * Execute ALL operations atomically after prior validation.
  * Accepts a bare operations list (legacy) or a full CanvasAgentResponse with layout.
@@ -573,7 +599,10 @@ function createOne(
 export function executeCanvasOperations(
   operationsOrPlan: readonly CanvasOperation[] | CanvasAgentResponse,
   target: AgentExecutorTarget,
+  options?: ExecuteCanvasOperationsOptions,
 ): ExecuteAgentOpsResult {
+  const manageInteraction = options?.manageInteraction !== false;
+  const shouldResolveCollisions = options?.resolveCollisions !== false;
   const plan = asPlan(operationsOrPlan);
   const operations = plan.operations;
   if (operations.length === 0) {
@@ -582,6 +611,7 @@ export function executeCanvasOperations(
       updatedIds: [],
       affectedIds: [],
       structureInstanceIds: [],
+      planRefMap: new Map(),
     };
   }
 
@@ -617,7 +647,7 @@ export function executeCanvasOperations(
   const resolveRef = (ref: string): string | undefined =>
     planRefMap.get(ref) ?? undefined;
 
-  target.beginInteraction();
+  if (manageInteraction) target.beginInteraction();
   let committed = false;
   try {
     for (let opIndex = 0; opIndex < operations.length; opIndex++) {
@@ -1033,13 +1063,22 @@ export function executeCanvasOperations(
         });
       }
     }
+    // Cascade-push neighbours only for edits. New creates resolve placement
+    // by trying orientations / free space without moving existing elements.
+    if (shouldResolveCollisions && updatedIds.length > 0) {
+      resolveCascadeCollisions(target, new Set(updatedIds));
+    }
+
     committed = true;
   } finally {
-    if (committed) {
-      target.endInteraction();
-    } else {
-      target.rollbackInteraction();
+    if (manageInteraction) {
+      if (committed) {
+        target.endInteraction();
+      } else {
+        target.rollbackInteraction();
+      }
     }
+    // When manageInteraction is false, the caller owns commit / rollback.
   }
 
   const latest = target.getElements();
@@ -1062,5 +1101,6 @@ export function executeCanvasOperations(
     affectedIds,
     structureInstanceIds,
     layoutDebug,
+    planRefMap,
   };
 }

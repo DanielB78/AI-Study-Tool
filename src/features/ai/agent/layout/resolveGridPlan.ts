@@ -34,6 +34,10 @@ import {
   ChronologicalCellLayoutError,
   groupCreationOpsIntoCells,
 } from './chronologicalCellLayout';
+import {
+  getUserLayoutSettings,
+  type UserLayoutSettings,
+} from './userLayoutSettings';
 import type { CanvasPlacementResult, GridLayoutResult, LayoutDebugInfo } from './types';
 
 export type ResolveGridPlanInput = {
@@ -47,6 +51,8 @@ export type ResolveGridPlanInput = {
   includeHandwriting?: boolean;
   /** LLM-selected output preset; defaults to lesson. */
   outputType?: AgentOutputType;
+  /** Override app layout prefs (tests). Defaults to getUserLayoutSettings(). */
+  userLayoutSettings?: UserLayoutSettings;
 };
 
 export type ResolveGridPlanResult = {
@@ -177,6 +183,8 @@ function resolveChronologicalGrid(
 ): ResolveGridPlanResult {
   const diagnostics: string[] = [];
   const outputConfig = getOutputLayoutConfig(input.outputType);
+  const userLayoutSettings =
+    input.userLayoutSettings ?? getUserLayoutSettings();
   let grouped;
   try {
     grouped = groupCreationOpsIntoCells(
@@ -192,9 +200,6 @@ function resolveChronologicalGrid(
   diagnostics.push(...grouped.diagnostics);
 
   const objectCount = grouped.objectCount;
-  const isVerticalSequence = outputConfig.gridArrangement === 'vertical_sequence';
-  const maxColumns = isVerticalSequence ? 1 : maxColumnsForObjectCount(objectCount);
-  const requestedColumns = isVerticalSequence ? 1 : (layout.columns ?? maxColumns);
   const refs = new Set(grouped.objectOrder);
 
   const measured = measureLayoutItems(input.operations, refs, {
@@ -210,65 +215,18 @@ function resolveChronologicalGrid(
     );
   }
 
-  let calc = calculateChronologicalCellGrid({
+  const calc = calculateChronologicalCellGrid({
     layout,
     operations: input.operations,
     measured,
     objectCount,
     outputConfig,
+    userLayoutSettings,
   });
   diagnostics.push(...calc.grid.diagnostics);
 
   const viewport = input.viewport ?? getDefaultViewportSize();
-  const visible = getVisibleWorldBounds(input.camera, viewport);
-  const usableWidth = visible.width * 0.92;
-
-  let columns = calc.effectiveCellLayout.columns;
-  let wrapped = calc.cellDebug.wrapped || (!isVerticalSequence && columns < requestedColumns);
-  let wrapReason = calc.cellDebug.wrapReason;
-  let widthWrapped = false;
-  let guard = 0;
-
-  // Lesson only: reduce columns when physically too wide.
-  while (
-    !isVerticalSequence &&
-    calc.grid.bounds.width > Math.max(usableWidth * 1.15, 480) &&
-    columns > 1 &&
-    guard < 4
-  ) {
-    guard += 1;
-    const nextColumns = columns - 1;
-    calc = calculateChronologicalCellGrid({
-      layout: { ...layout, columns: nextColumns },
-      operations: input.operations,
-      measured,
-      objectCount,
-      outputConfig,
-    });
-    diagnostics.push(
-      `Physical width wrap: reduced chronological columns ${columns} → ${nextColumns}.`,
-    );
-    diagnostics.push(...calc.grid.diagnostics);
-    columns = nextColumns;
-    wrapped = true;
-    widthWrapped = true;
-    wrapReason = 'physical_width';
-  }
-
-  if (!isVerticalSequence && columns > maxColumns) {
-    calc = calculateChronologicalCellGrid({
-      layout: { ...layout, columns: maxColumns },
-      operations: input.operations,
-      measured,
-      objectCount,
-      outputConfig,
-    });
-    diagnostics.push(...calc.grid.diagnostics);
-    columns = maxColumns;
-    wrapped = true;
-    wrapReason = 'exceeded_max_columns';
-  }
-
+  const columns = Math.max(1, calc.effectiveCellLayout.columns);
   const rows =
     calc.cellDebug.cells.length === 0
       ? 0
@@ -283,40 +241,41 @@ function resolveChronologicalGrid(
     includeHandwriting: input.includeHandwriting,
     diagnostics,
     objectCount,
-    maxColumns,
-    requestedColumns,
+    maxColumns: columns,
+    requestedColumns: columns,
     requestedRows: 0,
     columns,
     rows,
-    wrapped,
-    wrapReason,
-    widthWrapped,
+    wrapped: calc.cellDebug.wrapped,
+    wrapReason: calc.cellDebug.wrapReason,
+    widthWrapped: calc.cellDebug.wrapReason === 'group_wrap_width',
     chronologicalCells: calc.cellDebug,
-    effectiveLayout: { type: 'chronological_grid', placement: layout.placement, columns },
+    effectiveLayout: {
+      type: 'chronological_grid',
+      placement: layout.placement,
+      columns,
+    },
     outputType: outputConfig.outputType,
   });
 }
 
 /**
- * Agent-generated multi-element layouts always use a single vertical column
- * in operation order. Explicit multi-column `grid` specs from the LLM are
- * accepted for backward compatibility but do not control geometry.
+ * Agent layouts use chronological_grid packing controlled by user settings
+ * (direction + independent height/width limits). LLM multi-column `grid`
+ * specs are ignored for geometry; resolveExplicitGridPlan remains for tests.
  */
 export function resolveGridPlan(input: ResolveGridPlanInput): ResolveGridPlanResult {
   const chronoLayout: ChronologicalGridLayoutSpec = isChronologicalGridLayout(
     input.layout,
   )
-    ? { ...input.layout, columns: 1 }
+    ? { ...input.layout }
     : {
         type: 'chronological_grid',
         placement:
           'placement' in input.layout && input.layout.placement
             ? input.layout.placement
             : { mode: 'viewport_default' },
-        columns: 1,
       };
-  // Explicit multi-column grids from the LLM are ignored for geometry;
-  // resolveExplicitGridPlan remains available for non-agent callers/tests.
   return resolveChronologicalGrid(
     { ...input, layout: chronoLayout },
     chronoLayout,

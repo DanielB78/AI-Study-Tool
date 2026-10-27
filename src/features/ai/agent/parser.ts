@@ -1063,7 +1063,15 @@ function semanticValidate(op: CanvasOperation, ctx: ParseContext): void {
   if (isEquationComponentOperationType(op.type)) {
     const eop = op as EquationComponentOperation;
     if (eop.type === 'add_equation_to_text') {
-      validateTextTarget(eop.target_element_id, ctx);
+      // Plan refs (target_ref / unresolved target_element_id) resolve at execute.
+      if (eop.target_element_id && !eop.target_ref) {
+        const looksLikePlanRef =
+          !ctx.elementTypes?.has(eop.target_element_id) &&
+          !ctx.allowedElementIds.has(eop.target_element_id);
+        if (!looksLikePlanRef) {
+          validateTextTarget(eop.target_element_id, ctx);
+        }
+      }
     } else if (
       'target_element_id' in eop &&
       eop.target_element_id &&
@@ -1468,8 +1476,8 @@ export function describeOperationPlan(
         [
           'CHRONOLOGICAL GRID LAYOUT',
           `   Group placement: ${formatPlacementLine(L.placement, 'short')}`,
-          '   Columns: 1 (single vertical column — app-owned)',
-          '   Order: creation-operation order (top → bottom)',
+          '   Packing: app-owned (user direction + row/column limits)',
+          '   Order: creation-operation chronological reading order',
         ].join('\n'),
       );
     } else {

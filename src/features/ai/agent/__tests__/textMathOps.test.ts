@@ -157,9 +157,11 @@ describe('text math agent operations', () => {
     expect(nodes.some((n) => n.kind === 'display')).toBe(true);
     expect(el.text).toContain('[LaTeX: F=-kx]');
     expect(el.richText!.blocks.some(isDisplayMathBlock)).toBe(true);
-    expect(
-      el.richText!.blocks[0]!.spans.some((s) => isInlineMathSpan(s)),
-    ).toBe(true);
+    const firstBlock = el.richText!.blocks[0]!;
+    expect(firstBlock.type).toBe('paragraph');
+    if (firstBlock.type === 'paragraph') {
+      expect(firstBlock.spans.some((s) => isInlineMathSpan(s))).toBe(true);
+    }
   });
 
   it('updates and removes math via agent ops', () => {

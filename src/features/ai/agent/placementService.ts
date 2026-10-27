@@ -1,6 +1,10 @@
 /**
- * CanvasPlacementService — world-space placement for AI create_text.
- * Uses viewport / relative / absolute modes with light collision avoidance.
+ * CanvasPlacementService — world-space placement for AI creates.
+ *
+ * New elements never push neighbours. Relative placement:
+ * 1. Prefer the directed orientation around the anchor when free
+ * 2. Otherwise try the other orientations around the same anchor
+ * 3. If none fit, search free space away from existing elements
  */
 
 import type { Camera, CanvasElement } from '../../../types/canvas';
@@ -13,6 +17,8 @@ import {
   type ViewportSize,
 } from '../canvas/placement';
 import type { Placement, PlacementRelation } from './operations';
+import { PLACEMENT_RELATIONS } from './operations';
+import { spiralOffsets } from './layout/spiral';
 
 /** Default gap between anchor edge and new note (world units). */
 export const DEFAULT_ELEMENT_GAP = 48;
@@ -27,21 +33,19 @@ export interface PlacementRequest {
   gap?: number;
 }
 
-const RELATIVE_OFFSET_FACTORS: Array<[number, number]> = [
-  [0, 0],
-  [0, 0.35],
-  [0, -0.35],
-  [0, 0.7],
-  [0, -0.7],
-  [0.35, 0],
-  [-0.35, 0],
-  [0.7, 0],
-  [-0.7, 0],
-  [0.5, 0.5],
-  [-0.5, 0.5],
-];
+/** Ordered orientation attempts for a requested relation (first = preferred). */
+export const ORIENTATION_FALLBACKS: Record<
+  PlacementRelation,
+  readonly PlacementRelation[]
+> = {
+  below: ['below', 'right_of', 'left_of', 'above'],
+  above: ['above', 'right_of', 'left_of', 'below'],
+  right_of: ['right_of', 'below', 'above', 'left_of'],
+  left_of: ['left_of', 'below', 'above', 'right_of'],
+  near: ['right_of', 'below', 'left_of', 'above'],
+};
 
-function preferredRelative(
+export function preferredRelative(
   anchor: Rect,
   note: { width: number; height: number },
   relation: PlacementRelation,
@@ -58,7 +62,6 @@ function preferredRelative(
     case 'above':
       return { x: anchor.x, y: anchor.y - height - gap, width, height };
     case 'near':
-      // Prefer right-of; collision helper tries alternate offsets.
       return { x: anchor.x + anchor.width + gap, y: anchor.y, width, height };
     default: {
       const _exhaustive: never = relation;
@@ -72,26 +75,24 @@ function overlapsAny(candidate: Rect, elements: CanvasElement[]): boolean {
 }
 
 /**
- * World-space collision nudge for relative/absolute placement.
- * Does NOT clamp into the camera viewport — logical board relationships stay stable.
+ * Spiral-search for a free world rect starting at `preferred`.
+ * Does not move existing elements — only relocates the candidate.
  */
-export function findFreeWorldPlacement(
+export function findOpenSpaceAway(
   preferred: Rect,
   elements: CanvasElement[],
-  primaryAxis: 'x' | 'y' | 'both' = 'both',
+  options?: { step?: number; maxRings?: number },
 ): Rect {
-  // Prefer sliding along the secondary axis first for directional relations.
-  const ordered =
-    primaryAxis === 'y'
-      ? [...RELATIVE_OFFSET_FACTORS].sort((a, b) => Math.abs(a[0]) - Math.abs(b[0]))
-      : primaryAxis === 'x'
-        ? [...RELATIVE_OFFSET_FACTORS].sort((a, b) => Math.abs(a[1]) - Math.abs(b[1]))
-        : RELATIVE_OFFSET_FACTORS;
+  if (!overlapsAny(preferred, elements)) return preferred;
 
-  for (const [fx, fy] of ordered) {
+  const step = options?.step ?? Math.max(preferred.width, preferred.height, 64);
+  const maxRings = options?.maxRings ?? 24;
+
+  for (const { dx, dy } of spiralOffsets(step, maxRings)) {
+    if (dx === 0 && dy === 0) continue;
     const candidate: Rect = {
-      x: preferred.x + fx * preferred.width,
-      y: preferred.y + fy * preferred.height,
+      x: preferred.x + dx,
+      y: preferred.y + dy,
       width: preferred.width,
       height: preferred.height,
     };
@@ -100,26 +101,73 @@ export function findFreeWorldPlacement(
     }
   }
 
-  // Last resort: push further along the preferred direction.
-  const push: Rect = {
-    x: preferred.x + (primaryAxis === 'y' ? 0 : preferred.width + DEFAULT_ELEMENT_GAP),
-    y: preferred.y + (primaryAxis === 'x' ? 0 : preferred.height + DEFAULT_ELEMENT_GAP),
+  // Last resort: park far below+right of the union of obstacles.
+  let maxX = preferred.x;
+  let maxY = preferred.y;
+  for (const el of elements) {
+    const b = getElementBounds(el);
+    maxX = Math.max(maxX, b.x + b.width);
+    maxY = Math.max(maxY, b.y + b.height);
+  }
+  return {
+    x: maxX + DEFAULT_ELEMENT_GAP,
+    y: maxY + DEFAULT_ELEMENT_GAP,
     width: preferred.width,
     height: preferred.height,
   };
-  if (!overlapsAny(push, elements)) return push;
-  return preferred;
-}
-
-function primaryAxisForRelation(relation: PlacementRelation): 'x' | 'y' | 'both' {
-  if (relation === 'left_of' || relation === 'right_of') return 'y';
-  if (relation === 'above' || relation === 'below') return 'x';
-  return 'both';
 }
 
 /**
- * Resolve world-space origin+size for a create_text placement.
- * Never uses screen pixels for relative math — world coordinates only.
+ * Compatibility wrapper used by equation/graph/component placers.
+ * `@param _primaryAxis` is retained for call-site compatibility; search is
+ * isotropic via spiral (creates never push neighbours).
+ */
+export function findFreeWorldPlacement(
+  preferred: Rect,
+  elements: CanvasElement[],
+  _primaryAxis: 'x' | 'y' | 'both' = 'both',
+): Rect {
+  return findOpenSpaceAway(preferred, elements);
+}
+
+/**
+ * Place a rect relative to an anchor: preferred orientation → other
+ * orientations → free space away from existing elements. Never pushes.
+ */
+export function resolveRelativePlacement(input: {
+  anchor: Rect;
+  width: number;
+  height: number;
+  relation: PlacementRelation;
+  elements: CanvasElement[];
+  gap?: number;
+}): Rect {
+  const gap = input.gap ?? DEFAULT_ELEMENT_GAP;
+  const note = { width: input.width, height: input.height };
+  const order = ORIENTATION_FALLBACKS[input.relation] ?? [
+    input.relation,
+    ...PLACEMENT_RELATIONS.filter((r) => r !== input.relation && r !== 'near'),
+  ];
+
+  for (const rel of order) {
+    const candidate = preferredRelative(input.anchor, note, rel, gap);
+    if (!overlapsAny(candidate, input.elements)) {
+      return candidate;
+    }
+  }
+
+  const preferred = preferredRelative(
+    input.anchor,
+    note,
+    input.relation,
+    gap,
+  );
+  return findOpenSpaceAway(preferred, input.elements);
+}
+
+/**
+ * Resolve world-space origin+size for a create placement.
+ * Creates never displace neighbours — they relocate themselves instead.
  */
 export function resolvePlacement(request: PlacementRequest): Rect {
   const viewport = request.viewport ?? getDefaultViewportSize();
@@ -144,14 +192,14 @@ export function resolvePlacement(request: PlacementRequest): Rect {
       width,
       height,
     };
-    // Absolute coords are user-specified world positions — avoid viewport clamp.
-    return findFreeWorldPlacement(preferred, request.elements, 'both');
+    return findOpenSpaceAway(preferred, request.elements);
   }
 
   // relative_to_element
-  const anchorEl = request.elements.find((el) => el.id === placement.anchor_element_id);
+  const anchorEl = request.elements.find(
+    (el) => el.id === placement.anchor_element_id,
+  );
   if (!anchorEl) {
-    // Fallback to viewport if anchor vanished between plan and apply.
     return placeAiTextRect({
       camera: request.camera,
       viewport,
@@ -161,18 +209,14 @@ export function resolvePlacement(request: PlacementRequest): Rect {
     });
   }
 
-  const anchor = getElementBounds(anchorEl);
-  const preferred = preferredRelative(
-    anchor,
-    { width, height },
-    placement.relation,
+  return resolveRelativePlacement({
+    anchor: getElementBounds(anchorEl),
+    width,
+    height,
+    relation: placement.relation,
+    elements: request.elements,
     gap,
-  );
-  return findFreeWorldPlacement(
-    preferred,
-    request.elements,
-    primaryAxisForRelation(placement.relation),
-  );
+  });
 }
 
 export { AI_TEXT_DEFAULT_WIDTH };

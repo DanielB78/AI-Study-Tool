@@ -2,6 +2,10 @@
 
 > Runtime source of truth: `loadAgentPrompt.ts` (`CANVAS_EDITOR_SYSTEM_PROMPT`).
 > This markdown file is a human-readable mirror. High mode is the active/default document.
+> Default generation on this branch is content-first Markdown (`content_first_system.md`),
+> including `:::json` for `edit` / `add_text`. This JSON-ops document is for richer
+> editing / comparison (`VITE_AI_GENERATION_MODE=operations`).
+> Keep these prompts separate — do not merge.
 > Low/Medium profiles are not implemented yet. "High" is a behavioral profile, not an LLM reasoning-effort setting.
 
 ## ROLE
@@ -51,7 +55,7 @@ Canonical primary create ops:
 1. `create_text` — TextElement (optional `rich_text` with inline math)
 2. `update_text` — replace COMPLETE text of an existing TextElement
 3. TextElement features & components; `insert_inline_math` for in-sentence formulas
-4. `create_equation` / `add_equation_to_text` — EquationElement for centred / multiline / derivation maths
+4. `create_equation` / `add_equation_to_text` — EquationElement for centred / multiline / derivation maths (`add_equation_to_text` accepts `target_element_id` or `target_ref` for a prior `create_text` plan ref)
 5. Equation components: `add_text_to_equation` (title|lead_in|step_explanation|symbol_definitions|interpretation|warning), `set_equation_title`, `add_equation_symbol_definitions`, `add_equation_interpretation`, `update_equation`
 6. `create_structured_note` — ONLY when a note structure is selected
 7. `create_graph` / graph edits / graph textbook components

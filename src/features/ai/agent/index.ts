@@ -48,7 +48,23 @@ export {
 } from './parseErrors';
 export { executeCanvasOperations, type ExecuteAgentOpsResult } from './executor';
 export { executeAgentOperationsLive, createLiveAgentExecutorTarget } from './liveExecutor';
-export { resolvePlacement, DEFAULT_ELEMENT_GAP } from './placementService';
+export {
+  resolvePlacement,
+  resolveRelativePlacement,
+  findOpenSpaceAway,
+  findFreeWorldPlacement,
+  preferredRelative,
+  ORIENTATION_FALLBACKS,
+  DEFAULT_ELEMENT_GAP,
+} from './placementService';
+export {
+  dominantCollisionPush,
+  resolveCascadeCollisions,
+  DEFAULT_MAX_MOVED_FOR_EDIT,
+  type CollisionPush,
+  type CollisionSide,
+  type CascadeCollisionResult,
+} from './collisionResolver';
 export {
   CANVAS_EDITOR_SYSTEM_PROMPT,
   CANVAS_EDITOR_RESPONSE_INSTRUCTIONS,

@@ -36,7 +36,9 @@ import { CanvasAgentParseError } from './parseErrors';
 
 export type AddEquationToTextOperation = {
   type: 'add_equation_to_text';
-  target_element_id: string;
+  /** Existing TextElement id, or a temporary create_text `ref` resolved at execute time. */
+  target_element_id?: string;
+  target_ref?: string;
   latex: string;
   ref?: string;
 };
@@ -167,23 +169,18 @@ export function parseEquationComponentOperation(
 
   switch (raw.type) {
     case 'add_equation_to_text': {
-      const target =
-        typeof raw.target_element_id === 'string' && raw.target_element_id.trim()
-          ? raw.target_element_id.trim()
-          : typeof raw.target_id === 'string' && raw.target_id.trim()
-            ? raw.target_id.trim()
-            : '';
-      if (!target) {
+      const ids = resolveTargetIds(raw);
+      if (!ids.target_element_id && !ids.target_ref) {
         throw new CanvasAgentParseError(
           'missing_target',
-          'add_equation_to_text needs target_element_id.',
+          'add_equation_to_text needs target_element_id or target_ref.',
         );
       }
       const ref =
         typeof raw.ref === 'string' && raw.ref.trim() ? raw.ref.trim() : undefined;
       return {
         type: 'add_equation_to_text',
-        target_element_id: target,
+        ...ids,
         latex: requireLatex(raw, 'add_equation_to_text'),
         ...(ref ? { ref } : {}),
       };
@@ -496,12 +493,17 @@ export function executeAddEquationToText(
   ctx: EquationComponentExecuteContext,
 ): { createdId: string } {
   const elements = ctx.getElements();
-  const targetId =
-    ctx.resolveRef?.(op.target_element_id) ?? op.target_element_id;
+  const targetId = resolveEquationId(
+    {
+      target_element_id: op.target_element_id,
+      target_ref: op.target_ref,
+    },
+    ctx,
+  );
   const target = elements.find((e) => e.id === targetId);
   if (!target || target.type !== 'text') {
     throw new Error(
-      `add_equation_to_text target "${op.target_element_id}" is not a TextElement.`,
+      `add_equation_to_text target "${op.target_element_id ?? op.target_ref}" is not a TextElement.`,
     );
   }
 

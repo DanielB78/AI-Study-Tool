@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { Camera, CanvasElement } from '../../../../types/canvas';
-import { resolvePlacement, DEFAULT_ELEMENT_GAP } from '../placementService';
+import { getElementBounds, rectsIntersect } from '../../../../utils/coordinates';
+import {
+  resolvePlacement,
+  resolveRelativePlacement,
+  DEFAULT_ELEMENT_GAP,
+} from '../placementService';
 
 const camera: Camera = { x: 0, y: 0, zoom: 1 };
 const viewport = { width: 1000, height: 800 };
@@ -140,26 +145,58 @@ describe('resolvePlacement', () => {
     expect(r.y).toBe(800);
   });
 
-  it('collision avoidance nudges when preferred overlaps', () => {
-    const blocker = textEl('blocker', 348, 100, 160, 60); // sits at right_of preferred
+  it('blocked preferred orientation falls back to another around the anchor', () => {
+    // Occupies exact below slot.
+    const blocker = textEl(
+      'blocker',
+      100,
+      100 + 80 + DEFAULT_ELEMENT_GAP,
+      160,
+      60,
+    );
+    const r = resolveRelativePlacement({
+      anchor: getElementBounds(anchor),
+      ...note,
+      relation: 'below',
+      elements: [anchor, blocker],
+      gap: DEFAULT_ELEMENT_GAP,
+    });
+    // Should land right_of (first fallback) instead of overlapping blocker.
+    expect(r.x).toBeGreaterThanOrEqual(anchor.x + anchor.width + DEFAULT_ELEMENT_GAP - 1);
+    expect(r.y).toBe(anchor.y);
+    expect(rectsIntersect(r, getElementBounds(blocker))).toBe(false);
+  });
+
+  it('when all orientations are blocked, places away without overlapping', () => {
+    const blockers = [
+      textEl('b_below', 100, 100 + 80 + DEFAULT_ELEMENT_GAP, 160, 60),
+      textEl('b_right', 100 + 200 + DEFAULT_ELEMENT_GAP, 100, 160, 60),
+      textEl('b_left', 100 - 160 - DEFAULT_ELEMENT_GAP, 100, 160, 60),
+      textEl('b_above', 100, 100 - 60 - DEFAULT_ELEMENT_GAP, 160, 60),
+    ];
+    const r = resolveRelativePlacement({
+      anchor: getElementBounds(anchor),
+      ...note,
+      relation: 'below',
+      elements: [anchor, ...blockers],
+      gap: DEFAULT_ELEMENT_GAP,
+    });
+    for (const el of [anchor, ...blockers]) {
+      expect(rectsIntersect(r, getElementBounds(el))).toBe(false);
+    }
+  });
+
+  it('absolute collision relocates the new note, not the blocker', () => {
+    const blocker = textEl('blocker', 500, 800, 160, 60);
     const r = resolvePlacement({
-      placement: {
-        mode: 'relative_to_element',
-        anchor_element_id: 'a',
-        relation: 'right_of',
-      },
+      placement: { mode: 'absolute', x: 500, y: 800 },
       ...note,
       camera,
-      elements: [anchor, blocker],
+      elements: [blocker],
       viewport,
     });
-    const overlaps =
-      r.x < blocker.x + blocker.width &&
-      r.x + r.width > blocker.x &&
-      r.y < blocker.y + blocker.height &&
-      r.y + r.height > blocker.y;
-    expect(overlaps).toBe(false);
-    expect(r.x).toBeGreaterThan(anchor.x + anchor.width);
+    expect(rectsIntersect(r, getElementBounds(blocker))).toBe(false);
+    expect(r.x !== 500 || r.y !== 800).toBe(true);
   });
 
   it('camera pan/zoom does not change relative world relationship', () => {
@@ -186,9 +223,9 @@ describe('resolvePlacement', () => {
       elements: [anchor],
       viewport,
     });
-    // Preferred relative offset is world-based; collision clamp may differ slightly
-    // with zoom, but base right_of x should still be past the anchor.
     expect(r1.x).toBeGreaterThan(anchor.x + anchor.width);
     expect(r2.x).toBeGreaterThan(anchor.x + anchor.width);
+    expect(r1.x).toBe(r2.x);
+    expect(r1.y).toBe(r2.y);
   });
 });

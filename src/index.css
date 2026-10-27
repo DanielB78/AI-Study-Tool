@@ -1450,11 +1450,11 @@ textarea {
 .rt-math--inline {
   display: inline-block;
   vertical-align: middle;
-  padding: 0 0.1em;
+  padding: 0 0.15em;
   cursor: pointer;
-  max-width: 100%;
-  overflow-x: auto;
-  line-height: 1.2;
+  max-width: none;
+  overflow: visible;
+  line-height: inherit;
 }
 
 .rt-math--display {
@@ -1467,6 +1467,123 @@ textarea {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.9em;
   white-space: pre-wrap;
+}
+
+/* Inline code */
+.rt-code-inline {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+  white-space: break-spaces;
+}
+
+/* Fenced code blocks */
+.rt-code-block {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.75em 0;
+  padding: 0.75em 0.9em;
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.875em;
+  line-height: 1.45;
+}
+
+.rt-code-pre {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  white-space: pre;
+  overflow: visible;
+}
+
+.rt-code-source {
+  font-family: inherit;
+  white-space: pre;
+}
+
+/* highlight.js token colours — theme via currentColor mix */
+.rt-code-block .hljs-keyword,
+.rt-code-block .hljs-selector-tag,
+.rt-code-block .hljs-built_in {
+  color: color-mix(in srgb, #2563eb 70%, currentColor);
+  font-weight: 600;
+}
+.rt-code-block .hljs-string,
+.rt-code-block .hljs-attr {
+  color: color-mix(in srgb, #16a34a 65%, currentColor);
+}
+.rt-code-block .hljs-number,
+.rt-code-block .hljs-literal {
+  color: color-mix(in srgb, #ea580c 65%, currentColor);
+}
+.rt-code-block .hljs-comment,
+.rt-code-block .hljs-quote {
+  color: color-mix(in srgb, currentColor 45%, transparent);
+  font-style: italic;
+}
+.rt-code-block .hljs-title,
+.rt-code-block .hljs-section,
+.rt-code-block .hljs-function .hljs-title {
+  color: color-mix(in srgb, #7c3aed 60%, currentColor);
+}
+.rt-code-block .hljs-meta,
+.rt-code-block .hljs-type {
+  color: color-mix(in srgb, #0891b2 60%, currentColor);
+}
+
+/* Blockquotes */
+.rt-blockquote {
+  margin: 0.55em 0;
+  padding: 0.35em 0.75em;
+  border-left: 3px solid color-mix(in srgb, currentColor 28%, transparent);
+  background: color-mix(in srgb, currentColor 4%, transparent);
+}
+
+/* GFM Markdown tables inside TextElement rich text */
+.rt-table-wrap {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.75em 0;
+}
+
+.rt-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+  font-size: 1em;
+  line-height: 1.35;
+  border-top: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.rt-table th,
+.rt-table td {
+  padding: 0.4em 0.65em;
+  vertical-align: top;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+.rt-table th {
+  font-weight: 600;
+}
+
+.rt-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.rt-table .rt-math--inline {
+  max-width: 100%;
 }
 
 .popover-action {

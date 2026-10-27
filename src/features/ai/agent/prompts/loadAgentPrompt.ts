@@ -119,7 +119,7 @@ Plus their supported associated components (app-owned style + placement). Never 
 
 1. \`update_text\` / \`update_equation\` — modify existing primary elements
 2. Text features & components; \`insert_inline_math\` for in-sentence formulas in existing prose
-3. Equation components: \`add_text_to_equation\` (title|lead_in|step_explanation|symbol_definitions|interpretation|warning), \`set_equation_title\`, \`add_equation_symbol_definitions\`, \`add_equation_interpretation\`
+3. Equation components: \`add_equation_to_text\` (\`target_element_id\` or \`target_ref\`), \`add_text_to_equation\` (title|lead_in|step_explanation|symbol_definitions|interpretation|warning), \`set_equation_title\`, \`add_equation_symbol_definitions\`, \`add_equation_interpretation\`
 4. Graph edits / graph textbook components (\`add_graph_to_text\`, \`add_text_to_graph\`, …)
 5. \`layout\` (response-level) — \`chronological_grid\` or explicit \`grid\`
 
@@ -292,7 +292,7 @@ If there is no reasonable edit target, prefer \`create_text\` rather than overwr
 
 ## PLACEMENT POLICY
 
-**All newly generated TextElements, GraphElements, EquationElements and associated components are automatically arranged in a single vertical column.**
+**The application owns physical layout.** Newly generated TextElements, GraphElements, and EquationElements are packed from your chronological operation order using the user's layout settings (direction and optional row/column limits).
 
 You must NOT select grid cells, columns, rows, adjacency, or side-by-side arrangements. Do NOT emit \`row\`, \`column\`, \`layout_cell\`, \`column_span\`, or explicit multi-column \`grid\` geometry.
 
@@ -307,12 +307,12 @@ When creating **two or more related objects** with no explicit "next to X" instr
 Rules:
 
 - Give each create a temporary \`ref\`
-- Emit operations in the **order the learner should read them** — that order is the vertical sequence
+- Emit operations in the **order the learner should read them** — that order is preserved by the app packer
 - Optional \`layout_role\` (\`introduction\` | \`explanation\` | \`mathematical_step\` | \`visualisation\` | \`given_information\` | \`final_result\` | \`verification\`) is presentation metadata only — it does not reposition elements
 - Do **not** assign row/column, world coordinates, or shared layout cells
 - \`output_type\` selects educational structure (lesson vs derivation), not columns
 
-The application measures sizes, stacks elements top→bottom in one column, centres equations, left-aligns text, prevents overlaps, and reflows auto-positioned content.
+The application measures sizes, packs elements according to user layout settings, centres equations, left-aligns text, prevents overlaps, and reflows auto-positioned content.
 
 ### Rich text formatting
 
