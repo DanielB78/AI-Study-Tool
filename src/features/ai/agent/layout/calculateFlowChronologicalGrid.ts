@@ -161,8 +161,12 @@ function layoutLabels(settings: UserLayoutSettings): {
     settings.maxRowWidth == null
       ? '∞ width'
       : `W≤${Math.round(settings.maxRowWidth)}`;
+  const ratio =
+    settings.columnRowRatio == null
+      ? 'free ratio'
+      : `${settings.columnRowRatio.columns}:${settings.columnRowRatio.rows} cols:rows`;
   return {
-    layout: `${dir} (${h}, ${w})`,
+    layout: `${dir} (${h}, ${w}, ${ratio})`,
     cellArrangement: 'Vertical stack (associated cells)',
   };
 }
@@ -410,7 +414,8 @@ export function calculateFlowChronologicalGrid(input: {
   const isLegacySingleColumn =
     settings.chronologicalDirection === 'down' &&
     settings.maxColumnHeight == null &&
-    settings.maxRowWidth == null;
+    settings.maxRowWidth == null &&
+    settings.columnRowRatio == null;
 
   return {
     grid,

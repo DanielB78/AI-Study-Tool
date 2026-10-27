@@ -6,6 +6,7 @@ import {
   resetUserLayoutSettings,
   setUserLayoutSettings,
   setUserLayoutSettingsForTests,
+  targetColumnCountForRatio,
 } from '../userLayoutSettings';
 
 const KEY = 'ai-study-tool:user-layout-settings:v1';
@@ -38,16 +39,18 @@ describe('userLayoutSettings persistence', () => {
     setUserLayoutSettingsForTests({ ...DEFAULT_USER_LAYOUT_SETTINGS });
   });
 
-  it('Test K — persists direction and both limits across reload', () => {
+  it('Test K — persists direction, limits, and ratio across reload', () => {
     setUserLayoutSettings({
       chronologicalDirection: 'sideways',
       maxColumnHeight: 600,
       maxRowWidth: 900,
+      columnRowRatio: { columns: 2, rows: 1 },
     });
     expect(JSON.parse(localStorage.getItem(KEY)!)).toMatchObject({
       chronologicalDirection: 'sideways',
       maxColumnHeight: 600,
       maxRowWidth: 900,
+      columnRowRatio: { columns: 2, rows: 1 },
     });
 
     // Simulate reload from storage.
@@ -56,6 +59,7 @@ describe('userLayoutSettings persistence', () => {
       chronologicalDirection: 'sideways',
       maxColumnHeight: 600,
       maxRowWidth: 900,
+      columnRowRatio: { columns: 2, rows: 1 },
     });
   });
 
@@ -76,13 +80,19 @@ describe('userLayoutSettings persistence', () => {
     expect(getUserLayoutSettings()).toEqual(DEFAULT_USER_LAYOUT_SETTINGS);
   });
 
-  it('normalize rejects invalid limits', () => {
+  it('normalize rejects invalid limits and ratios', () => {
     expect(
       normalizeUserLayoutSettings({
         chronologicalDirection: 'down',
         maxColumnHeight: -1,
         maxRowWidth: Number.NaN,
+        columnRowRatio: { columns: 0, rows: 2 },
       }),
     ).toEqual(DEFAULT_USER_LAYOUT_SETTINGS);
+  });
+
+  it('targetColumnCountForRatio matches 1:1 and 2:1 intuition', () => {
+    expect(targetColumnCountForRatio(9, { columns: 1, rows: 1 })).toBe(3);
+    expect(targetColumnCountForRatio(8, { columns: 2, rows: 1 })).toBe(4);
   });
 });

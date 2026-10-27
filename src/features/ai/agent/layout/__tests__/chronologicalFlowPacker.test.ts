@@ -40,7 +40,12 @@ describe('packCellsChronologically', () => {
     // Each cell 80 tall + 18 gap → 2 fit in 180, third wraps.
     const r = packCellsChronologically(
       cells(5, 100, 80),
-      { chronologicalDirection: 'down', maxColumnHeight: 180, maxRowWidth: null },
+      {
+        chronologicalDirection: 'down',
+        maxColumnHeight: 180,
+        maxRowWidth: null,
+        columnRowRatio: null,
+      },
       gaps,
     );
     expect(r.wrapped).toBe(true);
@@ -170,11 +175,84 @@ describe('packCellsChronologically', () => {
         chronologicalDirection: 'down',
         maxColumnHeight: 120,
         maxRowWidth: null,
+        columnRowRatio: null,
       },
       gaps,
     );
     const big = r.cells.find((c) => c.id === 'big')!;
     expect(big.height).toBe(400);
+  });
+
+  it('ratio 1:1 packs ~equal columns and rows (down)', () => {
+    const r = packCellsChronologically(
+      cells(9, 100, 80),
+      {
+        chronologicalDirection: 'down',
+        maxColumnHeight: null,
+        maxRowWidth: null,
+        columnRowRatio: { columns: 1, rows: 1 },
+      },
+      gaps,
+    );
+    const cols = new Set(r.cells.map((c) => c.column));
+    expect(cols.size).toBe(3);
+    expect(r.wrapReason).toBe('ratio');
+    // ~3 items per column
+    for (const col of cols) {
+      const count = r.cells.filter((c) => c.column === col).length;
+      expect(count).toBe(3);
+    }
+  });
+
+  it('ratio 2:1 prefers about twice as many columns as rows (down)', () => {
+    // N=8 → targetCols = round(sqrt(8*2/1)) = round(4) = 4 → 2 items/col → 4 cols × 2 rows
+    const r = packCellsChronologically(
+      cells(8, 100, 80),
+      {
+        chronologicalDirection: 'down',
+        maxColumnHeight: null,
+        maxRowWidth: null,
+        columnRowRatio: { columns: 2, rows: 1 },
+      },
+      gaps,
+    );
+    const colCount = new Set(r.cells.map((c) => c.column)).size;
+    const maxRows = Math.max(...r.cells.map((c) => c.row)) + 1;
+    expect(colCount).toBeGreaterThanOrEqual(maxRows);
+    expect(colCount / maxRows).toBeGreaterThanOrEqual(1.5);
+  });
+
+  it('ratio 1:2 prefers about twice as many rows as columns (sideways)', () => {
+    // N=8, ratio 1:2 → targetCols = round(sqrt(8*1/2))=round(2)=2 → targetRows=4
+    const r = packCellsChronologically(
+      cells(8, 100, 80),
+      {
+        chronologicalDirection: 'sideways',
+        maxColumnHeight: null,
+        maxRowWidth: null,
+        columnRowRatio: { columns: 1, rows: 2 },
+      },
+      gaps,
+    );
+    const rowCount = new Set(r.cells.map((c) => c.row)).size;
+    const maxCols = Math.max(...r.cells.map((c) => c.column)) + 1;
+    expect(rowCount).toBeGreaterThanOrEqual(maxCols);
+  });
+
+  it('height limit still wins over ratio when it binds first', () => {
+    // Ratio wants many items/column, but height only fits 1.
+    const r = packCellsChronologically(
+      cells(4, 100, 80),
+      {
+        chronologicalDirection: 'down',
+        maxColumnHeight: 90,
+        maxRowWidth: null,
+        columnRowRatio: { columns: 1, rows: 1 },
+      },
+      gaps,
+    );
+    expect(r.wrapReason).toBe('column_height');
+    expect(new Set(r.cells.map((c) => c.column)).size).toBe(4);
   });
 });
 
@@ -190,6 +268,7 @@ describe('normalizeUserLayoutSettings', () => {
       chronologicalDirection: 'sideways',
       maxColumnHeight: null,
       maxRowWidth: null,
+      columnRowRatio: null,
     });
   });
 });

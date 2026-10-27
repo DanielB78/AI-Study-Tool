@@ -1,17 +1,22 @@
 /**
  * Flow packer for user-configurable chronological layout.
  *
- * Downwards: fill columns top→bottom; wrap to a new column on height limit;
- * wrap the column-group below on width limit.
+ * Downwards: fill columns top→bottom; wrap to a new column on height limit
+ * and/or column:row ratio; wrap the column-group below on width limit.
  *
- * Sideways: fill rows left→right; wrap to a new row on width limit;
- * wrap the row-group right on height limit.
+ * Sideways: fill rows left→right; wrap to a new row on width limit
+ * and/or ratio; wrap the row-group right on height limit.
  *
- * A secondary limit never creates primary-axis wrapping by itself
- * (e.g. downwards + only maxRowWidth → still one unlimited column).
+ * A secondary size limit never creates primary-axis wrapping by itself
+ * (e.g. downwards + only maxRowWidth → still one unlimited column), unless a
+ * column:row ratio is also set (ratio can introduce primary wraps).
  */
 
-import type { UserLayoutSettings } from './userLayoutSettings';
+import {
+  targetColumnCountForRatio,
+  targetRowCountForRatio,
+  type UserLayoutSettings,
+} from './userLayoutSettings';
 
 export type FlowCellSize = {
   id: string;
@@ -72,6 +77,21 @@ function packDown(
   const maxW = settings.maxRowWidth;
   const { columnGap, rowGap, outerPadding } = gaps;
 
+  // Soft wrap by item count when a columns:rows ratio is set.
+  const ratio = settings.columnRowRatio;
+  const targetCols = ratio
+    ? targetColumnCountForRatio(cells.length, ratio)
+    : null;
+  const maxItemsPerColumn =
+    targetCols != null
+      ? Math.max(1, Math.ceil(cells.length / targetCols))
+      : null;
+  if (ratio && targetCols != null && maxItemsPerColumn != null) {
+    diagnostics.push(
+      `Downwards ratio ${ratio.columns}:${ratio.rows} → target ~${targetCols} column(s), ≤${maxItemsPerColumn} item(s)/column.`,
+    );
+  }
+
   type Group = { columns: ColumnState[] };
   const groups: Group[] = [];
   let group: Group = { columns: [] };
@@ -107,6 +127,32 @@ function packDown(
     }
   };
 
+  const openNewColumn = (cell: FlowCellSize, reason: 'column_height' | 'ratio') => {
+    wrapped = true;
+    if (wrapReason === 'none') wrapReason = reason;
+    if (reason === 'column_height') {
+      diagnostics.push(
+        `Downwards: column height limit ${maxH} reached — new column for "${cell.id}".`,
+      );
+    } else {
+      diagnostics.push(
+        `Downwards: column:row ratio filled column (≤${maxItemsPerColumn}) — new column for "${cell.id}".`,
+      );
+    }
+
+    const widthAfterFinalize = groupWidth(group, true);
+    const nextGroupWidth = widthAfterFinalize + columnGap + cell.width;
+    if (maxW != null && nextGroupWidth > maxW && (group.columns.length > 0 || current.items.length > 0)) {
+      startNewGroup();
+    } else {
+      finalizeColumn();
+    }
+
+    current.items.push(cell);
+    current.width = cell.width;
+    current.height = cell.height;
+  };
+
   for (const cell of cells) {
     if (current.items.length === 0) {
       current.items.push(cell);
@@ -117,37 +163,17 @@ function packDown(
 
     const nextHeight = current.height + rowGap + cell.height;
     const fitsHeight = maxH == null || nextHeight <= maxH;
+    const fitsRatioCount =
+      maxItemsPerColumn == null || current.items.length < maxItemsPerColumn;
 
-    if (fitsHeight) {
+    if (fitsHeight && fitsRatioCount) {
       current.items.push(cell);
       current.width = Math.max(current.width, cell.width);
       current.height = nextHeight;
       continue;
     }
 
-    // Height budget exceeded → new column (primary wrap).
-    wrapped = true;
-    if (wrapReason === 'none') wrapReason = 'column_height';
-    diagnostics.push(
-      `Downwards: column height limit ${maxH} reached — new column for "${cell.id}".`,
-    );
-
-    // Would the new column exceed the group width limit?
-    const widthAfterFinalize = groupWidth(group, true);
-    const nextGroupWidth = widthAfterFinalize + columnGap + cell.width;
-    if (maxW != null && group.columns.length + 1 >= 1 && nextGroupWidth > maxW) {
-      // Only wrap group when we already have at least one finished column
-      // (or the current column) that would make adding another exceed maxW.
-      if (group.columns.length > 0 || current.items.length > 0) {
-        startNewGroup();
-      }
-    } else {
-      finalizeColumn();
-    }
-
-    current.items.push(cell);
-    current.width = cell.width;
-    current.height = cell.height;
+    openNewColumn(cell, !fitsHeight ? 'column_height' : 'ratio');
   }
 
   finalizeColumn();
@@ -235,6 +261,20 @@ function packSideways(
   const maxH = settings.maxColumnHeight;
   const { columnGap, rowGap, outerPadding } = gaps;
 
+  const ratio = settings.columnRowRatio;
+  const targetRows = ratio
+    ? targetRowCountForRatio(cells.length, ratio)
+    : null;
+  const maxItemsPerRow =
+    targetRows != null
+      ? Math.max(1, Math.ceil(cells.length / targetRows))
+      : null;
+  if (ratio && targetRows != null && maxItemsPerRow != null) {
+    diagnostics.push(
+      `Sideways ratio ${ratio.columns}:${ratio.rows} → target ~${targetRows} row(s), ≤${maxItemsPerRow} item(s)/row.`,
+    );
+  }
+
   type Group = { rows: RowState[] };
   const groups: Group[] = [];
   let group: Group = { rows: [] };
@@ -271,30 +311,18 @@ function packSideways(
     }
   };
 
-  for (const cell of cells) {
-    if (current.items.length === 0) {
-      current.items.push(cell);
-      current.width = cell.width;
-      current.height = cell.height;
-      continue;
-    }
-
-    const nextWidth = current.width + columnGap + cell.width;
-    const fitsWidth = maxW == null || nextWidth <= maxW;
-
-    if (fitsWidth) {
-      current.items.push(cell);
-      current.width = nextWidth;
-      current.height = Math.max(current.height, cell.height);
-      continue;
-    }
-
-    // Width budget exceeded → new row (primary wrap).
+  const openNewRow = (cell: FlowCellSize, reason: 'row_width' | 'ratio') => {
     wrapped = true;
-    if (wrapReason === 'none') wrapReason = 'row_width';
-    diagnostics.push(
-      `Sideways: row width limit ${maxW} reached — new row for "${cell.id}".`,
-    );
+    if (wrapReason === 'none') wrapReason = reason;
+    if (reason === 'row_width') {
+      diagnostics.push(
+        `Sideways: row width limit ${maxW} reached — new row for "${cell.id}".`,
+      );
+    } else {
+      diagnostics.push(
+        `Sideways: column:row ratio filled row (≤${maxItemsPerRow}) — new row for "${cell.id}".`,
+      );
+    }
 
     const heightAfterFinalize = groupHeight(group, true);
     const nextGroupHeight = heightAfterFinalize + rowGap + cell.height;
@@ -307,6 +335,29 @@ function packSideways(
     current.items.push(cell);
     current.width = cell.width;
     current.height = cell.height;
+  };
+
+  for (const cell of cells) {
+    if (current.items.length === 0) {
+      current.items.push(cell);
+      current.width = cell.width;
+      current.height = cell.height;
+      continue;
+    }
+
+    const nextWidth = current.width + columnGap + cell.width;
+    const fitsWidth = maxW == null || nextWidth <= maxW;
+    const fitsRatioCount =
+      maxItemsPerRow == null || current.items.length < maxItemsPerRow;
+
+    if (fitsWidth && fitsRatioCount) {
+      current.items.push(cell);
+      current.width = nextWidth;
+      current.height = Math.max(current.height, cell.height);
+      continue;
+    }
+
+    openNewRow(cell, !fitsWidth ? 'row_width' : 'ratio');
   }
 
   finalizeRow();

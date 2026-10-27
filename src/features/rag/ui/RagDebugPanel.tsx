@@ -8,7 +8,9 @@ import {
   formatNoteStructureForPrompt,
 } from '../../structures/formatForPrompt';
 import {
+  COLUMN_ROW_RATIO_PRESETS,
   DEFAULT_LIMIT_SUGGESTIONS,
+  formatColumnRowRatio,
   getUserLayoutSettingsSnapshot,
   setUserLayoutSettings,
   subscribeUserLayoutSettings,
@@ -604,6 +606,41 @@ export function RagDebugPanel() {
                 }}
               />
             </label>
+
+            <div className="rag-debug-section-title" style={{ marginTop: 10 }}>
+              Columns : Rows ratio
+            </div>
+            <p className="rag-debug-meta">
+              Shapes the packed group (e.g. 1:1 ≈ square, 2:1 ≈ twice as many columns as rows). Optional — off by default.
+            </p>
+            <div className="rag-debug-shortcuts">
+              <button
+                type="button"
+                className={`rag-debug-btn ghost${layoutSettings.columnRowRatio == null ? ' is-active' : ''}`}
+                onClick={() => setUserLayoutSettings({ columnRowRatio: null })}
+              >
+                Off
+              </button>
+              {COLUMN_ROW_RATIO_PRESETS.map((preset) => {
+                const key = formatColumnRowRatio(preset);
+                const active =
+                  layoutSettings.columnRowRatio != null &&
+                  layoutSettings.columnRowRatio.columns === preset.columns &&
+                  layoutSettings.columnRowRatio.rows === preset.rows;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`rag-debug-btn ghost${active ? ' is-active' : ''}`}
+                    onClick={() =>
+                      setUserLayoutSettings({ columnRowRatio: preset })
+                    }
+                  >
+                    {key}
+                  </button>
+                );
+              })}
+            </div>
           </section>
 
           <StructureSelector

@@ -59,14 +59,20 @@ export {
 export {
   DEFAULT_USER_LAYOUT_SETTINGS,
   DEFAULT_LIMIT_SUGGESTIONS,
+  COLUMN_ROW_RATIO_PRESETS,
   getUserLayoutSettings,
   setUserLayoutSettings,
   resetUserLayoutSettings,
   subscribeUserLayoutSettings,
   getUserLayoutSettingsSnapshot,
   normalizeUserLayoutSettings,
+  normalizeColumnRowRatio,
+  formatColumnRowRatio,
+  targetColumnCountForRatio,
+  targetRowCountForRatio,
   type UserLayoutSettings,
   type ChronologicalDirection,
+  type ColumnRowRatio,
 } from './userLayoutSettings';
 export type {
   GridLayoutSpec,
