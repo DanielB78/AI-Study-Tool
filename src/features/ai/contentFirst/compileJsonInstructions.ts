@@ -33,6 +33,9 @@ function spansToAgent(spans: ContentInlineSpan[]): AgentRichTextSpan[] {
     if (s.type === 'inline_math') {
       return { type: 'inline_math' as const, latex: s.latex };
     }
+    if (s.type === 'inline_code') {
+      return { type: 'inline_code' as const, text: s.text };
+    }
     const style =
       s.style?.bold || s.style?.italic
         ? {
@@ -42,6 +45,12 @@ function spansToAgent(spans: ContentInlineSpan[]): AgentRichTextSpan[] {
         : undefined;
     return style ? { text: s.text, style } : { text: s.text };
   });
+}
+
+function spanPlain(s: AgentRichTextSpan): string {
+  if ('type' in s && s.type === 'inline_math') return s.latex;
+  if ('type' in s && s.type === 'inline_code') return s.text;
+  return 'text' in s ? s.text : '';
 }
 
 /**
@@ -66,7 +75,12 @@ export function documentToSingleRichText(
         blocks.push({
           type: 'heading',
           spans: spansToAgent(node.spans).map((s) => {
-            if ('type' in s && s.type === 'inline_math') return s;
+            if (
+              'type' in s &&
+              (s.type === 'inline_math' || s.type === 'inline_code')
+            ) {
+              return s;
+            }
             return {
               text: 'text' in s ? s.text : '',
               style: { bold: true, font_size: size },
@@ -87,8 +101,12 @@ export function documentToSingleRichText(
       case 'list': {
         for (const item of node.items) {
           blocks.push({
-            type: node.ordered ? 'numbered' : 'bullet',
+            type: item.ordered ? 'numbered' : 'bullet',
             spans: spansToAgent(item.spans),
+            ...(item.depth > 0 ? { depth: item.depth } : {}),
+            ...(item.ordered && item.start != null && item.start > 0
+              ? { start: item.start }
+              : {}),
           });
         }
         break;
@@ -101,6 +119,22 @@ export function documentToSingleRichText(
             ...(r.header ? { header: true as const } : {}),
             cells: r.cells.map((c) => ({ spans: spansToAgent(c.spans) })),
           })),
+        });
+        break;
+      }
+      case 'code_block': {
+        blocks.push({
+          type: 'code_block',
+          language: node.language,
+          code: node.code,
+        });
+        break;
+      }
+      case 'blockquote': {
+        blocks.push({
+          type: 'blockquote',
+          spans: spansToAgent(node.spans),
+          depth: node.depth,
         });
         break;
       }
@@ -131,6 +165,10 @@ function richTextPlain(doc: AgentRichTextDocument): string {
   return doc.blocks
     .map((b) => {
       if (b.type === 'display_math') return b.latex;
+      if (b.type === 'code_block') {
+        const lang = b.language ?? '';
+        return `\`\`\`${lang}\n${b.code}\n\`\`\``;
+      }
       if (b.type === 'table') {
         const colCount = Math.max(
           b.columns.length,
@@ -138,16 +176,7 @@ function richTextPlain(doc: AgentRichTextDocument): string {
           1,
         );
         const cellText = (spans: AgentRichTextSpan[]) =>
-          spans
-            .map((s) =>
-              'type' in s && s.type === 'inline_math'
-                ? s.latex
-                : 'text' in s
-                  ? s.text
-                  : '',
-            )
-            .join('')
-            .replace(/\|/g, '\\|');
+          spans.map(spanPlain).join('').replace(/\|/g, '\\|');
         const pad = (cells: Array<{ spans: AgentRichTextSpan[] }>) =>
           Array.from({ length: colCount }, (_, i) => cellText(cells[i]?.spans ?? []));
         const fmt = (cells: string[]) => `| ${cells.join(' | ')} |`;
@@ -165,9 +194,16 @@ function richTextPlain(doc: AgentRichTextDocument): string {
         for (const row of body) lines.push(fmt(pad(row.cells)));
         return lines.join('\n');
       }
-      return b.spans
-        .map((s) => ('type' in s && s.type === 'inline_math' ? s.latex : 'text' in s ? s.text : ''))
-        .join('');
+      const content = b.spans.map(spanPlain).join('');
+      if (b.type === 'blockquote') {
+        const depth = Math.max(1, b.depth ?? 1);
+        const prefix = '> '.repeat(depth);
+        return content
+          .split('\n')
+          .map((line) => `${prefix}${line}`)
+          .join('\n');
+      }
+      return content;
     })
     .join('\n\n')
     .trim();
@@ -284,6 +320,8 @@ function compileEditEquation(
     }
     if (n.type === 'list') return n.items.length > 0;
     if (n.type === 'table') return n.rows.length > 0;
+    if (n.type === 'code_block') return n.code.length > 0;
+    if (n.type === 'blockquote') return Boolean(n.text.trim());
     if (n.type === 'graph') return true;
     return false;
   });
@@ -343,6 +381,8 @@ function compileEditGraph(
     }
     if (n.type === 'list') return n.items.length > 0;
     if (n.type === 'table') return n.rows.length > 0;
+    if (n.type === 'code_block') return n.code.length > 0;
+    if (n.type === 'blockquote') return Boolean(n.text.trim());
     if (n.type === 'equation') return true;
     return false;
   });

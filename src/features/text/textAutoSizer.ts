@@ -251,6 +251,15 @@ function estimateRichLayout(
       continue;
     }
 
+    if (block.type === 'code_block') {
+      const codeLines = Math.max(1, block.code.split('\n').length);
+      const monoSize = style.fontSize * 0.875;
+      const lineH = monoSize * 1.45;
+      contentHeight += codeLines * lineH + style.fontSize * 2.2; // padding + margins
+      wrappedLines += codeLines;
+      continue;
+    }
+
     // Approximate inline math width contribution for wrap estimates.
     let text = '';
     for (const s of block.spans) {
@@ -283,13 +292,28 @@ function estimateRichLayout(
       continue;
     }
 
-    const listIndent = block.type === 'bullet' || block.type === 'numbered' ? 28 : 0;
+    const depth =
+      block.type === 'bullet' || block.type === 'numbered'
+        ? Math.max(0, block.depth ?? 0)
+        : block.type === 'blockquote'
+          ? Math.max(0, (block.depth ?? 1) - 1)
+          : 0;
+    const listIndent =
+      block.type === 'bullet' || block.type === 'numbered'
+        ? 28 + depth * 18
+        : block.type === 'blockquote'
+          ? 16 + depth * 10
+          : 0;
     const innerW = Math.max(40, contentWidth - listIndent);
     const fontSize = Math.max(spanSize, style.fontSize);
     const lines = countWrappedLinesForParagraph(text || ' ', innerW, fontSize);
     const lineH = fontSize * (style.lineHeight || 1.35);
     const margin =
-      block.type === 'paragraph' ? fontSize * 0.45 : fontSize * 0.2;
+      block.type === 'paragraph'
+        ? fontSize * 0.45
+        : block.type === 'blockquote'
+          ? fontSize * 0.55
+          : fontSize * 0.2;
     contentHeight += lines * lineH + margin;
     wrappedLines += lines;
   }

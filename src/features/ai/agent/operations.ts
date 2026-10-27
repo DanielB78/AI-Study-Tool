@@ -142,15 +142,26 @@ export type AgentRichTextInlineMathSpan = {
   style?: Pick<AgentRichTextSpanStyle, 'color' | 'highlight_color'>;
 };
 
+export type AgentRichTextInlineCodeSpan = {
+  type: 'inline_code';
+  text: string;
+  style?: Pick<AgentRichTextSpanStyle, 'color' | 'highlight_color'>;
+};
+
 export type AgentRichTextSpan =
   | AgentRichTextTextSpan
-  | AgentRichTextInlineMathSpan;
+  | AgentRichTextInlineMathSpan
+  | AgentRichTextInlineCodeSpan;
 
 export type AgentRichTextContentBlock = {
   /** Optional temporary local id for comment anchors within the same create plan. */
   id?: string;
-  type: 'paragraph' | 'heading' | 'bullet' | 'numbered';
+  type: 'paragraph' | 'heading' | 'bullet' | 'numbered' | 'blockquote';
   role?: 'heading' | 'body';
+  /** Nesting depth for lists (0 = top) and blockquotes (1 = outermost). */
+  depth?: number;
+  /** Explicit start for ordered list items. */
+  start?: number;
   spans: AgentRichTextSpan[];
 };
 
@@ -172,10 +183,18 @@ export type AgentRichTextTableBlock = {
   }>;
 };
 
+export type AgentRichTextCodeBlock = {
+  id?: string;
+  type: 'code_block';
+  language: string | null;
+  code: string;
+};
+
 export type AgentRichTextBlock =
   | AgentRichTextContentBlock
   | AgentRichTextDisplayMathBlock
-  | AgentRichTextTableBlock;
+  | AgentRichTextTableBlock
+  | AgentRichTextCodeBlock;
 
 export type AgentRichTextDocument = {
   blocks: AgentRichTextBlock[];
@@ -1496,9 +1515,17 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
                   id: { type: 'string', minLength: 1 },
                   type: {
                     type: 'string',
-                    enum: ['paragraph', 'heading', 'bullet', 'numbered'],
+                    enum: [
+                      'paragraph',
+                      'heading',
+                      'bullet',
+                      'numbered',
+                      'blockquote',
+                    ],
                   },
                   role: { type: 'string', enum: ['heading', 'body'] },
+                  depth: { type: 'number' },
+                  start: { type: 'number' },
                   spans: {
                     type: 'array',
                     minItems: 1,
@@ -1557,6 +1584,23 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
                             },
                           },
                         },
+                        {
+                          type: 'object',
+                          additionalProperties: false,
+                          required: ['type', 'text'],
+                          properties: {
+                            type: { const: 'inline_code' },
+                            text: { type: 'string' },
+                            style: {
+                              type: 'object',
+                              additionalProperties: false,
+                              properties: {
+                                color: { type: 'string' },
+                                highlight_color: { type: 'string' },
+                              },
+                            },
+                          },
+                        },
                       ],
                     },
                   },
@@ -1570,6 +1614,17 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
                   id: { type: 'string', minLength: 1 },
                   type: { const: 'display_math' },
                   latex: { type: 'string', minLength: 1 },
+                },
+              },
+              {
+                type: 'object',
+                additionalProperties: false,
+                required: ['type', 'code'],
+                properties: {
+                  id: { type: 'string', minLength: 1 },
+                  type: { const: 'code_block' },
+                  language: { type: ['string', 'null'] },
+                  code: { type: 'string' },
                 },
               },
               {

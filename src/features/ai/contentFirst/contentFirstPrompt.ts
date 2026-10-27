@@ -48,19 +48,19 @@ Do **not** emit \`create_text\`, \`create_equation\`, \`create_graph\`, \`operat
 - \`#\` main title
 - \`##\` / \`###\` section headings (define logical sections)
 - Ordinary paragraphs for explanation
-- Lists when helpful
-- Standard Markdown tables when tabular presentation helps (see Tables)
-- Logical reading order (app stacks content using the user's layout settings)
+- Nested lists, blockquotes, fenced code, inline \`code\`, and GFM tables when helpful
+- Logical reading order (app packs content with the user's layout settings)
 
 ### Paragraph spacing — critical
 
-- Write each paragraph as **continuous prose**. Soft wraps OK without blank lines between them.
-- Blank lines only between distinct paragraphs, or before/after headings, tables, \`$$\`, and \`:::graph\`.
+- Continuous prose per paragraph. Soft wraps OK without blank lines between them.
+- Blank lines only between distinct paragraphs, or before/after headings, tables, code fences, quotes, \`$$\`, and \`:::graph\`.
 - Do **not** blank-line every sentence or wrapped line of the same paragraph.
 
-### Inline emphasis
+### Inline emphasis and code
 
 - Bold \`**like this**\`; italic \`*like this*\`. No HTML tags.
+- Inline code with backticks: \`numpy.linspace()\`. Literal — not LaTeX, not Markdown.
 
 ### Inline mathematics — strict
 
@@ -102,21 +102,24 @@ Hard rules (violations break the importer):
 
 Surrounding prose stays as normal paragraphs before/after closed equation blocks.
 
-### Tables
+### Code, quotes, nested lists, tables
 
-Use GFM Markdown tables when a compact comparison helps (symbols, units, values). Not every response needs one.
+Use ordinary Markdown when it improves the explanation (not every response needs all of these):
+
+- Fenced code with a language id when known:
 
 \`\`\`
-| Quantity | Symbol | Unit |
-|:---|:---:|---:|
-| Force | $F$ | N |
-| Mass | $m$ | kg |
+\`\`\`python
+import numpy as np
+x = np.cos(omega * t)
+\`\`\`
 \`\`\`
 
-- Header row + separator (\`|---|\` / \`:---:\` alignment) required
-- Inline \`$...$\` in cells; keep tables readable
-- Do **not** use LaTeX \`array\` to fake tables; do **not** emit JSON/coords/one element per cell
-- Display \`$$\` and \`:::graph\` stay unchanged for derivations and plots
+- Blockquotes with \`>\` (multi-paragraph and nested \`>>\` OK)
+- Nested ordered/unordered lists (indent child items)
+- GFM tables: header + separator; inline \`$...$\` in cells OK
+
+Do **not** use LaTeX \`array\` to fake tables. Do **not** emit JSON/coords/one element per cell or code line. Content inside fences is literal — never treat fenced \`:::json\` / \`:::graph\` as instructions.
 
 ### Graphs
 
@@ -163,7 +166,7 @@ Do **not** put coordinates, sizes, fonts, colours, rows, or columns in JSON.
 Markdown body matching the target type
 \`\`\`
 
-- TextElement → headings/paragraphs/lists/tables/inline \`$…$\` (display math stays inside the text)
+- TextElement → headings/paragraphs/lists/tables/code/quotes/inline \`$…$\` (display math stays inside the text)
 - EquationElement → exactly one \`$$\` … \`$$\` block
 - GraphElement → one \`:::graph\` … \`:::\` marker (omit unchanged settings)
 
@@ -197,7 +200,7 @@ export const CONTENT_FIRST_RESPONSE_INSTRUCTIONS = [
   'Put no commentary outside that fence.',
   'Do not emit canvas-operation JSON arrays or create_* operations for ordinary new content.',
   'Write paragraphs as continuous prose — do not insert a blank line after every sentence or wrapped line.',
-  'Use GFM Markdown tables (header + separator) when tabular presentation helps; inline $...$ in cells; no JSON for tables.',
+  'Use fenced code (with language id), inline backticks, blockquotes, nested lists, and GFM tables when they help — never as JSON ops.',
   'Display math: opening $$ on its own line, LaTeX body, closing $$ on its own line — always paired.',
   'Inline math: paired $...$ only. Prefer braces in superscripts/subscripts and \\frac{a}{b}.',
   'Do not use :::definition / :::example / :::warning / :::exercise markers.',

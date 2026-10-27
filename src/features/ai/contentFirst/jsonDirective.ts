@@ -11,6 +11,11 @@
  * Distinguishes :::json from :::graph. Ignores markers inside ``` fences.
  */
 
+import {
+  isFenceCloseLine,
+  parseFenceOpenLine,
+  stripMarkdownDocumentFence,
+} from './markdownFences';
 import type {
   ContentFirstEnvelope,
   ContentJsonInstruction,
@@ -20,19 +25,7 @@ import { ContentParseError } from './types';
 
 /** Strip optional whole-document ```markdown fence (same rules as contentParser). */
 export function stripContentFence(raw: string): string {
-  let text = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
-  const trimmed = text.trim();
-  const whole = /^```(?:markdown|md|text)?\s*\n([\s\S]*?)\n```\s*$/i.exec(
-    trimmed,
-  );
-  if (whole) return whole[1]!;
-  const fenced =
-    /```(?:markdown|md)\s*\n([\s\S]*?)\n```/i.exec(trimmed) ??
-    /```text\s*\n([\s\S]*?)\n```/i.exec(trimmed);
-  if (fenced?.[1] != null && fenced[1].trim().length > 0) {
-    return fenced[1];
-  }
-  return text;
+  return stripMarkdownDocumentFence(raw);
 }
 
 function parseJsonInstruction(jsonText: string): ContentJsonInstruction {
@@ -128,7 +121,7 @@ export function splitContentFirstEnvelope(raw: string): ContentFirstEnvelope {
   const segments: ContentJsonSegment[] = [];
 
   let i = 0;
-  let inFence = false;
+  let openFence: ReturnType<typeof parseFenceOpenLine> | null = null;
   let current: ContentJsonInstruction | null = null;
   let bodyLines: string[] = [];
 
@@ -150,16 +143,26 @@ export function splitContentFirstEnvelope(raw: string): ContentFirstEnvelope {
     const line = lines[i]!;
     const trimmed = line.trim();
 
-    // Track fenced code blocks so :::json inside them is inert.
-    if (/^```/.test(trimmed)) {
-      inFence = !inFence;
+    // Track fenced code blocks (``` / ~~~, matching length) so :::json inside is inert.
+    if (openFence) {
+      if (isFenceCloseLine(line, openFence)) {
+        openFence = null;
+      }
+      if (current) bodyLines.push(line);
+      else preambleLines.push(line);
+      i += 1;
+      continue;
+    }
+    const fenceOpen = parseFenceOpenLine(line);
+    if (fenceOpen) {
+      openFence = fenceOpen;
       if (current) bodyLines.push(line);
       else preambleLines.push(line);
       i += 1;
       continue;
     }
 
-    if (!inFence && /^:::json\s*$/i.test(trimmed)) {
+    if (!openFence && /^:::json\s*$/i.test(trimmed)) {
       flushSegment();
       i += 1;
       const jsonBuf: string[] = [];
@@ -185,8 +188,8 @@ export function splitContentFirstEnvelope(raw: string): ContentFirstEnvelope {
     i += 1;
   }
 
-  if (inFence) {
-    throw new ContentParseError('unclosed_fence', 'Unclosed ``` code fence.');
+  if (openFence) {
+    throw new ContentParseError('unclosed_fence', 'Unclosed fenced code block.');
   }
 
   flushSegment();

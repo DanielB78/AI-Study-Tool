@@ -10,13 +10,18 @@
 
 import { renderLatexHtml } from '../equations/latex';
 import {
+  isCodeBlock,
   isDisplayMathBlock,
+  isInlineCodeSpan,
   isInlineMathSpan,
   isTableBlock,
+  isTextSpan,
   resolveRichTextColor,
   resolveRichTextFontSize,
   type RichTextBlock,
+  type RichTextCodeBlock,
   type RichTextDocument,
+  type RichTextInlineCodeSpan,
   type RichTextInlineMathSpan,
   type RichTextSpan,
   type RichTextTableAlignment,
@@ -25,6 +30,7 @@ import {
   type RichTextTableRow,
   type RichTextTextSpan,
 } from './richText';
+import { highlightCodeToHtml, normalizeCodeLanguage } from './syntaxHighlight';
 
 function escapeHtml(s: string): string {
   return s
@@ -116,12 +122,34 @@ function textSpanToHtml(
   return `<span${attrs}${parts.length ? ` style="${parts.join(';')}"` : ''}>${text}</span>`;
 }
 
+function inlineCodeToHtml(
+  span: RichTextInlineCodeSpan,
+  defaults: { color: string },
+): string {
+  const chrome = mathChromeStyle(span.style, defaults);
+  const commentAttr = span.style?.linked_comment_id
+    ? ` data-linked-comment="${escapeHtml(span.style.linked_comment_id)}"`
+    : '';
+  return `<code data-rt-span="inline_code"${commentAttr}${chrome} class="rt-code-inline">${escapeHtml(span.text)}</code>`;
+}
+
 function spanToHtml(
   span: RichTextSpan,
   defaults: { color: string; fontSize: number },
 ): string {
   if (isInlineMathSpan(span)) return inlineMathToHtml(span, defaults);
+  if (isInlineCodeSpan(span)) return inlineCodeToHtml(span, defaults);
   return textSpanToHtml(span, defaults);
+}
+
+function codeBlockToHtml(block: RichTextCodeBlock): string {
+  const idAttr = block.id ? ` data-rt-block-id="${escapeHtml(block.id)}"` : '';
+  const lang = block.language?.trim() || '';
+  const langAttr = lang ? ` data-rt-lang="${escapeHtml(lang)}"` : '';
+  const { html, highlighted } = highlightCodeToHtml(block.code, block.language);
+  const hlClass = highlighted ? ' hljs' : '';
+  // contenteditable=false keeps indentation stable; source is in data-rt-code for round-trip.
+  return `<div data-rt-type="code_block"${idAttr}${langAttr} data-rt-code="${escapeHtml(block.code)}" class="rt-code-block" contenteditable="false" style="display:block;margin:0.75em 0;padding:0.75em 0.9em;border-radius:6px;background:color-mix(in srgb, currentColor 6%, transparent);border:1px solid color-mix(in srgb, currentColor 12%, transparent);overflow-x:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:0.875em;line-height:1.45;white-space:pre"><pre class="rt-code-pre" style="margin:0;padding:0;background:transparent;border:none;white-space:pre;overflow:visible"><code class="rt-code-source${hlClass}"${lang ? ` data-language="${escapeHtml(lang)}"` : ''}>${html}</code></pre></div>`;
 }
 
 function displayMathToHtml(
@@ -202,6 +230,8 @@ function tableToHtml(
   return `<div data-rt-type="table"${idAttr}${colsAttr} class="rt-table-wrap" style="display:block;margin:0.75em 0;overflow-x:auto;max-width:100%"><table class="rt-table" style="width:100%;border-collapse:collapse;table-layout:auto;font-size:1em;line-height:1.35;border-top:1px solid color-mix(in srgb, currentColor 22%, transparent);border-bottom:1px solid color-mix(in srgb, currentColor 22%, transparent)">${thead}<tbody>${tbodyRows}</tbody></table></div>`;
 }
 
+const LIST_BULLETS = ['•', '◦', '▪', '•'] as const;
+
 function blockToHtml(
   block: RichTextBlock,
   defaults: { color: string; fontSize: number },
@@ -213,6 +243,9 @@ function blockToHtml(
   if (isTableBlock(block)) {
     return { html: tableToHtml(block, defaults), nextNumbered: 0 };
   }
+  if (isCodeBlock(block)) {
+    return { html: codeBlockToHtml(block), nextNumbered: 0 };
+  }
   const inner = block.spans.map((s) => spanToHtml(s, defaults)).join('');
   if (block.type === 'heading') {
     const size = resolveRichTextFontSize('heading', defaults.fontSize);
@@ -221,16 +254,30 @@ function blockToHtml(
       nextNumbered: 0,
     };
   }
-  if (block.type === 'bullet') {
+  if (block.type === 'blockquote') {
+    const depth = Math.max(1, block.depth ?? 1);
+    const pad = 0.75 + (depth - 1) * 0.55;
     return {
-      html: `<div data-rt-type="bullet" style="display:flex;gap:0.4em;margin:0 0 0.2em 0;padding-left:0.15em"><span contenteditable="false" aria-hidden="true">•</span><div style="flex:1;min-width:0">${inner || '<br/>'}</div></div>`,
+      html: `<div data-rt-type="blockquote" data-rt-depth="${depth}" class="rt-blockquote" style="margin:0.55em 0;padding:0.35em 0.75em 0.35em ${pad}em;border-left:3px solid color-mix(in srgb, currentColor 28%, transparent);background:color-mix(in srgb, currentColor 4%, transparent)">${inner || '<br/>'}</div>`,
+      nextNumbered: 0,
+    };
+  }
+  if (block.type === 'bullet') {
+    const depth = Math.max(0, block.depth ?? 0);
+    const bullet = LIST_BULLETS[Math.min(depth, LIST_BULLETS.length - 1)]!;
+    const pad = 0.15 + depth * 1.15;
+    return {
+      html: `<div data-rt-type="bullet" data-rt-depth="${depth}" style="display:flex;gap:0.4em;margin:0 0 0.2em 0;padding-left:${pad}em"><span contenteditable="false" aria-hidden="true">${bullet}</span><div style="flex:1;min-width:0">${inner || '<br/>'}</div></div>`,
       nextNumbered: 0,
     };
   }
   if (block.type === 'numbered') {
-    const n = numberedIndex + 1;
+    const depth = Math.max(0, block.depth ?? 0);
+    const start = block.start && block.start > 0 ? block.start : numberedIndex + 1;
+    const n = start;
+    const pad = 0.15 + depth * 1.15;
     return {
-      html: `<div data-rt-type="numbered" data-rt-n="${n}" style="display:flex;gap:0.4em;margin:0 0 0.2em 0;padding-left:0.15em"><span contenteditable="false" aria-hidden="true">${n}.</span><div style="flex:1;min-width:0">${inner || '<br/>'}</div></div>`,
+      html: `<div data-rt-type="numbered" data-rt-n="${n}" data-rt-depth="${depth}" style="display:flex;gap:0.4em;margin:0 0 0.2em 0;padding-left:${pad}em"><span contenteditable="false" aria-hidden="true">${n}.</span><div style="flex:1;min-width:0">${inner || '<br/>'}</div></div>`,
       nextNumbered: n,
     };
   }
@@ -340,7 +387,23 @@ function spansFromNode(
     return [inlineMathFromElement(el)];
   }
 
-  // Skip list markers / other non-editable chrome, but not math (handled above).
+  if (el.getAttribute('data-rt-span') === 'inline_code' || el.tagName === 'CODE') {
+    // Prefer explicit attribute; bare <code> inside paragraphs is also inline code.
+    // Skip <code> inside fenced code blocks (handled at block level).
+    if (el.closest('[data-rt-type="code_block"]')) return [];
+    const linked = el.getAttribute('data-linked-comment') ?? undefined;
+    const style: RichTextInlineCodeSpan['style'] = {};
+    if (linked) style.linked_comment_id = linked;
+    return [
+      {
+        type: 'inline_code',
+        text: el.textContent ?? '',
+        ...(Object.keys(style).length ? { style } : {}),
+      },
+    ];
+  }
+
+  // Skip list markers / other non-editable chrome, but not math / inline code.
   if (el.getAttribute('contenteditable') === 'false') return [];
 
   const merged = {
@@ -359,14 +422,14 @@ function spansFromNode(
 function mergeAdjacentSpans(spans: RichTextSpan[]): RichTextSpan[] {
   const out: RichTextSpan[] = [];
   for (const s of spans) {
-    if (isInlineMathSpan(s)) {
+    if (isInlineMathSpan(s) || isInlineCodeSpan(s)) {
       out.push({ ...s });
       continue;
     }
     const prev = out[out.length - 1];
     if (
       prev &&
-      !isInlineMathSpan(prev) &&
+      isTextSpan(prev) &&
       JSON.stringify(prev.style ?? {}) === JSON.stringify(s.style ?? {})
     ) {
       prev.text += s.text;
@@ -496,18 +559,59 @@ export function htmlToRichText(
       continue;
     }
 
+    if (typeAttr === 'code_block') {
+      const id = el.getAttribute('data-rt-block-id') ?? undefined;
+      const language = normalizeCodeLanguage(
+        el.getAttribute('data-rt-lang') || el.getAttribute('data-language'),
+      );
+      const code =
+        el.getAttribute('data-rt-code') ??
+        el.querySelector('code')?.textContent ??
+        el.textContent ??
+        '';
+      blocks.push({
+        type: 'code_block',
+        code,
+        language,
+        ...(id ? { id } : {}),
+      });
+      continue;
+    }
+
     let contentRoot: HTMLElement = el;
     if (typeAttr === 'bullet' || typeAttr === 'numbered') {
       contentRoot = (el.querySelector(':scope > div') as HTMLElement) ?? el;
     }
     const spans = spansFromNode(contentRoot, baseFontSize, rootFontPx);
-    const type: Exclude<RichTextBlock['type'], 'display_math' | 'table'> =
-      typeAttr === 'heading' || typeAttr === 'bullet' || typeAttr === 'numbered'
+    const depthRaw = el.getAttribute('data-rt-depth');
+    const depth =
+      depthRaw != null && Number.isFinite(Number(depthRaw))
+        ? Math.max(0, Math.round(Number(depthRaw)))
+        : undefined;
+    const nRaw = el.getAttribute('data-rt-n');
+    const start =
+      typeAttr === 'numbered' && nRaw != null && Number.isFinite(Number(nRaw))
+        ? Math.max(1, Math.round(Number(nRaw)))
+        : undefined;
+
+    const type: Exclude<
+      RichTextBlock['type'],
+      'display_math' | 'table' | 'code_block'
+    > =
+      typeAttr === 'heading' ||
+      typeAttr === 'bullet' ||
+      typeAttr === 'numbered' ||
+      typeAttr === 'blockquote'
         ? typeAttr
         : 'paragraph';
     blocks.push({
       type,
       spans: spans.length ? spans : [{ text: '' }],
+      ...(depth !== undefined &&
+      (type === 'bullet' || type === 'numbered' || type === 'blockquote')
+        ? { depth: type === 'blockquote' ? Math.max(1, depth) : depth }
+        : {}),
+      ...(start !== undefined ? { start } : {}),
     });
   }
 
@@ -612,6 +716,12 @@ function estimateRichTextHeightFallback(
       lines += 1.2; // table vertical margins
       continue;
     }
+    if (isCodeBlock(block)) {
+      const codeLines = Math.max(1, block.code.split('\n').length);
+      // Monospace slightly denser; padding ≈ 1.5 lines.
+      lines += codeLines * 0.95 + 1.5;
+      continue;
+    }
     let textLen = 0;
     let extraMathWidth = 0;
     for (const s of block.spans) {
@@ -630,7 +740,7 @@ function estimateRichTextHeightFallback(
     const avg = size * 0.52;
     const cpl = Math.max(1, Math.floor((contentWidth - extraMathWidth) / avg));
     lines += Math.max(1, Math.ceil(Math.max(textLen, 1) / cpl));
-    lines += 0.35;
+    lines += block.type === 'blockquote' ? 0.55 : 0.35;
   }
   return Math.max(
     56,

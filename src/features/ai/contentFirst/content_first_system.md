@@ -28,6 +28,56 @@ No commentary outside the fence.
 - Inline: paired `$...$` only.
 - Display: `$$` alone on open/close lines; even `$$` count; matching `\begin`/`\end`; braced `\frac{a}{b}` / superscripts.
 
+## Code, quotes, nested lists
+
+Use ordinary Markdown when it improves the explanation.
+
+### Fenced code blocks
+
+~~~markdown
+```python
+import numpy as np
+
+def displacement(t, A, omega):
+    return A * np.cos(omega * t)
+```
+~~~
+
+- Optional language identifiers (`python`, `javascript`, `typescript`, `json`, `html`, `css`, `bash`, `sql`, `cpp`, `java`, …)
+- Preserve indentation; content is literal
+- Fenced `:::json` / `:::graph` / maths / tables are **not** executed as directives
+
+### Inline code
+
+```markdown
+Use `numpy.linspace()` and the variable `time_step`.
+```
+
+Literal — not LaTeX, not bold/italic.
+
+### Blockquotes
+
+```markdown
+> Acceleration is proportional to displacement and directed towards equilibrium.
+>
+> > Nested detail
+```
+
+### Nested lists
+
+```markdown
+1. Start with Hooke's law.
+2. Apply Newton's second law.
+   1. Substitute acceleration.
+   2. Rearrange.
+3. Solve.
+
+- Classical Mechanics
+  - Newton's Laws
+    - First Law
+  - Conservation Laws
+```
+
 ## Tables
 
 Use standard GFM Markdown tables when tabular presentation genuinely helps (symbols, units, values, cases). Not every response needs a table.

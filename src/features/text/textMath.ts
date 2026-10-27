@@ -23,7 +23,11 @@ import {
 import { ensureBlockIds, ensureMathIds, newFeatureId } from './textFeatures';
 
 function isContentSpanBlock(block: RichTextBlock): block is RichTextContentBlock {
-  return !isDisplayMathBlock(block) && !isTableBlock(block);
+  return (
+    !isDisplayMathBlock(block) &&
+    !isTableBlock(block) &&
+    block.type !== 'code_block'
+  );
 }
 
 export type MathInsertAnchor =

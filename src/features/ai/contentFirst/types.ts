@@ -10,7 +10,8 @@ export type ContentTextSpanStyle = {
 
 export type ContentInlineSpan =
   | { type: 'text'; text: string; style?: ContentTextSpanStyle }
-  | { type: 'inline_math'; latex: string };
+  | { type: 'inline_math'; latex: string }
+  | { type: 'inline_code'; text: string };
 
 export type ContentHeadingNode = {
   type: 'heading';
@@ -28,10 +29,39 @@ export type ContentParagraphNode = {
   sectionId: string | null;
 };
 
+export type ContentListItem = {
+  ordered: boolean;
+  /** 0 = top level. */
+  depth: number;
+  /** Explicit start when ordered. */
+  start: number | null;
+  spans: ContentInlineSpan[];
+  text: string;
+};
+
 export type ContentListNode = {
   type: 'list';
+  /** True when the first item is ordered (legacy hint; prefer per-item flags). */
   ordered: boolean;
-  items: Array<{ spans: ContentInlineSpan[]; text: string }>;
+  items: ContentListItem[];
+  sectionId: string | null;
+};
+
+export type ContentCodeBlockNode = {
+  type: 'code_block';
+  language: string | null;
+  code: string;
+  /** Fenced plain extract for RAG. */
+  text: string;
+  sectionId: string | null;
+};
+
+export type ContentBlockquoteNode = {
+  type: 'blockquote';
+  /** Nesting depth (1 = outermost). */
+  depth: number;
+  spans: ContentInlineSpan[];
+  text: string;
   sectionId: string | null;
 };
 
@@ -94,6 +124,8 @@ export type ContentDocumentNode =
   | ContentHeadingNode
   | ContentParagraphNode
   | ContentListNode
+  | ContentCodeBlockNode
+  | ContentBlockquoteNode
   | ContentTableNode
   | ContentEquationNode
   | ContentGraphNode

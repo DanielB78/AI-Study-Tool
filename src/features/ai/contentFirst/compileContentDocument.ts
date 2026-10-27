@@ -2,8 +2,9 @@
  * Compile ContentDocument → CanvasAgentResponse (existing operation schema).
  * Reading order = node order. Layout = chronological single column.
  *
- * Adjacent paragraphs/lists are merged into one TextElement (multiple rich-text
- * blocks) so blank-line-per-sentence LLM output does not create one object per line.
+ * Adjacent paragraphs/lists/tables/code/quotes are merged into one TextElement
+ * (multiple rich-text blocks) so blank-line-per-sentence LLM output does not
+ * create one object per line.
  * Textbook feature components / auto associations are intentionally not applied.
  */
 
@@ -19,6 +20,7 @@ import type {
 import type {
   ContentDocument,
   ContentInlineSpan,
+  ContentListItem,
 } from './types';
 
 export type ContentAssociationPlan = {
@@ -44,6 +46,9 @@ function spansToAgent(spans: ContentInlineSpan[]): AgentRichTextSpan[] {
     if (s.type === 'inline_math') {
       return { type: 'inline_math' as const, latex: s.latex };
     }
+    if (s.type === 'inline_code') {
+      return { type: 'inline_code' as const, text: s.text };
+    }
     const style =
       s.style?.bold || s.style?.italic
         ? {
@@ -66,7 +71,9 @@ function headingRichText(
       {
         type: 'heading',
         spans: spansToAgent(spans).map((s) => {
-          if ('type' in s && s.type === 'inline_math') return s;
+          if ('type' in s && (s.type === 'inline_math' || s.type === 'inline_code')) {
+            return s;
+          }
           return {
             text: 'text' in s ? s.text : '',
             style: { bold: true, font_size: size },
@@ -87,7 +94,7 @@ type ProseChunk =
   | {
       kind: 'list';
       ordered: boolean;
-      items: Array<{ spans: ContentInlineSpan[]; text: string }>;
+      items: ContentListItem[];
       sectionId: string | null;
     }
   | {
@@ -97,6 +104,20 @@ type ProseChunk =
         header?: boolean;
         cells: Array<{ spans: ContentInlineSpan[]; text: string }>;
       }>;
+      text: string;
+      sectionId: string | null;
+    }
+  | {
+      kind: 'code_block';
+      language: string | null;
+      code: string;
+      text: string;
+      sectionId: string | null;
+    }
+  | {
+      kind: 'blockquote';
+      depth: number;
+      spans: ContentInlineSpan[];
       text: string;
       sectionId: string | null;
     };
@@ -141,12 +162,16 @@ export function compileContentDocument(
       } else if (chunk.kind === 'list') {
         for (const item of chunk.items) {
           blocks.push({
-            type: chunk.ordered ? 'numbered' : 'bullet',
+            type: item.ordered ? 'numbered' : 'bullet',
             spans: spansToAgent(item.spans),
+            ...(item.depth > 0 ? { depth: item.depth } : {}),
+            ...(item.ordered && item.start != null && item.start > 0
+              ? { start: item.start }
+              : {}),
           });
           plainParts.push(item.text);
         }
-      } else {
+      } else if (chunk.kind === 'table') {
         blocks.push({
           type: 'table',
           columns: chunk.columns.map((c) => ({ alignment: c.alignment })),
@@ -154,6 +179,20 @@ export function compileContentDocument(
             ...(r.header ? { header: true as const } : {}),
             cells: r.cells.map((c) => ({ spans: spansToAgent(c.spans) })),
           })),
+        });
+        plainParts.push(chunk.text);
+      } else if (chunk.kind === 'code_block') {
+        blocks.push({
+          type: 'code_block',
+          language: chunk.language,
+          code: chunk.code,
+        });
+        plainParts.push(chunk.text);
+      } else {
+        blocks.push({
+          type: 'blockquote',
+          spans: spansToAgent(chunk.spans),
+          depth: chunk.depth,
         });
         plainParts.push(chunk.text);
       }
@@ -214,6 +253,26 @@ export function compileContentDocument(
           kind: 'table',
           columns: node.columns,
           rows: node.rows,
+          text: node.text,
+          sectionId: node.sectionId,
+        });
+        break;
+      }
+      case 'code_block': {
+        proseBuf.push({
+          kind: 'code_block',
+          language: node.language,
+          code: node.code,
+          text: node.text,
+          sectionId: node.sectionId,
+        });
+        break;
+      }
+      case 'blockquote': {
+        proseBuf.push({
+          kind: 'blockquote',
+          depth: node.depth,
+          spans: node.spans,
           text: node.text,
           sectionId: node.sectionId,
         });

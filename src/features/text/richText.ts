@@ -6,6 +6,9 @@
  * - inline_math spans participate in paragraph flow
  * - display_math blocks are dedicated centred equation blocks
  * Both store original LaTeX source (never rendered image bytes).
+ *
+ * Also supports GFM tables, fenced code blocks, inline code, blockquotes,
+ * and nested lists — all inside TextElements (not separate canvas types).
  */
 
 export type RichTextColorName =
@@ -61,7 +64,20 @@ export type RichTextInlineMathSpan = {
   >;
 };
 
-export type RichTextSpan = RichTextTextSpan | RichTextInlineMathSpan;
+/** Literal inline code (`code`) — never interpreted as LaTeX or Markdown. */
+export type RichTextInlineCodeSpan = {
+  type: 'inline_code';
+  text: string;
+  style?: Pick<
+    RichTextSpanStyle,
+    'color' | 'highlight_color' | 'linked_comment_id'
+  >;
+};
+
+export type RichTextSpan =
+  | RichTextTextSpan
+  | RichTextInlineMathSpan
+  | RichTextInlineCodeSpan;
 
 export type RichTextBlockType =
   | 'paragraph'
@@ -69,11 +85,13 @@ export type RichTextBlockType =
   | 'bullet'
   | 'numbered'
   | 'display_math'
-  | 'table';
+  | 'table'
+  | 'code_block'
+  | 'blockquote';
 
 export type RichTextContentBlockType = Exclude<
   RichTextBlockType,
-  'display_math' | 'table'
+  'display_math' | 'table' | 'code_block'
 >;
 
 export type RichTextContentBlock = {
@@ -85,6 +103,13 @@ export type RichTextContentBlock = {
   type: RichTextContentBlockType;
   /** Optional role hint for paragraphs (e.g. heading) — normalized into type. */
   role?: 'heading' | 'body';
+  /**
+   * Nesting depth for list items and blockquotes (0 = top-level list item /
+   * outermost quote depth is stored as 1 on blockquote blocks).
+   */
+  depth?: number;
+  /** Explicit start index for ordered list items (Markdown `3.` starts at 3). */
+  start?: number;
   spans: RichTextSpan[];
 };
 
@@ -121,10 +146,21 @@ export type RichTextTableBlock = {
   rows: RichTextTableRow[];
 };
 
+/** Fenced Markdown code block — literal source, optional language. */
+export type RichTextCodeBlock = {
+  id?: string;
+  type: 'code_block';
+  /** Normalised language id (python, javascript, …) or null for plain text. */
+  language: string | null;
+  /** Exact source including indentation and newlines. */
+  code: string;
+};
+
 export type RichTextBlock =
   | RichTextContentBlock
   | RichTextDisplayMathBlock
-  | RichTextTableBlock;
+  | RichTextTableBlock
+  | RichTextCodeBlock;
 
 export type RichTextDocument = {
   blocks: RichTextBlock[];
@@ -168,6 +204,9 @@ export const RICH_TEXT_LIMITS = {
   maxFontSize: 48,
   maxTableRows: 40,
   maxTableCols: 12,
+  maxCodeBlockChars: 20000,
+  maxListDepth: 8,
+  maxQuoteDepth: 6,
 } as const;
 
 const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
@@ -176,8 +215,12 @@ export function isInlineMathSpan(span: RichTextSpan): span is RichTextInlineMath
   return span.type === 'inline_math';
 }
 
+export function isInlineCodeSpan(span: RichTextSpan): span is RichTextInlineCodeSpan {
+  return span.type === 'inline_code';
+}
+
 export function isTextSpan(span: RichTextSpan): span is RichTextTextSpan {
-  return span.type !== 'inline_math';
+  return span.type !== 'inline_math' && span.type !== 'inline_code';
 }
 
 export function isDisplayMathBlock(
@@ -190,6 +233,16 @@ export function isTableBlock(block: RichTextBlock): block is RichTextTableBlock 
   return block.type === 'table';
 }
 
+export function isCodeBlock(block: RichTextBlock): block is RichTextCodeBlock {
+  return block.type === 'code_block';
+}
+
+export function isBlockquoteBlock(
+  block: RichTextBlock,
+): block is Extract<RichTextContentBlock, { type: 'blockquote' }> {
+  return block.type === 'blockquote';
+}
+
 /** Searchable plain extract for one math node — used by RAG / anchors. */
 export function latexPlainExtract(latex: string): string {
   return `[LaTeX: ${latex}]`;
@@ -198,6 +251,7 @@ export function latexPlainExtract(latex: string): string {
 /** Plain-text contribution of a single span (math → searchable token). */
 export function spanPlainText(span: RichTextSpan): string {
   if (isInlineMathSpan(span)) return latexPlainExtract(span.latex);
+  if (isInlineCodeSpan(span)) return span.text;
   return span.text;
 }
 
@@ -237,6 +291,12 @@ export function tableBlockToPlainText(block: RichTextTableBlock): string {
   lines.push(sep);
   for (const row of bodyRows) lines.push(fmt(row.cells));
   return lines.join('\n');
+}
+
+/** Fenced Markdown extract for RAG (preserves language + source). */
+export function codeBlockToPlainText(block: RichTextCodeBlock): string {
+  const lang = block.language?.trim() || '';
+  return `\`\`\`${lang}\n${block.code}\n\`\`\``;
 }
 
 export function resolveRichTextColor(
@@ -291,7 +351,32 @@ export function richTextToPlainText(doc: RichTextDocument): string {
       lines.push(tableBlockToPlainText(block));
       continue;
     }
+    if (isCodeBlock(block)) {
+      lines.push(codeBlockToPlainText(block));
+      continue;
+    }
     const content = block.spans.map(spanPlainText).join('');
+    if (block.type === 'blockquote') {
+      const depth = Math.max(1, block.depth ?? 1);
+      const prefix = '> '.repeat(depth);
+      lines.push(
+        content
+          .split('\n')
+          .map((line) => `${prefix}${line}`)
+          .join('\n'),
+      );
+      continue;
+    }
+    if (block.type === 'bullet' || block.type === 'numbered') {
+      const depth = Math.max(0, block.depth ?? 0);
+      const indent = '  '.repeat(depth);
+      const marker =
+        block.type === 'bullet'
+          ? '-'
+          : `${block.start && block.start > 0 ? block.start : 1}.`;
+      lines.push(`${indent}${marker} ${content}`);
+      continue;
+    }
     lines.push(content);
   }
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd();
@@ -356,6 +441,18 @@ export function createInlineMathSpan(
   };
 }
 
+/** Create an inline code span. */
+export function createInlineCodeSpan(
+  text: string,
+  options?: { style?: RichTextInlineCodeSpan['style'] },
+): RichTextInlineCodeSpan {
+  return {
+    type: 'inline_code',
+    text,
+    ...(options?.style ? { style: options.style } : {}),
+  };
+}
+
 /** Create a display math block (id optional — assigned on normalize). */
 export function createDisplayMathBlock(
   latex: string,
@@ -365,6 +462,19 @@ export function createDisplayMathBlock(
     type: 'display_math',
     latex,
     spans: [],
+    ...(options?.id ? { id: options.id } : {}),
+  };
+}
+
+/** Create a fenced code block. */
+export function createCodeBlock(
+  code: string,
+  options?: { id?: string; language?: string | null },
+): RichTextCodeBlock {
+  return {
+    type: 'code_block',
+    code,
+    language: options?.language ?? null,
     ...(options?.id ? { id: options.id } : {}),
   };
 }

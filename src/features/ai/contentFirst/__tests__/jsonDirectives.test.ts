@@ -109,7 +109,7 @@ describe(':::json directives', () => {
     expect(CONTENT_FIRST_SYSTEM_PROMPT).toContain(':::json');
     expect(CONTENT_FIRST_SYSTEM_PROMPT).toContain('"action":"edit"');
     expect(CONTENT_FIRST_SYSTEM_PROMPT).toContain('"action":"add_text"');
-    expect(CONTENT_FIRST_SYSTEM_PROMPT).toContain('### Tables');
+    expect(CONTENT_FIRST_SYSTEM_PROMPT).toContain('### Code, quotes, nested lists, tables');
     expect(CONTENT_FIRST_SYSTEM_PROMPT.length).toBeLessThan(7500);
   });
 

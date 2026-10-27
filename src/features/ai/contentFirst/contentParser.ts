@@ -1,11 +1,20 @@
 /**
  * Deterministic Markdown → ContentDocument parser for content-first generation.
- * Not an LLM call. Recognises headings, paragraphs, lists, inline/display math,
- * :::graph markers, and :::definition|example|warning|exercise markers.
+ * Not an LLM call. Recognises headings, paragraphs, nested lists, inline/display
+ * math, fenced code, inline code, blockquotes, tables, :::graph markers, and
+ * :::definition|example|warning|exercise markers.
  */
 
 import { sanitizeLatexSource, validateLatex } from '../../equations/latex';
 import { validateGraphExpression } from '../../graphs/expressionService';
+import { normalizeCodeLanguage } from '../../text/syntaxHighlight';
+import {
+  looksLikeFenceOpen,
+  parseFenceAt,
+  stripMarkdownDocumentFence,
+} from './markdownFences';
+import { parseNestedListAt } from './markdownLists';
+import { parseBlockquoteAt } from './markdownQuotes';
 import {
   markdownTableToPlainText,
   parseMarkdownTableAt,
@@ -134,7 +143,30 @@ export function parseMarkdownEmphasis(
   return spans.length > 0 ? spans : [{ type: 'text', text: '' }];
 }
 
-/** Parse inline spans: text (+ bold/italic) + $...$ / \(...\). */
+/**
+ * Find a matching inline-code closing run of backticks of length `tickLen`
+ * starting after `from` (CommonMark: longer runs of backticks open/close).
+ */
+function findInlineCodeClose(
+  raw: string,
+  from: number,
+  tickLen: number,
+): number {
+  let i = from;
+  while (i < raw.length) {
+    if (raw[i] !== '`') {
+      i += 1;
+      continue;
+    }
+    let j = i;
+    while (j < raw.length && raw[j] === '`') j += 1;
+    if (j - i === tickLen) return i;
+    i = j;
+  }
+  return -1;
+}
+
+/** Parse inline spans: text (+ bold/italic) + `code` + $...$ / \(...\). */
 export function parseInlineSpans(raw: string): ContentInlineSpan[] {
   const spans: ContentInlineSpan[] = [];
   let i = 0;
@@ -147,6 +179,29 @@ export function parseInlineSpans(raw: string): ContentInlineSpan[] {
   };
 
   while (i < raw.length) {
+    // Inline code — must run before math / emphasis so `$x$` stays literal.
+    if (raw[i] === '`') {
+      let tickLen = 0;
+      while (i + tickLen < raw.length && raw[i + tickLen] === '`') tickLen += 1;
+      const close = findInlineCodeClose(raw, i + tickLen, tickLen);
+      if (close !== -1) {
+        flushText();
+        let code = raw.slice(i + tickLen, close);
+        // CommonMark: strip one leading/trailing space when both present.
+        if (
+          code.length >= 2 &&
+          code.startsWith(' ') &&
+          code.endsWith(' ') &&
+          code.trim().length > 0
+        ) {
+          code = code.slice(1, -1);
+        }
+        spans.push({ type: 'inline_code', text: code });
+        i = close + tickLen;
+        continue;
+      }
+    }
+
     // \( ... \)
     if (raw[i] === '\\' && raw[i + 1] === '(') {
       const end = raw.indexOf('\\)', i + 2);
@@ -222,34 +277,30 @@ export function parseInlineSpans(raw: string): ContentInlineSpan[] {
 
 function spansToPlain(spans: ContentInlineSpan[]): string {
   return spans
-    .map((s) => (s.type === 'text' ? s.text : s.latex))
+    .map((s) => {
+      if (s.type === 'text') return s.text;
+      if (s.type === 'inline_code') return s.text;
+      return s.latex;
+    })
     .join('')
     .trim();
 }
 
 function stripFenceAndNormalize(raw: string): string {
-  let text = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
-  const trimmed = text.trim();
-  // Preferred: whole response is one ```markdown fence.
-  const whole = /^```(?:markdown|md|text)?\s*\n([\s\S]*?)\n```\s*$/i.exec(
-    trimmed,
-  );
-  if (whole) return whole[1]!;
-  // ChatGPT often adds a short preamble ("Here is the document:") before the fence.
-  // Prefer the largest ```markdown / ```md fenced body when present.
-  const fenced =
-    /```(?:markdown|md)\s*\n([\s\S]*?)\n```/i.exec(trimmed) ??
-    /```text\s*\n([\s\S]*?)\n```/i.exec(trimmed);
-  if (fenced?.[1] != null && fenced[1].trim().length > 0) {
-    return fenced[1];
-  }
-  return text;
+  return stripMarkdownDocumentFence(raw);
 }
+
+type ListItemBlock = {
+  ordered: boolean;
+  depth: number;
+  start: number | null;
+  body: string;
+};
 
 type Block =
   | { kind: 'heading'; level: 1 | 2 | 3; body: string }
   | { kind: 'paragraph'; body: string }
-  | { kind: 'list'; ordered: boolean; items: string[] }
+  | { kind: 'list'; ordered: boolean; items: ListItemBlock[] }
   | {
       kind: 'table';
       header: string[];
@@ -259,7 +310,8 @@ type Block =
   | { kind: 'display_math'; latex: string }
   | { kind: 'graph'; body: string }
   | { kind: 'component'; component: ContentComponentKind; body: string }
-  | { kind: 'code'; body: string };
+  | { kind: 'code'; language: string | null; body: string }
+  | { kind: 'blockquote'; depth: number; body: string };
 
 function parseGraphBody(body: string): {
   title: string | null;
@@ -368,19 +420,35 @@ export function tokenizeContentBlocks(source: string): Block[] {
       continue;
     }
 
-    // Fenced code block ``` — treat interior as opaque paragraph text (no math split)
-    if (/^```/.test(line.trim())) {
-      const buf: string[] = [];
-      i += 1;
-      while (i < lines.length && !/^```/.test(lines[i]!.trim())) {
-        buf.push(lines[i]!);
-        i += 1;
+    // Fenced code block ``` / ~~~ — interior is literal (no math / markers / tables)
+    if (looksLikeFenceOpen(line)) {
+      const fence = parseFenceAt(lines, i);
+      if (!fence) {
+        throw new ContentParseError(
+          'unclosed_fence',
+          'Unclosed fenced code block.',
+        );
       }
-      if (i >= lines.length) {
-        throw new ContentParseError('unclosed_fence', 'Unclosed ``` code fence.');
+      blocks.push({
+        kind: 'code',
+        language: fence.language,
+        body: fence.code,
+      });
+      i = fence.nextIndex;
+      continue;
+    }
+
+    // Blockquotes (`>` / nested)
+    const quote = parseBlockquoteAt(lines, i);
+    if (quote) {
+      for (const para of quote.paragraphs) {
+        blocks.push({
+          kind: 'blockquote',
+          depth: para.depth,
+          body: para.body,
+        });
       }
-      i += 1; // closing fence
-      blocks.push({ kind: 'code', body: buf.join('\n') });
+      i = quote.nextIndex;
       continue;
     }
 
@@ -506,17 +574,15 @@ export function tokenizeContentBlocks(source: string): Block[] {
       continue;
     }
 
-    // List (consecutive items)
-    if (/^\s*([-*+]|\d+\.)\s+/.test(line)) {
-      const ordered = /^\s*\d+\.\s+/.test(line);
-      const items: string[] = [];
-      while (i < lines.length) {
-        const lm = /^\s*(?:[-*+]|\d+\.)\s+(.+)$/.exec(lines[i]!);
-        if (!lm) break;
-        items.push(lm[1]!.trim());
-        i += 1;
-      }
-      blocks.push({ kind: 'list', ordered, items });
+    // Nested lists (ordered + unordered, mixed depths)
+    const nestedList = parseNestedListAt(lines, i);
+    if (nestedList) {
+      blocks.push({
+        kind: 'list',
+        ordered: nestedList.items[0]?.ordered ?? false,
+        items: nestedList.items,
+      });
+      i = nestedList.nextIndex;
       continue;
     }
 
@@ -538,14 +604,14 @@ export function tokenizeContentBlocks(source: string): Block[] {
     while (i < lines.length) {
       const l = lines[i]!;
       if (!l.trim()) break;
-      if (/^```/.test(l.trim())) break;
+      if (looksLikeFenceOpen(l)) break;
       if (/^:::(graph|definition|example|warning|exercise)\s*$/i.test(l.trim()))
         break;
       if (l.trim() === '$$' || /^\$\$/.test(l.trim())) break;
       if (l.trim() === '\\[' || /^\\\[/.test(l.trim())) break;
       if (/^#{1,3}\s+/.test(l)) break;
-      if (/^\s*([-*+]|\d+\.)\s+/.test(l) && buf.length === 0) break;
-      if (/^\s*([-*+]|\d+\.)\s+/.test(l)) break;
+      if (/^ {0,3}>/.test(l)) break;
+      if (parseNestedListAt(lines, i)) break;
       // Do not swallow a following GFM table into the paragraph.
       if (parseMarkdownTableAt(lines, i)) break;
       buf.push(l);
@@ -679,8 +745,14 @@ function expandComponentBody(
       }
       case 'list': {
         const items = b.items.map((item) => {
-          const spans = parseInlineSpans(item);
-          return { spans, text: spansToPlain(spans) };
+          const spans = parseInlineSpans(item.body);
+          return {
+            ordered: item.ordered,
+            depth: item.depth,
+            start: item.start,
+            spans,
+            text: spansToPlain(spans),
+          };
         });
         nodes.push({
           type: 'list',
@@ -704,15 +776,29 @@ function expandComponentBody(
         pushGraph(b.body, sectionId, nodes);
         break;
       case 'code': {
-        const text = b.body.trim();
-        if (text) {
-          nodes.push({
-            type: 'paragraph',
-            spans: [{ type: 'text', text }],
-            text,
-            sectionId,
-          });
-        }
+        const language = normalizeCodeLanguage(b.language);
+        const code = b.body;
+        const fenceLang = language ?? '';
+        nodes.push({
+          type: 'code_block',
+          language,
+          code,
+          text: `\`\`\`${fenceLang}\n${code}\n\`\`\``,
+          sectionId,
+        });
+        break;
+      }
+      case 'blockquote': {
+        const spans = parseInlineSpans(b.body);
+        const text = spansToPlain(spans);
+        if (!text) break;
+        nodes.push({
+          type: 'blockquote',
+          depth: b.depth,
+          spans,
+          text,
+          sectionId,
+        });
         break;
       }
       case 'component':
@@ -771,8 +857,14 @@ export function parseContentDocument(raw: string): ContentDocument {
       }
       case 'list': {
         const items = block.items.map((item) => {
-          const spans = parseInlineSpans(item);
-          return { spans, text: spansToPlain(spans) };
+          const spans = parseInlineSpans(item.body);
+          return {
+            ordered: item.ordered,
+            depth: item.depth,
+            start: item.start,
+            spans,
+            text: spansToPlain(spans),
+          };
         });
         nodes.push({
           type: 'list',
@@ -813,16 +905,29 @@ export function parseContentDocument(raw: string): ContentDocument {
         break;
       }
       case 'code': {
-        // Opaque code → plain paragraph (preserve content, no math parsing).
-        const text = block.body.trim();
-        if (text) {
-          nodes.push({
-            type: 'paragraph',
-            spans: [{ type: 'text', text }],
-            text,
-            sectionId: currentSectionId,
-          });
-        }
+        const language = normalizeCodeLanguage(block.language);
+        const code = block.body;
+        const fenceLang = language ?? '';
+        nodes.push({
+          type: 'code_block',
+          language,
+          code,
+          text: `\`\`\`${fenceLang}\n${code}\n\`\`\``,
+          sectionId: currentSectionId,
+        });
+        break;
+      }
+      case 'blockquote': {
+        const spans = parseInlineSpans(block.body);
+        const text = spansToPlain(spans);
+        if (!text) break;
+        nodes.push({
+          type: 'blockquote',
+          depth: block.depth,
+          spans,
+          text,
+          sectionId: currentSectionId,
+        });
         break;
       }
     }
