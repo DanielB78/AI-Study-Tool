@@ -1,7 +1,8 @@
 /**
  * Application-defined layout presets for LLM output types.
  * The LLM selects the output type (lesson vs step_by_step) for educational
- * structure only — geometry is always a single vertical column owned by the app.
+ * structure only. Physical packing (direction + row/column limits) is owned by
+ * user layout settings — see userLayoutSettings.ts / chronologicalFlowPacker.ts.
  */
 
 export const AGENT_OUTPUT_TYPES = ['lesson', 'step_by_step'] as const;

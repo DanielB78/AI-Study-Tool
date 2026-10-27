@@ -50,6 +50,24 @@ export {
   type ResolveGridPlanInput,
   type ResolveGridPlanResult,
 } from './resolveGridPlan';
+export {
+  packCellsChronologically,
+  type FlowCellSize,
+  type FlowPackedCell,
+  type FlowPackResult,
+} from './chronologicalFlowPacker';
+export {
+  DEFAULT_USER_LAYOUT_SETTINGS,
+  DEFAULT_LIMIT_SUGGESTIONS,
+  getUserLayoutSettings,
+  setUserLayoutSettings,
+  resetUserLayoutSettings,
+  subscribeUserLayoutSettings,
+  getUserLayoutSettingsSnapshot,
+  normalizeUserLayoutSettings,
+  type UserLayoutSettings,
+  type ChronologicalDirection,
+} from './userLayoutSettings';
 export type {
   GridLayoutSpec,
   GridLayoutItemSpec,

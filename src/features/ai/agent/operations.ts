@@ -108,8 +108,8 @@ export type CreationLayoutFields = {
   /** Temporary ref for layout / chronological ordering. */
   ref?: OperationRef;
   /**
-   * Legacy cell id — accepted for backward compatibility but does not control
-   * agent geometry (always a single vertical column).
+   * Cell id — keeps associated creates together as one packer unit when shared.
+   * Does not choose rows/columns; user layout settings own packing geometry.
    */
   layout_cell?: string;
   /** Legacy column span — ignored for agent geometry. */

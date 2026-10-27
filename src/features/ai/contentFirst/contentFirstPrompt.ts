@@ -206,7 +206,7 @@ Ordinary new lessons still use plain Markdown with **no** \`:::json\`.
 
 ## What the application does
 
-Creates Text / Equation / Graph elements, keeps reading order, centres equations, handles sizing, spacing, undo and persistence. Applies \`:::json\` edit/add_text via existing update/create operations.
+Creates Text / Equation / Graph elements, keeps reading order, packs them using the user's layout settings (direction and optional limits), centres equations, handles sizing, spacing, undo and persistence. Applies \`:::json\` edit/add_text via existing update/create operations. Do not emit rows, columns, coordinates, or sizes.
 `;
 
 export const CONTENT_FIRST_RESPONSE_INSTRUCTIONS = [

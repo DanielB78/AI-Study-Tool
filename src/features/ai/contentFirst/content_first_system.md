@@ -135,3 +135,7 @@ The Markdown body is expanded like ordinary generation into separate Text / Equa
 Several `:::json` blocks may appear in one response; each owns the Markdown until the next `:::json`.
 
 Do **not** emit canvas-operation JSON arrays (`create_text`, `operations`, …) in this mode.
+
+## Layout
+
+The app packs generated elements from Markdown reading order using the user's layout settings. Do not emit rows, columns, coordinates, or sizes.

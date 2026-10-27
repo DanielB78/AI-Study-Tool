@@ -8,6 +8,12 @@ import {
   formatNoteStructureForPrompt,
 } from '../../structures/formatForPrompt';
 import {
+  DEFAULT_LIMIT_SUGGESTIONS,
+  getUserLayoutSettingsSnapshot,
+  setUserLayoutSettings,
+  subscribeUserLayoutSettings,
+} from '../../ai/agent/layout/userLayoutSettings';
+import {
   RAG_MAX_CONTEXT_CHARACTERS,
   RAG_MAX_CONTEXT_ELEMENTS,
   RAG_MAX_CONTEXT_IMAGES,
@@ -359,6 +365,29 @@ export function RagDebugPanel() {
   const busy = retrieving || sending || expanding;
   const manual = llmExecutionMode === 'manual';
   const contentFirst = aiGenerationMode === 'content_first';
+  const layoutSettings = useSyncExternalStore(
+    subscribeUserLayoutSettings,
+    getUserLayoutSettingsSnapshot,
+    getUserLayoutSettingsSnapshot,
+  );
+  const [heightDraft, setHeightDraft] = useState(
+    String(
+      layoutSettings.maxColumnHeight ?? DEFAULT_LIMIT_SUGGESTIONS.maxColumnHeight,
+    ),
+  );
+  const [widthDraft, setWidthDraft] = useState(
+    String(layoutSettings.maxRowWidth ?? DEFAULT_LIMIT_SUGGESTIONS.maxRowWidth),
+  );
+  useEffect(() => {
+    if (layoutSettings.maxColumnHeight != null) {
+      setHeightDraft(String(layoutSettings.maxColumnHeight));
+    }
+  }, [layoutSettings.maxColumnHeight]);
+  useEffect(() => {
+    if (layoutSettings.maxRowWidth != null) {
+      setWidthDraft(String(layoutSettings.maxRowWidth));
+    }
+  }, [layoutSettings.maxRowWidth]);
   const canBuildPrompt = prompt.trim().length > 0;
   const canSendAutomatic = canBuildPrompt && !busy && !manual;
 
@@ -439,6 +468,142 @@ export function RagDebugPanel() {
                 ? 'LLM writes Markdown ($$ equations, :::graph). App converts to Text / Equation / Graph elements.'
                 : 'LLM returns structured create_text / create_equation / create_graph JSON operations.'}
             </p>
+          </section>
+
+          <section className="rag-debug-section rag-debug-mode">
+            <div className="rag-debug-section-title">AI Layout Settings</div>
+            <p className="rag-debug-meta">
+              Controls how newly generated Markdown content is packed. Does not rearrange existing elements.
+            </p>
+            <div className="rag-debug-section-title" style={{ marginTop: 8 }}>
+              Chronological Direction
+            </div>
+            <div className="rag-debug-shortcuts">
+              <button
+                type="button"
+                className={`rag-debug-btn ghost${layoutSettings.chronologicalDirection === 'down' ? ' is-active' : ''}`}
+                onClick={() =>
+                  setUserLayoutSettings({ chronologicalDirection: 'down' })
+                }
+              >
+                Downwards
+              </button>
+              <button
+                type="button"
+                className={`rag-debug-btn ghost${layoutSettings.chronologicalDirection === 'sideways' ? ' is-active' : ''}`}
+                onClick={() =>
+                  setUserLayoutSettings({ chronologicalDirection: 'sideways' })
+                }
+              >
+                Sideways
+              </button>
+            </div>
+
+            <div className="rag-debug-section-title" style={{ marginTop: 10 }}>
+              Maximum Column Height
+            </div>
+            <label className="rag-debug-label">
+              <input
+                type="checkbox"
+                checked={layoutSettings.maxColumnHeight == null}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setUserLayoutSettings({ maxColumnHeight: null });
+                  } else {
+                    const n = Number(heightDraft);
+                    setUserLayoutSettings({
+                      maxColumnHeight:
+                        Number.isFinite(n) && n > 0
+                          ? n
+                          : DEFAULT_LIMIT_SUGGESTIONS.maxColumnHeight,
+                    });
+                  }
+                }}
+              />{' '}
+              No limit
+            </label>
+            <label className="rag-debug-label" htmlFor="ai-layout-max-height">
+              Height (world units)
+              <input
+                id="ai-layout-max-height"
+                type="number"
+                min={1}
+                step={10}
+                className="rag-debug-textarea"
+                style={{ minHeight: 0, height: 32, resize: 'none' }}
+                disabled={layoutSettings.maxColumnHeight == null}
+                value={heightDraft}
+                onChange={(e) => setHeightDraft(e.target.value)}
+                onBlur={() => {
+                  const n = Number(heightDraft);
+                  if (!Number.isFinite(n) || n <= 0) {
+                    setHeightDraft(
+                      String(
+                        layoutSettings.maxColumnHeight ??
+                          DEFAULT_LIMIT_SUGGESTIONS.maxColumnHeight,
+                      ),
+                    );
+                    return;
+                  }
+                  if (layoutSettings.maxColumnHeight != null) {
+                    setUserLayoutSettings({ maxColumnHeight: n });
+                  }
+                }}
+              />
+            </label>
+
+            <div className="rag-debug-section-title" style={{ marginTop: 10 }}>
+              Maximum Row Width
+            </div>
+            <label className="rag-debug-label">
+              <input
+                type="checkbox"
+                checked={layoutSettings.maxRowWidth == null}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setUserLayoutSettings({ maxRowWidth: null });
+                  } else {
+                    const n = Number(widthDraft);
+                    setUserLayoutSettings({
+                      maxRowWidth:
+                        Number.isFinite(n) && n > 0
+                          ? n
+                          : DEFAULT_LIMIT_SUGGESTIONS.maxRowWidth,
+                    });
+                  }
+                }}
+              />{' '}
+              No limit
+            </label>
+            <label className="rag-debug-label" htmlFor="ai-layout-max-width">
+              Width (world units)
+              <input
+                id="ai-layout-max-width"
+                type="number"
+                min={1}
+                step={10}
+                className="rag-debug-textarea"
+                style={{ minHeight: 0, height: 32, resize: 'none' }}
+                disabled={layoutSettings.maxRowWidth == null}
+                value={widthDraft}
+                onChange={(e) => setWidthDraft(e.target.value)}
+                onBlur={() => {
+                  const n = Number(widthDraft);
+                  if (!Number.isFinite(n) || n <= 0) {
+                    setWidthDraft(
+                      String(
+                        layoutSettings.maxRowWidth ??
+                          DEFAULT_LIMIT_SUGGESTIONS.maxRowWidth,
+                      ),
+                    );
+                    return;
+                  }
+                  if (layoutSettings.maxRowWidth != null) {
+                    setUserLayoutSettings({ maxRowWidth: n });
+                  }
+                }}
+              />
+            </label>
           </section>
 
           <StructureSelector

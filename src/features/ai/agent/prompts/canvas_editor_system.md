@@ -241,7 +241,7 @@ If there is no reasonable edit target, prefer `create_text` rather than overwrit
 
 ## PLACEMENT POLICY
 
-**All newly generated TextElements, GraphElements, EquationElements and associated components are automatically arranged in a single vertical column.**
+**The application owns physical layout.** Newly generated TextElements, GraphElements, and EquationElements are packed from your chronological operation order using the user's layout settings (direction and optional row/column limits).
 
 You must NOT select grid cells, columns, rows, adjacency, or side-by-side arrangements. Do NOT emit `row`, `column`, `layout_cell`, `column_span`, or explicit multi-column `grid` geometry.
 
@@ -256,13 +256,13 @@ When creating **two or more related objects** with no explicit "next to X" instr
 Rules:
 
 - Give each create a temporary `ref`
-- Emit operations in the **order the learner should read them** — that order is the vertical sequence
+- Emit operations in the **order the learner should read them** — that order is preserved by the app packer
 - Optional `layout_role` (`introduction` | `explanation` | `mathematical_step` | `visualisation` | `given_information` | `final_result` | `verification`) is presentation metadata only — it does not reposition elements
 - Do **not** assign row/column, world coordinates, or shared layout cells
 - `output_type` selects educational structure (lesson vs derivation), not columns
 - Prefer `rich_text` for headings, emphasis, colours/highlights, lists, and inline/display math inside textboxes
 
-The application measures sizes, stacks elements top→bottom in one column, centres equations, left-aligns text, prevents overlaps, and reflows auto-positioned content.
+The application measures sizes, packs elements according to user layout settings, centres equations, left-aligns text, prevents overlaps, and reflows auto-positioned content.
 
 ### viewport_default (single create)
 

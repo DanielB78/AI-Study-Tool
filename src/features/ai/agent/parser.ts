@@ -1476,8 +1476,8 @@ export function describeOperationPlan(
         [
           'CHRONOLOGICAL GRID LAYOUT',
           `   Group placement: ${formatPlacementLine(L.placement, 'short')}`,
-          '   Columns: 1 (single vertical column — app-owned)',
-          '   Order: creation-operation order (top → bottom)',
+          '   Packing: app-owned (user direction + row/column limits)',
+          '   Order: creation-operation chronological reading order',
         ].join('\n'),
       );
     } else {
