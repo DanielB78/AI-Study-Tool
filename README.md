@@ -62,7 +62,7 @@ Two generation paths share the same canonical canvas elements:
 
 **Operations mode** — the LLM is a planner and returns JSON only (`create_text`, `create_equation`, `create_graph`, updates, associations). Docs: `src/features/ai/agent/prompts/canvas_editor_system.md`.
 
-**Content-first mode** — the LLM writes Markdown (`#` headings, paragraphs, `$` / `$$` math, `:::graph`). Optional `:::json` directives support `edit` / `add_text` (above|below) against existing element IDs from context; educational content stays in the Markdown body after each JSON block. A deterministic parser compiles that into the same create/update ops (chronological layout for new content; relative placement for `add_text`). Docs: `src/features/ai/contentFirst/content_first_system.md` (runtime: `contentFirstPrompt.ts`; mirrored under `backend/app/agent/prompts/`).
+**Content-first mode** — the LLM writes Markdown (`#` headings, paragraphs, GFM tables, `$` / `$$` math, `:::graph`). Tables stay inside TextElement rich text (not a separate canvas element type). Optional `:::json` directives support `edit` / `add_text` (above|below) against existing element IDs from context; educational content stays in the Markdown body after each JSON block. A deterministic parser compiles that into the same create/update ops (chronological layout for new content; relative placement for `add_text`). Docs: `src/features/ai/contentFirst/content_first_system.md` (runtime: `contentFirstPrompt.ts`; mirrored under `backend/app/agent/prompts/`).
 
 The app owns IDs, coordinates, collision avoidance, history, and RAG reindex in both modes.
 
@@ -81,7 +81,7 @@ The app owns IDs, coordinates, collision avoidance, history, and RAG reindex in 
 7. **Copy LLM prompt** → paste into ChatGPT
 8. **Paste LLM response** → **Preview AI plan** → **Apply** (atomic undo)
 
-In JSON ops mode expect an `operations` array. In content-first mode expect Markdown (display math + optional `:::graph` markers).
+In JSON ops mode expect an `operations` array. In content-first mode expect Markdown (tables, display math, optional `:::graph` markers).
 
 Automatic mode (`VITE_LLM_EXECUTION_MODE=automatic` or panel toggle) restores **Send with context (API)** and uses the selected generation format’s system instruction.
 
