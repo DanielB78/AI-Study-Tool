@@ -20,13 +20,75 @@ No commentary outside the fence.
 
 - Continuous prose per paragraph.
 - Soft wraps OK **without** blank lines between lines of the same paragraph.
-- Blank lines only between distinct paragraphs, or before/after headings, `$$`, and `:::graph`.
+- Blank lines only between distinct paragraphs, or before/after headings, tables, `$$`, and `:::graph`.
 - Do **not** blank-line every sentence or wrapped line.
 
 ## Maths
 
 - Inline: paired `$...$` only.
 - Display: `$$` alone on open/close lines; even `$$` count; matching `\begin`/`\end`; braced `\frac{a}{b}` / superscripts.
+
+## Tables
+
+Use standard GFM Markdown tables when tabular presentation genuinely helps (symbols, units, values, cases). Not every response needs a table.
+
+### Basic table
+
+```markdown
+| Variable | Meaning | Unit |
+|---|---|---|
+| $F$ | Force | N |
+| $m$ | Mass | kg |
+| $a$ | Acceleration | m/s² |
+```
+
+### Inline mathematics in cells
+
+```markdown
+| Quantity | Equation |
+|---|---|
+| Force | $F=ma$ |
+| Kinetic Energy | $E_k=\frac{1}{2}mv^2$ |
+| Angular Frequency | $\omega=\sqrt{\frac{k}{m}}$ |
+```
+
+### Column alignment
+
+```markdown
+| Left | Centre | Right |
+|:---|:---:|---:|
+| A | B | C |
+```
+
+### Inside a longer explanation
+
+```markdown
+## Energy in Simple Harmonic Motion
+
+The energy of a spring-mass system takes several forms.
+
+| Energy Type | Equation |
+|---|---|
+| Kinetic | $E_k=\frac12mv^2$ |
+| Potential | $E_p=\frac12kx^2$ |
+| Total | $E=\frac12kA^2$ |
+
+The total energy remains constant.
+
+$$
+E_k+E_p=E
+$$
+```
+
+The table stays inside the TextElement. The display equation becomes an EquationElement.
+
+Rules:
+
+- Header row + separator row required
+- Inline `$...$` in cells; keep tables readable
+- Do **not** use LaTeX `array` merely to simulate informational tables
+- Do **not** emit JSON operations, coordinates, sizes, or one TextElement per cell
+- Continue using display `$$` for independent derivations and `:::graph` for plots
 
 ## Graphs
 
@@ -67,10 +129,16 @@ title: Displacement
 {"action":"edit","target_id":"text_12"}
 :::
 
-## The Restoring Force
+## Physical Quantities
 
-A mass on a spring experiences $F=-kx$.
+| Quantity | Symbol | Unit |
+|---|---|---|
+| Force | $F$ | N |
+| Mass | $m$ | kg |
+| Acceleration | $a$ | m/s² |
 ```
+
+Tables inside a TextElement edit update that element's rich text (same element ID).
 
 ### Edit EquationElement
 
@@ -119,19 +187,22 @@ The following graph compares displacement and velocity.
 {"action":"add_text","target_id":"equation_5","position":"below"}
 :::
 
-## Why the sign matters
+The variables are summarised below:
 
-The negative sign means acceleration acts towards equilibrium.
-
-$$
-a=-\omega^{2}x
-$$
+| Symbol | Meaning |
+|---|---|
+| $m$ | Mass |
+| $k$ | Spring constant |
 ```
 
-The Markdown body is expanded like ordinary generation into separate Text / Equation / Graph elements and stacked above or below the target — not collapsed into one text box.
+The Markdown body is expanded like ordinary generation into separate Text / Equation / Graph elements and stacked above or below the target — not collapsed into one text box. Tables stay inside their TextElement.
 
 ### Multiple instructions
 
 Several `:::json` blocks may appear in one response; each owns the Markdown until the next `:::json`.
 
 Do **not** emit canvas-operation JSON arrays (`create_text`, `operations`, …) in this mode.
+
+## Layout
+
+The app packs generated elements from Markdown reading order using the user's layout settings. Do not emit rows, columns, coordinates, or sizes.

@@ -315,8 +315,12 @@ describe('create_text_component / add_linked_comment pipeline', () => {
     expect(comment).toBeTruthy();
     expect(comment.componentMeta?.anchor?.quote).toBe('positive test charge');
     const main = texts().find((e) => e.id === 'text_12')!;
-    const spans = main.richText!.blocks.flatMap((b) => b.spans);
-    expect(spans.some((s) => s.style?.linked_comment_id === comment.id)).toBe(true);
+    const spans = main.richText!.blocks.flatMap((b) =>
+      'spans' in b && Array.isArray(b.spans) ? b.spans : [],
+    );
+    expect(
+      spans.some((s) => 'style' in s && s.style?.linked_comment_id === comment.id),
+    ).toBe(true);
   });
 
   it('rejects ambiguous linked comment anchors', () => {

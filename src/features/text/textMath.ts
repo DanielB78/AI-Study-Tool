@@ -11,14 +11,20 @@ import {
   getRichTextDocument,
   isDisplayMathBlock,
   isInlineMathSpan,
+  isTableBlock,
   richTextToPlainText,
   spanPlainText,
   type RichTextBlock,
+  type RichTextContentBlock,
   type RichTextDocument,
   type RichTextInlineMathSpan,
   type RichTextSpan,
 } from './richText';
 import { ensureBlockIds, ensureMathIds, newFeatureId } from './textFeatures';
+
+function isContentSpanBlock(block: RichTextBlock): block is RichTextContentBlock {
+  return !isDisplayMathBlock(block) && !isTableBlock(block);
+}
 
 export type MathInsertAnchor =
   | { after_block_id: string }
@@ -69,8 +75,10 @@ export function insertInlineMathInBlock(
   latex: string,
   options?: { id?: string },
 ): RichTextBlock {
-  if (isDisplayMathBlock(block)) {
-    throw new TextMathError('Cannot insert inline math into a display_math block.');
+  if (isDisplayMathBlock(block) || isTableBlock(block)) {
+    throw new TextMathError(
+      'Cannot insert inline math into a display_math or table block.',
+    );
   }
   const source = requireValidLatex(latex, false);
   const math = createInlineMathSpan(source, {
@@ -160,7 +168,7 @@ function resolveInsertIndex(
     for (let i = 0; i < doc.blocks.length; i++) {
       const b = doc.blocks[i]!;
       if (anchor.block_id && b.id !== anchor.block_id) continue;
-      if (isDisplayMathBlock(b)) continue;
+      if (!isContentSpanBlock(b)) continue;
       const plain = b.spans.map(spanPlainText).join('');
       let from = 0;
       while (from <= plain.length) {
@@ -201,7 +209,7 @@ function resolveInsertIndex(
     for (let i = 0; i < doc.blocks.length; i++) {
       const b = doc.blocks[i]!;
       if (anchor.block_id && b.id !== anchor.block_id) continue;
-      if (isDisplayMathBlock(b)) continue;
+      if (!isContentSpanBlock(b)) continue;
       const plain = b.spans.map(spanPlainText).join('');
       let from = 0;
       while (from <= plain.length) {
@@ -249,7 +257,7 @@ export function insertInlineMathInElement(
     // Insert into last content block at end, or create a paragraph.
     let blocks = [...doc.blocks];
     let targetIdx = blocks.length - 1;
-    while (targetIdx >= 0 && isDisplayMathBlock(blocks[targetIdx]!)) {
+    while (targetIdx >= 0 && !isContentSpanBlock(blocks[targetIdx]!)) {
       targetIdx -= 1;
     }
     if (targetIdx < 0) {
@@ -257,7 +265,7 @@ export function insertInlineMathInElement(
       targetIdx = 0;
     }
     const block = blocks[targetIdx]!;
-    const offset = isDisplayMathBlock(block)
+    const offset = !isContentSpanBlock(block)
       ? 0
       : block.spans.map(spanPlainText).join('').length;
     blocks[targetIdx] = insertInlineMathInBlock(block, offset, latex);
@@ -284,7 +292,7 @@ export function insertDisplayMathInElement(
   if (resolved.mode === 'inline' && resolved.inlineOffset !== undefined) {
     // Split the paragraph at the offset and insert display math between parts.
     const block = doc.blocks[resolved.blockIndex]!;
-    if (isDisplayMathBlock(block)) {
+    if (!isContentSpanBlock(block)) {
       index = resolved.blockIndex + 1;
     } else {
       const plain = block.spans.map(spanPlainText).join('');
@@ -357,13 +365,36 @@ function findMathNode(
   blockIndex: number;
   spanIndex: number | null;
   kind: 'inline' | 'display';
+  tableRow?: number;
+  tableCol?: number;
 } {
   for (let i = 0; i < doc.blocks.length; i++) {
     const b = doc.blocks[i]!;
     if (isDisplayMathBlock(b) && b.id === mathId) {
       return { blockIndex: i, spanIndex: null, kind: 'display' };
     }
-    if (!isDisplayMathBlock(b)) {
+    if (isTableBlock(b)) {
+      for (let ri = 0; ri < b.rows.length; ri++) {
+        const row = b.rows[ri]!;
+        for (let ci = 0; ci < row.cells.length; ci++) {
+          const cell = row.cells[ci]!;
+          for (let j = 0; j < cell.spans.length; j++) {
+            const s = cell.spans[j]!;
+            if (isInlineMathSpan(s) && s.id === mathId) {
+              return {
+                blockIndex: i,
+                spanIndex: j,
+                kind: 'inline',
+                tableRow: ri,
+                tableCol: ci,
+              };
+            }
+          }
+        }
+      }
+      continue;
+    }
+    if (isContentSpanBlock(b)) {
       for (let j = 0; j < b.spans.length; j++) {
         const s = b.spans[j]!;
         if (isInlineMathSpan(s) && s.id === mathId) {
@@ -391,9 +422,28 @@ export function updateTextMathInElement(
       { type: 'display_math' }
     >;
     blocks[loc.blockIndex] = { ...prev, latex: source };
+  } else if (loc.tableRow !== undefined && loc.tableCol !== undefined) {
+    const block = blocks[loc.blockIndex]!;
+    if (!isTableBlock(block)) throw new TextMathError('Internal math location error.');
+    const rows = block.rows.map((row, ri) => {
+      if (ri !== loc.tableRow) return row;
+      return {
+        ...row,
+        cells: row.cells.map((cell, ci) => {
+          if (ci !== loc.tableCol) return cell;
+          const spans = [...cell.spans];
+          const prev = spans[loc.spanIndex!] as RichTextInlineMathSpan;
+          spans[loc.spanIndex!] = { ...prev, latex: source };
+          return { ...cell, spans };
+        }),
+      };
+    });
+    blocks[loc.blockIndex] = { ...block, rows };
   } else {
     const block = { ...blocks[loc.blockIndex]! };
-    if (isDisplayMathBlock(block)) throw new TextMathError('Internal math location error.');
+    if (!isContentSpanBlock(block)) {
+      throw new TextMathError('Internal math location error.');
+    }
     const spans = [...block.spans];
     const prev = spans[loc.spanIndex!] as RichTextInlineMathSpan;
     spans[loc.spanIndex!] = { ...prev, latex: source };
@@ -414,9 +464,26 @@ export function removeTextMathFromElement(
     if (blocks.length === 0) {
       blocks = [{ type: 'paragraph', id: newFeatureId('block'), spans: [{ text: '' }] }];
     }
+  } else if (loc.tableRow !== undefined && loc.tableCol !== undefined) {
+    const block = blocks[loc.blockIndex]!;
+    if (!isTableBlock(block)) throw new TextMathError('Internal math location error.');
+    const rows = block.rows.map((row, ri) => {
+      if (ri !== loc.tableRow) return row;
+      return {
+        ...row,
+        cells: row.cells.map((cell, ci) => {
+          if (ci !== loc.tableCol) return cell;
+          const spans = cell.spans.filter((_, i) => i !== loc.spanIndex);
+          return { ...cell, spans: spans.length ? spans : [{ text: '' }] };
+        }),
+      };
+    });
+    blocks[loc.blockIndex] = { ...block, rows };
   } else {
     const block = { ...blocks[loc.blockIndex]! };
-    if (isDisplayMathBlock(block)) throw new TextMathError('Internal math location error.');
+    if (!isContentSpanBlock(block)) {
+      throw new TextMathError('Internal math location error.');
+    }
     const spans = block.spans.filter((_, i) => i !== loc.spanIndex);
     blocks[loc.blockIndex] = {
       ...block,
@@ -438,7 +505,14 @@ export function convertTextMathInElement(
 
   if (loc.kind === 'inline' && to === 'display') {
     const block = doc.blocks[loc.blockIndex]!;
-    if (isDisplayMathBlock(block)) throw new TextMathError('Internal math location error.');
+    if (isTableBlock(block)) {
+      throw new TextMathError(
+        'Cannot convert table-cell inline math to display math; edit the cell or move the expression first.',
+      );
+    }
+    if (!isContentSpanBlock(block)) {
+      throw new TextMathError('Internal math location error.');
+    }
     const span = block.spans[loc.spanIndex!] as RichTextInlineMathSpan;
     const latex = span.latex;
     // Remove inline, insert display after the block (or split if mid-paragraph).
@@ -483,6 +557,18 @@ export function listMathNodes(doc: RichTextDocument): Array<{
   for (const b of doc.blocks) {
     if (isDisplayMathBlock(b)) {
       if (b.id) out.push({ id: b.id, kind: 'display', latex: b.latex, blockId: b.id });
+      continue;
+    }
+    if (isTableBlock(b)) {
+      for (const row of b.rows) {
+        for (const cell of row.cells) {
+          for (const s of cell.spans) {
+            if (isInlineMathSpan(s) && s.id) {
+              out.push({ id: s.id, kind: 'inline', latex: s.latex, blockId: b.id });
+            }
+          }
+        }
+      }
       continue;
     }
     for (const s of b.spans) {

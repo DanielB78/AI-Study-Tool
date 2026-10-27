@@ -68,9 +68,13 @@ export type RichTextBlockType =
   | 'heading'
   | 'bullet'
   | 'numbered'
-  | 'display_math';
+  | 'display_math'
+  | 'table';
 
-export type RichTextContentBlockType = Exclude<RichTextBlockType, 'display_math'>;
+export type RichTextContentBlockType = Exclude<
+  RichTextBlockType,
+  'display_math' | 'table'
+>;
 
 export type RichTextContentBlock = {
   /**
@@ -93,7 +97,34 @@ export type RichTextDisplayMathBlock = {
   spans: [];
 };
 
-export type RichTextBlock = RichTextContentBlock | RichTextDisplayMathBlock;
+export type RichTextTableAlignment = 'left' | 'center' | 'right';
+
+export type RichTextTableColumn = {
+  alignment: RichTextTableAlignment;
+};
+
+export type RichTextTableCell = {
+  spans: RichTextSpan[];
+};
+
+export type RichTextTableRow = {
+  /** True for the header row (Markdown header). */
+  header?: boolean;
+  cells: RichTextTableCell[];
+};
+
+/** GFM Markdown table stored inside a TextElement (not a canvas element). */
+export type RichTextTableBlock = {
+  id?: string;
+  type: 'table';
+  columns: RichTextTableColumn[];
+  rows: RichTextTableRow[];
+};
+
+export type RichTextBlock =
+  | RichTextContentBlock
+  | RichTextDisplayMathBlock
+  | RichTextTableBlock;
 
 export type RichTextDocument = {
   blocks: RichTextBlock[];
@@ -135,6 +166,8 @@ export const RICH_TEXT_LIMITS = {
   maxLatexChars: 2000,
   minFontSize: 10,
   maxFontSize: 48,
+  maxTableRows: 40,
+  maxTableCols: 12,
 } as const;
 
 const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
@@ -153,6 +186,10 @@ export function isDisplayMathBlock(
   return block.type === 'display_math';
 }
 
+export function isTableBlock(block: RichTextBlock): block is RichTextTableBlock {
+  return block.type === 'table';
+}
+
 /** Searchable plain extract for one math node — used by RAG / anchors. */
 export function latexPlainExtract(latex: string): string {
   return `[LaTeX: ${latex}]`;
@@ -162,6 +199,44 @@ export function latexPlainExtract(latex: string): string {
 export function spanPlainText(span: RichTextSpan): string {
   if (isInlineMathSpan(span)) return latexPlainExtract(span.latex);
   return span.text;
+}
+
+function escapePlainTableCell(text: string): string {
+  return text.replace(/\|/g, '\\|');
+}
+
+/** Markdown-style plain extract for a table block (RAG / legacy text). */
+export function tableBlockToPlainText(block: RichTextTableBlock): string {
+  const colCount = Math.max(
+    block.columns.length,
+    ...block.rows.map((r) => r.cells.length),
+    1,
+  );
+  const alignments = Array.from({ length: colCount }, (_, i) => {
+    return block.columns[i]?.alignment ?? 'left';
+  });
+  const cellText = (cell: RichTextTableCell | undefined): string =>
+    escapePlainTableCell((cell?.spans ?? []).map(spanPlainText).join(''));
+
+  const fmt = (cells: RichTextTableCell[]) => {
+    const padded = Array.from({ length: colCount }, (_, i) => cellText(cells[i]));
+    return `| ${padded.join(' | ')} |`;
+  };
+  const sep = `| ${alignments
+    .map((a) => {
+      if (a === 'center') return ':---:';
+      if (a === 'right') return '---:';
+      return '---';
+    })
+    .join(' | ')} |`;
+
+  const headerRow = block.rows.find((r) => r.header) ?? block.rows[0];
+  const bodyRows = block.rows.filter((r) => r !== headerRow);
+  const lines: string[] = [];
+  if (headerRow) lines.push(fmt(headerRow.cells));
+  lines.push(sep);
+  for (const row of bodyRows) lines.push(fmt(row.cells));
+  return lines.join('\n');
 }
 
 export function resolveRichTextColor(
@@ -212,6 +287,10 @@ export function richTextToPlainText(doc: RichTextDocument): string {
       lines.push(latexPlainExtract(block.latex));
       continue;
     }
+    if (isTableBlock(block)) {
+      lines.push(tableBlockToPlainText(block));
+      continue;
+    }
     const content = block.spans.map(spanPlainText).join('');
     lines.push(content);
   }
@@ -248,6 +327,20 @@ export function isPlainRichText(doc: RichTextDocument): boolean {
             Object.values(s.style).every((v) => v === undefined || v === false)),
       ),
   );
+}
+
+/** Create a table block (ids optional — assigned on normalize). */
+export function createTableBlock(
+  columns: RichTextTableColumn[],
+  rows: RichTextTableRow[],
+  options?: { id?: string },
+): RichTextTableBlock {
+  return {
+    type: 'table',
+    columns,
+    rows,
+    ...(options?.id ? { id: options.id } : {}),
+  };
 }
 
 /** Create an inline math span (id optional — assigned on normalize). */

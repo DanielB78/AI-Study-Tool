@@ -1469,6 +1469,45 @@ textarea {
   white-space: pre-wrap;
 }
 
+/* GFM Markdown tables inside TextElement rich text */
+.rt-table-wrap {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.75em 0;
+}
+
+.rt-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+  font-size: 1em;
+  line-height: 1.35;
+  border-top: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.rt-table th,
+.rt-table td {
+  padding: 0.4em 0.65em;
+  vertical-align: top;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+.rt-table th {
+  font-weight: 600;
+}
+
+.rt-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.rt-table .rt-math--inline {
+  max-width: 100%;
+}
+
 .popover-action {
   display: block;
   width: 100%;

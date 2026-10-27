@@ -35,6 +35,28 @@ export type ContentListNode = {
   sectionId: string | null;
 };
 
+export type ContentTableAlignment = 'left' | 'center' | 'right';
+
+export type ContentTableCell = {
+  spans: ContentInlineSpan[];
+  text: string;
+};
+
+export type ContentTableRow = {
+  header?: boolean;
+  cells: ContentTableCell[];
+};
+
+/** GFM Markdown table — stays inside a TextElement after compile. */
+export type ContentTableNode = {
+  type: 'table';
+  columns: Array<{ alignment: ContentTableAlignment }>;
+  rows: ContentTableRow[];
+  /** Markdown-style plain extract for RAG / associations. */
+  text: string;
+  sectionId: string | null;
+};
+
 export type ContentEquationNode = {
   type: 'equation';
   latex: string;
@@ -72,6 +94,7 @@ export type ContentDocumentNode =
   | ContentHeadingNode
   | ContentParagraphNode
   | ContentListNode
+  | ContentTableNode
   | ContentEquationNode
   | ContentGraphNode
   | ContentComponentNode;

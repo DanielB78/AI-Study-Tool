@@ -49,34 +49,18 @@ Do **not** emit \`create_text\`, \`create_equation\`, \`create_graph\`, \`operat
 - \`##\` / \`###\` section headings (define logical sections)
 - Ordinary paragraphs for explanation
 - Lists when helpful
-- Logical reading order (app stacks content in one vertical column)
+- Standard Markdown tables when tabular presentation helps (see Tables)
+- Logical reading order (app stacks content using the user's layout settings)
 
 ### Paragraph spacing — critical
 
-- Write each paragraph as **continuous prose** (one block of sentences).
-- Soft line wraps inside a paragraph are fine **without** a blank line between them.
-- Use a blank line **only** between distinct paragraphs, or before/after headings, \`$$\` equations, and \`:::graph\` markers.
-- Do **not** put a blank line after every sentence.
-- Do **not** put a blank line after every wrapped line of the same paragraph.
-- Bad (creates fragmented text):
-
-\`\`\`
-This is sentence one.
-
-This is sentence two of the same idea.
-\`\`\`
-
-- Good (one paragraph):
-
-\`\`\`
-This is sentence one. This is sentence two of the same idea.
-\`\`\`
+- Write each paragraph as **continuous prose**. Soft wraps OK without blank lines between them.
+- Blank lines only between distinct paragraphs, or before/after headings, tables, \`$$\`, and \`:::graph\`.
+- Do **not** blank-line every sentence or wrapped line of the same paragraph.
 
 ### Inline emphasis
 
-- Bold: \`**like this**\`
-- Italic: \`*like this*\`
-- Do not use HTML tags for emphasis.
+- Bold \`**like this**\`; italic \`*like this*\`. No HTML tags.
 
 ### Inline mathematics — strict
 
@@ -109,31 +93,30 @@ $$
 
 Hard rules (violations break the importer):
 
-1. Opening line is exactly \`$$\` (alone on its line)
-2. LaTeX body on the following line(s)
-3. Closing line is exactly \`$$\` (alone on its line)
-4. Never leave an opening \`$$\` without a closing \`$$\`
-5. Never start a new heading, paragraph, or \`:::graph\` before closing \`$$\`
-6. Do **not** use \`\\\\[\` / \`\\\\]\` in this mode — use \`$$\` only (fewer ChatGPT rendering mistakes)
-7. Do **not** write single-line \`$$F=-kx$$\`; always use the three-line form above
-8. Every \`\\\\begin{...}\` must have a matching \`\\\\end{...}\` inside the same \`$$\` block
-9. For multi-step algebra use one \`aligned\` block, not several half-open equations:
-
-\`\`\`
-$$
-\\\\begin{aligned}
-F &= -kx \\\\\\\\
-m\\\\ddot{x} &= -kx \\\\\\\\
-\\\\ddot{x}+\\\\omega^2 x &= 0
-\\\\end{aligned}
-$$
-\`\`\`
-
-10. Brace every multi-character superscript/subscript: \`x^{2}\`, \`a_{0}\` (not \`x^2\` when followed by more digits/letters that would glue wrongly — prefer braces always: \`x^{2}\`, \`\\\\omega^{2}\`)
-11. Fractions: \`\\\\frac{a}{b}\` with both arguments braced — never \`\\\\frac a b\`
-12. Before finishing, scan the document: count of \`$$\` lines must be **even**
+1. Opening \`$$\` alone on its line; LaTeX body; closing \`$$\` alone on its line
+2. Never leave \`$$\` unpaired; never start a heading/paragraph/\`:::graph\` before closing
+3. Do **not** use \`\\\\[\` / \`\\\\]\` or single-line \`$$F=-kx$$\` — always the three-line form
+4. Every \`\\\\begin{...}\` needs matching \`\\\\end{...}\` in the same block
+5. Multi-step algebra: one \`aligned\` block. Brace superscripts/subscripts (\`x^{2}\`) and fractions (\`\\\\frac{a}{b}\`)
+6. Count of \`$$\` lines must be **even**
 
 Surrounding prose stays as normal paragraphs before/after closed equation blocks.
+
+### Tables
+
+Use GFM Markdown tables when a compact comparison helps (symbols, units, values). Not every response needs one.
+
+\`\`\`
+| Quantity | Symbol | Unit |
+|:---|:---:|---:|
+| Force | $F$ | N |
+| Mass | $m$ | kg |
+\`\`\`
+
+- Header row + separator (\`|---|\` / \`:---:\` alignment) required
+- Inline \`$...$\` in cells; keep tables readable
+- Do **not** use LaTeX \`array\` to fake tables; do **not** emit JSON/coords/one element per cell
+- Display \`$$\` and \`:::graph\` stay unchanged for derivations and plots
 
 ### Graphs
 
@@ -180,7 +163,7 @@ Do **not** put coordinates, sizes, fonts, colours, rows, or columns in JSON.
 Markdown body matching the target type
 \`\`\`
 
-- TextElement → headings/paragraphs/lists/inline \`$…$\` (display math stays inside the text)
+- TextElement → headings/paragraphs/lists/tables/inline \`$…$\` (display math stays inside the text)
 - EquationElement → exactly one \`$$\` … \`$$\` block
 - GraphElement → one \`:::graph\` … \`:::\` marker (omit unchanged settings)
 
@@ -214,6 +197,7 @@ export const CONTENT_FIRST_RESPONSE_INSTRUCTIONS = [
   'Put no commentary outside that fence.',
   'Do not emit canvas-operation JSON arrays or create_* operations for ordinary new content.',
   'Write paragraphs as continuous prose — do not insert a blank line after every sentence or wrapped line.',
+  'Use GFM Markdown tables (header + separator) when tabular presentation helps; inline $...$ in cells; no JSON for tables.',
   'Display math: opening $$ on its own line, LaTeX body, closing $$ on its own line — always paired.',
   'Inline math: paired $...$ only. Prefer braces in superscripts/subscripts and \\frac{a}{b}.',
   'Do not use :::definition / :::example / :::warning / :::exercise markers.',

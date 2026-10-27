@@ -4,6 +4,7 @@ import {
   RICH_TEXT_SIZE_PRESETS,
   isDisplayMathBlock,
   isInlineMathSpan,
+  isTableBlock,
   type RichTextBlock,
   type RichTextBlockType,
   type RichTextDocument,
@@ -11,6 +12,10 @@ import {
   type RichTextSizePreset,
   type RichTextSpan,
   type RichTextSpanStyle,
+  type RichTextTableAlignment,
+  type RichTextTableBlock,
+  type RichTextTableCell,
+  type RichTextTableRow,
   type RichTextTextSpan,
 } from './richText';
 import { ensureBlockIds, ensureMathIds } from './textFeatures';
@@ -34,6 +39,13 @@ const BLOCK_TYPES = new Set<RichTextBlockType>([
   'bullet',
   'numbered',
   'display_math',
+  'table',
+]);
+
+const TABLE_ALIGNMENTS = new Set<RichTextTableAlignment>([
+  'left',
+  'center',
+  'right',
 ]);
 
 function parseStyle(raw: unknown, path: string): RichTextSpanStyle | undefined {
@@ -166,13 +178,93 @@ function parseSpan(raw: unknown, path: string): RichTextSpan {
   return textSpan;
 }
 
+function parseTableCell(raw: unknown, path: string): RichTextTableCell {
+  if (!isRecord(raw)) throw new RichTextParseError(`${path} must be an object.`);
+  if (!Array.isArray(raw.spans)) {
+    throw new RichTextParseError(`${path}.spans must be an array.`);
+  }
+  if (raw.spans.length > RICH_TEXT_LIMITS.maxSpansPerBlock) {
+    throw new RichTextParseError(
+      `${path}.spans exceeds ${RICH_TEXT_LIMITS.maxSpansPerBlock}.`,
+    );
+  }
+  const spans =
+    raw.spans.length === 0
+      ? ([{ text: '' }] as RichTextSpan[])
+      : raw.spans.map((s, i) => parseSpan(s, `${path}.spans[${i}]`));
+  return { spans };
+}
+
+function parseTableRow(raw: unknown, path: string): RichTextTableRow {
+  if (!isRecord(raw)) throw new RichTextParseError(`${path} must be an object.`);
+  if (!Array.isArray(raw.cells) || raw.cells.length === 0) {
+    throw new RichTextParseError(`${path}.cells must be a non-empty array.`);
+  }
+  if (raw.cells.length > RICH_TEXT_LIMITS.maxTableCols) {
+    throw new RichTextParseError(
+      `${path}.cells exceeds ${RICH_TEXT_LIMITS.maxTableCols} columns.`,
+    );
+  }
+  const cells = raw.cells.map((c, i) => parseTableCell(c, `${path}.cells[${i}]`));
+  const row: RichTextTableRow = { cells };
+  if (raw.header !== undefined) {
+    if (typeof raw.header !== 'boolean') {
+      throw new RichTextParseError(`${path}.header must be boolean.`);
+    }
+    if (raw.header) row.header = true;
+  }
+  return row;
+}
+
+function parseTableBlock(raw: Record<string, unknown>, path: string, id?: string): RichTextTableBlock {
+  if (!Array.isArray(raw.columns) || raw.columns.length === 0) {
+    throw new RichTextParseError(`${path}.columns must be a non-empty array.`);
+  }
+  if (raw.columns.length > RICH_TEXT_LIMITS.maxTableCols) {
+    throw new RichTextParseError(
+      `${path}.columns exceeds ${RICH_TEXT_LIMITS.maxTableCols}.`,
+    );
+  }
+  const columns = raw.columns.map((col, i) => {
+    if (!isRecord(col)) {
+      throw new RichTextParseError(`${path}.columns[${i}] must be an object.`);
+    }
+    const alignment = col.alignment ?? 'left';
+    if (
+      typeof alignment !== 'string' ||
+      !TABLE_ALIGNMENTS.has(alignment as RichTextTableAlignment)
+    ) {
+      throw new RichTextParseError(
+        `${path}.columns[${i}].alignment must be left, center, or right.`,
+      );
+    }
+    return { alignment: alignment as RichTextTableAlignment };
+  });
+
+  if (!Array.isArray(raw.rows) || raw.rows.length === 0) {
+    throw new RichTextParseError(`${path}.rows must be a non-empty array.`);
+  }
+  if (raw.rows.length > RICH_TEXT_LIMITS.maxTableRows) {
+    throw new RichTextParseError(
+      `${path}.rows exceeds ${RICH_TEXT_LIMITS.maxTableRows}.`,
+    );
+  }
+  const rows = raw.rows.map((r, i) => parseTableRow(r, `${path}.rows[${i}]`));
+  return {
+    type: 'table',
+    columns,
+    rows,
+    ...(id ? { id } : {}),
+  };
+}
+
 function parseBlock(raw: unknown, path: string): RichTextBlock {
   if (!isRecord(raw)) throw new RichTextParseError(`${path} must be an object.`);
   let type = raw.type;
   if (type === undefined && raw.role === 'heading') type = 'heading';
   if (typeof type !== 'string' || !BLOCK_TYPES.has(type as RichTextBlockType)) {
     throw new RichTextParseError(
-      `${path}.type must be one of: paragraph, heading, bullet, numbered, display_math.`,
+      `${path}.type must be one of: paragraph, heading, bullet, numbered, display_math, table.`,
     );
   }
 
@@ -189,6 +281,10 @@ function parseBlock(raw: unknown, path: string): RichTextBlock {
     };
   }
 
+  if (type === 'table') {
+    return parseTableBlock(raw, path, id);
+  }
+
   if (!Array.isArray(raw.spans) || raw.spans.length === 0) {
     throw new RichTextParseError(`${path}.spans must be a non-empty array.`);
   }
@@ -199,7 +295,7 @@ function parseBlock(raw: unknown, path: string): RichTextBlock {
   }
   const spans = raw.spans.map((s, i) => parseSpan(s, `${path}.spans[${i}]`));
   return {
-    type: type as Exclude<RichTextBlockType, 'display_math'>,
+    type: type as Exclude<RichTextBlockType, 'display_math' | 'table'>,
     spans,
     ...(id ? { id } : {}),
   };
@@ -210,6 +306,17 @@ function totalPlainChars(doc: RichTextDocument): number {
   for (const block of doc.blocks) {
     if (isDisplayMathBlock(block)) {
       total += block.latex.length;
+      continue;
+    }
+    if (isTableBlock(block)) {
+      for (const row of block.rows) {
+        for (const cell of row.cells) {
+          for (const span of cell.spans) {
+            if (isInlineMathSpan(span)) total += span.latex.length;
+            else total += span.text.length;
+          }
+        }
+      }
       continue;
     }
     for (const span of block.spans) {

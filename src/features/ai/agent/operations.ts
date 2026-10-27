@@ -160,9 +160,22 @@ export type AgentRichTextDisplayMathBlock = {
   latex: string;
 };
 
+export type AgentRichTextTableAlignment = 'left' | 'center' | 'right';
+
+export type AgentRichTextTableBlock = {
+  id?: string;
+  type: 'table';
+  columns: Array<{ alignment: AgentRichTextTableAlignment }>;
+  rows: Array<{
+    header?: boolean;
+    cells: Array<{ spans: AgentRichTextSpan[] }>;
+  }>;
+};
+
 export type AgentRichTextBlock =
   | AgentRichTextContentBlock
-  | AgentRichTextDisplayMathBlock;
+  | AgentRichTextDisplayMathBlock
+  | AgentRichTextTableBlock;
 
 export type AgentRichTextDocument = {
   blocks: AgentRichTextBlock[];
@@ -1559,6 +1572,113 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
                   latex: { type: 'string', minLength: 1 },
                 },
               },
+              {
+                type: 'object',
+                additionalProperties: false,
+                required: ['type', 'columns', 'rows'],
+                properties: {
+                  id: { type: 'string', minLength: 1 },
+                  type: { const: 'table' },
+                  columns: {
+                    type: 'array',
+                    minItems: 1,
+                    items: {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: ['alignment'],
+                      properties: {
+                        alignment: {
+                          type: 'string',
+                          enum: ['left', 'center', 'right'],
+                        },
+                      },
+                    },
+                  },
+                  rows: {
+                    type: 'array',
+                    minItems: 1,
+                    items: {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: ['cells'],
+                      properties: {
+                        header: { type: 'boolean' },
+                        cells: {
+                          type: 'array',
+                          minItems: 1,
+                          items: {
+                            type: 'object',
+                            additionalProperties: false,
+                            required: ['spans'],
+                            properties: {
+                              spans: {
+                                type: 'array',
+                                items: {
+                                  oneOf: [
+                                    {
+                                      type: 'object',
+                                      additionalProperties: false,
+                                      required: ['text'],
+                                      properties: {
+                                        type: { type: 'string', enum: ['text'] },
+                                        text: { type: 'string' },
+                                        style: {
+                                          type: 'object',
+                                          additionalProperties: false,
+                                          properties: {
+                                            bold: { type: 'boolean' },
+                                            italic: { type: 'boolean' },
+                                            underline: { type: 'boolean' },
+                                            color: { type: 'string' },
+                                            highlight_color: { type: 'string' },
+                                            font_size: {
+                                              anyOf: [
+                                                { type: 'number' },
+                                                {
+                                                  type: 'string',
+                                                  enum: [
+                                                    'heading_large',
+                                                    'heading',
+                                                    'subheading',
+                                                    'body',
+                                                    'small',
+                                                  ],
+                                                },
+                                              ],
+                                            },
+                                          },
+                                        },
+                                      },
+                                    },
+                                    {
+                                      type: 'object',
+                                      additionalProperties: false,
+                                      required: ['type', 'latex'],
+                                      properties: {
+                                        type: { const: 'inline_math' },
+                                        id: { type: 'string', minLength: 1 },
+                                        latex: { type: 'string', minLength: 1 },
+                                        style: {
+                                          type: 'object',
+                                          additionalProperties: false,
+                                          properties: {
+                                            color: { type: 'string' },
+                                            highlight_color: { type: 'string' },
+                                          },
+                                        },
+                                      },
+                                    },
+                                  ],
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
             ],
           },
         },
@@ -1701,6 +1821,7 @@ Span style (all optional): bold, italic, underline, color (default|blue|green|re
 highlight_color (same palette), font_size (heading_large|heading|subheading|body|small|number 10–48).
 Inline math span: { "type":"inline_math", "latex":"..." } — part of a sentence; do NOT invent ids.
 Display math block: { "type":"display_math", "latex":"..." } — centred equation on its own line.
+Table block (rare in JSON mode — prefer Markdown tables in content-first): { "type":"table", "columns":[{"alignment":"left"|"center"|"right"}], "rows":[{"header":true,"cells":[{"spans":[…]}]},…] } — stays inside the TextElement; never create one TextElement per cell.
 Use formatting intentionally — not every sentence needs colour/highlight.
 Prefer one textbox with headings/lists/math over many tiny textboxes for emphasis.
 

@@ -8,6 +8,8 @@ import type { TextElement } from '../../types/canvas';
 import {
   getRichTextDocument,
   isDisplayMathBlock,
+  isTableBlock,
+  tableBlockToPlainText,
   isInlineMathSpan,
   isTextSpan,
   latexPlainExtract,
@@ -65,6 +67,13 @@ export function ensureBlockIds(doc: RichTextDocument): RichTextDocument {
   };
 }
 
+function withMathIdsOnSpans(spans: RichTextSpan[]): RichTextSpan[] {
+  return spans.map((s) => {
+    if (!isInlineMathSpan(s)) return s;
+    return s.id?.trim() ? s : { ...s, id: newFeatureId('math') };
+  });
+}
+
 /** Assign stable ids to inline_math spans and display_math blocks when missing. */
 export function ensureMathIds(doc: RichTextDocument): RichTextDocument {
   return {
@@ -72,12 +81,21 @@ export function ensureMathIds(doc: RichTextDocument): RichTextDocument {
       if (isDisplayMathBlock(b)) {
         return b.id?.trim() ? b : { ...b, id: newFeatureId('math') };
       }
+      if (isTableBlock(b)) {
+        return {
+          ...b,
+          rows: b.rows.map((row) => ({
+            ...row,
+            cells: row.cells.map((cell) => ({
+              ...cell,
+              spans: withMathIdsOnSpans(cell.spans),
+            })),
+          })),
+        };
+      }
       return {
         ...b,
-        spans: b.spans.map((s) => {
-          if (!isInlineMathSpan(s)) return s;
-          return s.id?.trim() ? s : { ...s, id: newFeatureId('math') };
-        }),
+        spans: withMathIdsOnSpans(b.spans),
       };
     }),
   };
@@ -85,6 +103,7 @@ export function ensureMathIds(doc: RichTextDocument): RichTextDocument {
 
 export function blockPlainText(block: RichTextBlock): string {
   if (isDisplayMathBlock(block)) return latexPlainExtract(block.latex);
+  if (isTableBlock(block)) return tableBlockToPlainText(block);
   return block.spans.map(spanPlainText).join('');
 }
 
@@ -221,7 +240,7 @@ export function applyDecorationToBlock(
   patch: SpanDecorationPatch,
 ): RichTextBlock {
   if (start >= end) return block;
-  if (isDisplayMathBlock(block)) return block;
+  if (isDisplayMathBlock(block) || isTableBlock(block)) return block;
   const plain = blockPlainText(block);
   const lo = Math.max(0, Math.min(start, plain.length));
   const hi = Math.max(lo, Math.min(end, plain.length));
@@ -513,8 +532,8 @@ function splitBlockAt(
   block: RichTextBlock,
   offset: number,
 ): { before: RichTextBlock; after: RichTextBlock } {
-  if (isDisplayMathBlock(block)) {
-    // Display math is atomic — split before or after the whole block.
+  if (isDisplayMathBlock(block) || isTableBlock(block)) {
+    // Display math / tables are atomic — split before or after the whole block.
     if (offset <= 0) {
       return {
         before: { type: 'paragraph', id: block.id, spans: [{ text: '' }] },

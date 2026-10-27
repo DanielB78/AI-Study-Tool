@@ -107,8 +107,10 @@ describe('textFeatures — title / notes / headings / highlights', () => {
       quote: 'vector quantity',
       style: 'definition',
     });
-    const spans = el.richText!.blocks.flatMap((b) => b.spans);
-    expect(spans.some((s) => s.style?.highlight_color === 'blue')).toBe(true);
+    const spans = el.richText!.blocks.flatMap((b) =>
+      'spans' in b && Array.isArray(b.spans) ? b.spans : [],
+    );
+    expect(spans.some((s) => 'style' in s && s.style?.highlight_color === 'blue')).toBe(true);
   });
 
   it('measure includes title and notes height', () => {
@@ -139,8 +141,12 @@ describe('textFeatures — linked comments', () => {
     expect(element.comments).toHaveLength(1);
     expect(element.comments![0]!.anchor.status).toBe('resolved');
     expect(element.comments![0]!.displayState).toBe('collapsed');
-    const spans = element.richText!.blocks.flatMap((b) => b.spans);
-    expect(spans.some((s) => s.style?.linked_comment_id === commentId)).toBe(true);
+    const spans = element.richText!.blocks.flatMap((b) =>
+      'spans' in b && Array.isArray(b.spans) ? b.spans : [],
+    );
+    expect(
+      spans.some((s) => 'style' in s && s.style?.linked_comment_id === commentId),
+    ).toBe(true);
   });
 
   it('B: multiple comments on separate phrases', () => {

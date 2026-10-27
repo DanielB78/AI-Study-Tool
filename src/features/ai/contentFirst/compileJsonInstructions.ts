@@ -93,6 +93,17 @@ export function documentToSingleRichText(
         }
         break;
       }
+      case 'table': {
+        blocks.push({
+          type: 'table',
+          columns: node.columns.map((c) => ({ alignment: c.alignment })),
+          rows: node.rows.map((r) => ({
+            ...(r.header ? { header: true as const } : {}),
+            cells: r.cells.map((c) => ({ spans: spansToAgent(c.spans) })),
+          })),
+        });
+        break;
+      }
       case 'equation': {
         blocks.push({ type: 'display_math', latex: node.latex });
         break;
@@ -120,6 +131,40 @@ function richTextPlain(doc: AgentRichTextDocument): string {
   return doc.blocks
     .map((b) => {
       if (b.type === 'display_math') return b.latex;
+      if (b.type === 'table') {
+        const colCount = Math.max(
+          b.columns.length,
+          ...b.rows.map((r) => r.cells.length),
+          1,
+        );
+        const cellText = (spans: AgentRichTextSpan[]) =>
+          spans
+            .map((s) =>
+              'type' in s && s.type === 'inline_math'
+                ? s.latex
+                : 'text' in s
+                  ? s.text
+                  : '',
+            )
+            .join('')
+            .replace(/\|/g, '\\|');
+        const pad = (cells: Array<{ spans: AgentRichTextSpan[] }>) =>
+          Array.from({ length: colCount }, (_, i) => cellText(cells[i]?.spans ?? []));
+        const fmt = (cells: string[]) => `| ${cells.join(' | ')} |`;
+        const sep = `| ${Array.from({ length: colCount }, (_, i) => {
+          const a = b.columns[i]?.alignment ?? 'left';
+          if (a === 'center') return ':---:';
+          if (a === 'right') return '---:';
+          return '---';
+        }).join(' | ')} |`;
+        const header = b.rows.find((r) => r.header) ?? b.rows[0];
+        const body = b.rows.filter((r) => r !== header);
+        const lines: string[] = [];
+        if (header) lines.push(fmt(pad(header.cells)));
+        lines.push(sep);
+        for (const row of body) lines.push(fmt(pad(row.cells)));
+        return lines.join('\n');
+      }
       return b.spans
         .map((s) => ('type' in s && s.type === 'inline_math' ? s.latex : 'text' in s ? s.text : ''))
         .join('');
@@ -238,6 +283,7 @@ function compileEditEquation(
       return Boolean(n.text.trim());
     }
     if (n.type === 'list') return n.items.length > 0;
+    if (n.type === 'table') return n.rows.length > 0;
     if (n.type === 'graph') return true;
     return false;
   });
@@ -296,6 +342,7 @@ function compileEditGraph(
       return Boolean(n.text.trim());
     }
     if (n.type === 'list') return n.items.length > 0;
+    if (n.type === 'table') return n.rows.length > 0;
     if (n.type === 'equation') return true;
     return false;
   });

@@ -220,6 +220,37 @@ function estimateRichLayout(
       continue;
     }
 
+    if (block.type === 'table') {
+      const colCount = Math.max(block.columns.length, 1);
+      const cellWidth = Math.max(40, contentWidth / colCount);
+      let tableLines = 0;
+      for (const row of block.rows) {
+        let rowLines = 1;
+        for (const cell of row.cells) {
+          let text = '';
+          for (const s of cell.spans) {
+            if (s.type === 'inline_math') {
+              text += 'M'.repeat(Math.max(2, Math.ceil(s.latex.length * 0.65)));
+            } else {
+              text += s.text;
+            }
+          }
+          rowLines = Math.max(
+            rowLines,
+            countWrappedLinesForParagraph(text || ' ', cellWidth, style.fontSize),
+          );
+        }
+        // Cell padding ≈ 0.8em vertical per row.
+        tableLines += rowLines;
+        contentHeight +=
+          rowLines * style.fontSize * (style.lineHeight || 1.35) +
+          style.fontSize * 0.8;
+      }
+      contentHeight += style.fontSize * 1.5; // table margins
+      wrappedLines += Math.max(1, tableLines);
+      continue;
+    }
+
     // Approximate inline math width contribution for wrap estimates.
     let text = '';
     for (const s of block.spans) {
@@ -240,7 +271,7 @@ function estimateRichLayout(
     if (block.type === 'heading') {
       const headingSpan = block.spans.find((s) => s.type !== 'inline_math');
       const size = resolveRichTextFontSize(
-        headingSpan && headingSpan.type !== 'inline_math'
+        headingSpan && 'style' in headingSpan
           ? headingSpan.style?.font_size ?? 'heading'
           : 'heading',
         style.fontSize,

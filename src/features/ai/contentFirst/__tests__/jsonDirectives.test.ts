@@ -109,6 +109,7 @@ describe(':::json directives', () => {
     expect(CONTENT_FIRST_SYSTEM_PROMPT).toContain(':::json');
     expect(CONTENT_FIRST_SYSTEM_PROMPT).toContain('"action":"edit"');
     expect(CONTENT_FIRST_SYSTEM_PROMPT).toContain('"action":"add_text"');
+    expect(CONTENT_FIRST_SYSTEM_PROMPT).toContain('### Tables');
     expect(CONTENT_FIRST_SYSTEM_PROMPT.length).toBeLessThan(7500);
   });
 
@@ -161,6 +162,33 @@ A mass attached to a spring experiences $F=-kx$.
       expect(updated.text).toContain('Restoring Force');
       expect(updated.text).toContain('F=-kx');
       expect(updated.id).toBe('text_12');
+    }
+  });
+
+  it('B2 — edit TextElement with a Markdown table preserves id and table block', () => {
+    const text = seedText();
+    reset([text]);
+    const raw = `:::json
+{"action":"edit","target_id":"text_12"}
+:::
+
+## Physical Quantities
+
+| Quantity | Symbol | Unit |
+|---|---|---|
+| Force | $F$ | N |
+| Mass | $m$ | kg |
+`;
+    handleContentFirstResponse(raw, ctxFor([text]));
+    const updated = useCanvasStore
+      .getState()
+      .document.elements.find((e) => e.id === 'text_12');
+    expect(updated?.type).toBe('text');
+    if (updated?.type === 'text') {
+      expect(updated.id).toBe('text_12');
+      expect(updated.text).toContain('Force');
+      expect(updated.richText?.blocks.some((b) => b.type === 'table')).toBe(true);
+      expect(updated.richText?.blocks.some((b) => b.type === 'heading')).toBe(true);
     }
   });
 

@@ -18,7 +18,6 @@ import type {
 } from '../agent/operations';
 import type {
   ContentDocument,
-  ContentDocumentNode,
   ContentInlineSpan,
 } from './types';
 
@@ -90,6 +89,16 @@ type ProseChunk =
       ordered: boolean;
       items: Array<{ spans: ContentInlineSpan[]; text: string }>;
       sectionId: string | null;
+    }
+  | {
+      kind: 'table';
+      columns: Array<{ alignment: 'left' | 'center' | 'right' }>;
+      rows: Array<{
+        header?: boolean;
+        cells: Array<{ spans: ContentInlineSpan[]; text: string }>;
+      }>;
+      text: string;
+      sectionId: string | null;
     };
 
 /**
@@ -129,7 +138,7 @@ export function compileContentDocument(
           spans: spansToAgent(chunk.spans),
         });
         plainParts.push(text);
-      } else {
+      } else if (chunk.kind === 'list') {
         for (const item of chunk.items) {
           blocks.push({
             type: chunk.ordered ? 'numbered' : 'bullet',
@@ -137,6 +146,16 @@ export function compileContentDocument(
           });
           plainParts.push(item.text);
         }
+      } else {
+        blocks.push({
+          type: 'table',
+          columns: chunk.columns.map((c) => ({ alignment: c.alignment })),
+          rows: chunk.rows.map((r) => ({
+            ...(r.header ? { header: true as const } : {}),
+            cells: r.cells.map((c) => ({ spans: spansToAgent(c.spans) })),
+          })),
+        });
+        plainParts.push(chunk.text);
       }
     }
 
@@ -186,6 +205,16 @@ export function compileContentDocument(
           kind: 'list',
           ordered: node.ordered,
           items: node.items,
+          sectionId: node.sectionId,
+        });
+        break;
+      }
+      case 'table': {
+        proseBuf.push({
+          kind: 'table',
+          columns: node.columns,
+          rows: node.rows,
+          text: node.text,
           sectionId: node.sectionId,
         });
         break;

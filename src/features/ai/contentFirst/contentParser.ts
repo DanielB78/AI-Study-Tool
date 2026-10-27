@@ -7,11 +7,19 @@
 import { sanitizeLatexSource, validateLatex } from '../../equations/latex';
 import { validateGraphExpression } from '../../graphs/expressionService';
 import {
+  markdownTableToPlainText,
+  parseMarkdownTableAt,
+  type MarkdownTableAlignment,
+  type ParsedMarkdownTable,
+} from './markdownTables';
+import {
   ContentParseError,
   type ContentComponentKind,
   type ContentDocument,
   type ContentDocumentNode,
   type ContentInlineSpan,
+  type ContentTableCell,
+  type ContentTableNode,
 } from './types';
 
 const COMPONENT_KINDS = new Set<ContentComponentKind>([
@@ -242,6 +250,12 @@ type Block =
   | { kind: 'heading'; level: 1 | 2 | 3; body: string }
   | { kind: 'paragraph'; body: string }
   | { kind: 'list'; ordered: boolean; items: string[] }
+  | {
+      kind: 'table';
+      header: string[];
+      alignments: MarkdownTableAlignment[];
+      rows: string[][];
+    }
   | { kind: 'display_math'; latex: string }
   | { kind: 'graph'; body: string }
   | { kind: 'component'; component: ContentComponentKind; body: string }
@@ -506,6 +520,19 @@ export function tokenizeContentBlocks(source: string): Block[] {
       continue;
     }
 
+    // GFM Markdown table (header + separator required)
+    const tableParsed = parseMarkdownTableAt(lines, i);
+    if (tableParsed) {
+      blocks.push({
+        kind: 'table',
+        header: tableParsed.table.header,
+        alignments: tableParsed.table.alignments,
+        rows: tableParsed.table.rows,
+      });
+      i = tableParsed.nextIndex;
+      continue;
+    }
+
     // Paragraph — gather until blank / structural boundary
     const buf: string[] = [];
     while (i < lines.length) {
@@ -519,6 +546,8 @@ export function tokenizeContentBlocks(source: string): Block[] {
       if (/^#{1,3}\s+/.test(l)) break;
       if (/^\s*([-*+]|\d+\.)\s+/.test(l) && buf.length === 0) break;
       if (/^\s*([-*+]|\d+\.)\s+/.test(l)) break;
+      // Do not swallow a following GFM table into the paragraph.
+      if (parseMarkdownTableAt(lines, i)) break;
       buf.push(l);
       i += 1;
     }
@@ -571,6 +600,35 @@ function pushGraph(
     yLabel: g.yLabel,
     sectionId,
   });
+}
+
+function cellFromMarkdown(raw: string): ContentTableCell {
+  const spans = parseInlineSpans(raw);
+  return { spans, text: spansToPlain(spans) };
+}
+
+function pushTable(
+  table: ParsedMarkdownTable,
+  sectionId: string | null,
+  nodes: ContentDocumentNode[],
+): void {
+  const columns = table.alignments.map((alignment) => ({ alignment }));
+  const headerCells = table.header.map(cellFromMarkdown);
+  const rows = [
+    { header: true as const, cells: headerCells },
+    ...table.rows.map((r) => ({ cells: r.map(cellFromMarkdown) })),
+  ];
+  const plain = markdownTableToPlainText(table, (raw) =>
+    spansToPlain(parseInlineSpans(raw)),
+  );
+  const node: ContentTableNode = {
+    type: 'table',
+    columns,
+    rows,
+    text: plain,
+    sectionId,
+  };
+  nodes.push(node);
 }
 
 /**
@@ -634,6 +692,13 @@ function expandComponentBody(
       }
       case 'display_math':
         pushDisplayMath(b.latex, sectionId, nodes, warnings);
+        break;
+      case 'table':
+        pushTable(
+          { header: b.header, alignments: b.alignments, rows: b.rows },
+          sectionId,
+          nodes,
+        );
         break;
       case 'graph':
         pushGraph(b.body, sectionId, nodes);
@@ -717,6 +782,18 @@ export function parseContentDocument(raw: string): ContentDocument {
         });
         break;
       }
+      case 'table': {
+        pushTable(
+          {
+            header: block.header,
+            alignments: block.alignments,
+            rows: block.rows,
+          },
+          currentSectionId,
+          nodes,
+        );
+        break;
+      }
       case 'display_math': {
         pushDisplayMath(block.latex, currentSectionId, nodes, warnings);
         break;
@@ -777,6 +854,8 @@ export function looksLikeContentMarkdown(raw: string): boolean {
   if (/^#{1,3}\s+/m.test(t)) return true;
   if (/\$\$/.test(t) || /\\\[[\s\S]*?\\\]/.test(t)) return true;
   if (/^:::(graph|definition|example|warning|exercise)\s*$/m.test(t)) return true;
+  // GFM table separator row is a strong content-first signal.
+  if (/^\s*\|?[\s:]*-{3,}[\s:]*\|/m.test(t)) return true;
   // Multi-paragraph prose without JSON operation arrays
   if (!/"operations"\s*:/.test(t) && t.split(/\n\n+/).length >= 2) return true;
   return false;

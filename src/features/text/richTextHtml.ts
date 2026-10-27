@@ -12,12 +12,17 @@ import { renderLatexHtml } from '../equations/latex';
 import {
   isDisplayMathBlock,
   isInlineMathSpan,
+  isTableBlock,
   resolveRichTextColor,
   resolveRichTextFontSize,
   type RichTextBlock,
   type RichTextDocument,
   type RichTextInlineMathSpan,
   type RichTextSpan,
+  type RichTextTableAlignment,
+  type RichTextTableBlock,
+  type RichTextTableCell,
+  type RichTextTableRow,
   type RichTextTextSpan,
 } from './richText';
 
@@ -134,6 +139,69 @@ function displayMathToHtml(
   return `<div data-rt-type="display_math"${idAttr}${latexAttr} class="rt-math rt-math--display" contenteditable="false" style="display:block;text-align:center;margin:0.65em 0;padding:0.15em 0;overflow-x:auto;line-height:1.35;font-size:${fontSizeToEm(defaults.fontSize * 1.15, defaults.fontSize)};background:transparent;border:none">${inner}</div>`;
 }
 
+function alignCss(alignment: RichTextTableAlignment): string {
+  if (alignment === 'center') return 'center';
+  if (alignment === 'right') return 'right';
+  return 'left';
+}
+
+function tableCellToHtml(
+  cell: RichTextTableCell,
+  alignment: RichTextTableAlignment,
+  tag: 'th' | 'td',
+  defaults: { color: string; fontSize: number },
+): string {
+  const inner = cell.spans.map((s) => spanToHtml(s, defaults)).join('') || '<br/>';
+  const weight = tag === 'th' ? 'font-weight:600;' : 'font-weight:inherit;';
+  return `<${tag} data-rt-cell="1" data-rt-align="${alignment}" style="text-align:${alignCss(alignment)};${weight}padding:0.4em 0.65em;vertical-align:top;border-bottom:1px solid color-mix(in srgb, currentColor 18%, transparent);word-wrap:break-word;overflow-wrap:anywhere">${inner}</${tag}>`;
+}
+
+function tableToHtml(
+  block: RichTextTableBlock,
+  defaults: { color: string; fontSize: number },
+): string {
+  const colCount = Math.max(
+    block.columns.length,
+    ...block.rows.map((r) => r.cells.length),
+    1,
+  );
+  const alignments: RichTextTableAlignment[] = Array.from(
+    { length: colCount },
+    (_, i) => block.columns[i]?.alignment ?? 'left',
+  );
+  const idAttr = block.id ? ` data-rt-block-id="${escapeHtml(block.id)}"` : '';
+  const colsAttr = ` data-rt-cols="${alignments.join(',')}"`;
+
+  const headerRow = block.rows.find((r) => r.header);
+  const bodyRows = headerRow
+    ? block.rows.filter((r) => r !== headerRow)
+    : block.rows;
+
+  const padCells = (row: RichTextTableRow): RichTextTableCell[] =>
+    Array.from({ length: colCount }, (_, i) => row.cells[i] ?? { spans: [{ text: '' }] });
+
+  let thead = '';
+  if (headerRow) {
+    const cells = padCells(headerRow)
+      .map((c, i) => tableCellToHtml(c, alignments[i]!, 'th', defaults))
+      .join('');
+    thead = `<thead><tr>${cells}</tr></thead>`;
+  }
+
+  const tbodyRows = (headerRow ? bodyRows : block.rows)
+    .map((row) => {
+      const cells = padCells(row)
+        .map((c, i) => tableCellToHtml(c, alignments[i]!, 'td', defaults))
+        .join('');
+      return `<tr>${cells}</tr>`;
+    })
+    .join('');
+
+  // App-owned styling: subtle separators, consistent padding, theme via currentColor.
+  // overflow-x:auto avoids silent clipping when content is wider than the TextElement.
+  return `<div data-rt-type="table"${idAttr}${colsAttr} class="rt-table-wrap" style="display:block;margin:0.75em 0;overflow-x:auto;max-width:100%"><table class="rt-table" style="width:100%;border-collapse:collapse;table-layout:auto;font-size:1em;line-height:1.35;border-top:1px solid color-mix(in srgb, currentColor 22%, transparent);border-bottom:1px solid color-mix(in srgb, currentColor 22%, transparent)">${thead}<tbody>${tbodyRows}</tbody></table></div>`;
+}
+
 function blockToHtml(
   block: RichTextBlock,
   defaults: { color: string; fontSize: number },
@@ -141,6 +209,9 @@ function blockToHtml(
 ): { html: string; nextNumbered: number } {
   if (isDisplayMathBlock(block)) {
     return { html: displayMathToHtml(block, defaults), nextNumbered: 0 };
+  }
+  if (isTableBlock(block)) {
+    return { html: tableToHtml(block, defaults), nextNumbered: 0 };
   }
   const inner = block.spans.map((s) => spanToHtml(s, defaults)).join('');
   if (block.type === 'heading') {
@@ -195,10 +266,10 @@ function styleFromElement(
   el: HTMLElement,
   baseFontSize: number,
   rootFontPx: number,
-): RichTextSpan['style'] {
+): RichTextTextSpan['style'] {
   const cs = el.style;
   const computed = getComputedStyle(el);
-  const style: NonNullable<RichTextSpan['style']> = {};
+  const style: NonNullable<RichTextTextSpan['style']> = {};
   const weight = cs.fontWeight || computed.fontWeight;
   if (weight === 'bold' || Number(weight) >= 600) style.bold = true;
   if ((cs.fontStyle || computed.fontStyle) === 'italic') style.italic = true;
@@ -255,7 +326,7 @@ function spansFromNode(
   node: Node,
   baseFontSize: number,
   rootFontPx: number,
-  inherited?: RichTextSpan['style'],
+  inherited?: RichTextTextSpan['style'],
 ): RichTextSpan[] {
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent ?? '';
@@ -306,6 +377,86 @@ function mergeAdjacentSpans(spans: RichTextSpan[]): RichTextSpan[] {
   return out;
 }
 
+function parseAlignAttr(raw: string | null | undefined): RichTextTableAlignment {
+  if (raw === 'center' || raw === 'right' || raw === 'left') return raw;
+  return 'left';
+}
+
+function tableFromElement(
+  wrap: HTMLElement,
+  baseFontSize: number,
+  rootFontPx: number,
+): RichTextTableBlock {
+  const id = wrap.getAttribute('data-rt-block-id') ?? undefined;
+  const colsAttr = wrap.getAttribute('data-rt-cols') ?? '';
+  const alignmentsFromAttr = colsAttr
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => parseAlignAttr(s));
+
+  const table = wrap.querySelector('table') ?? wrap;
+  const headerCells = Array.from(table.querySelectorAll('thead th, thead td'));
+  const bodyRows = Array.from(table.querySelectorAll('tbody tr'));
+  // Fallback: no thead — treat first tr as header when th present, else all body.
+  const allRows = Array.from(table.querySelectorAll('tr'));
+
+  const rows: RichTextTableRow[] = [];
+  let colCount = alignmentsFromAttr.length;
+
+  const cellsFromRow = (tr: Element, header: boolean): RichTextTableRow => {
+    const cellEls = Array.from(tr.querySelectorAll(':scope > th, :scope > td'));
+    colCount = Math.max(colCount, cellEls.length);
+    const cells: RichTextTableCell[] = cellEls.map((cellEl) => {
+      const spans = spansFromNode(cellEl, baseFontSize, rootFontPx);
+      return { spans: spans.length ? spans : [{ text: '' }] };
+    });
+    return header ? { header: true, cells } : { cells };
+  };
+
+  if (headerCells.length > 0 || table.querySelector('thead')) {
+    const headerTr = table.querySelector('thead tr');
+    if (headerTr) rows.push(cellsFromRow(headerTr, true));
+    for (const tr of bodyRows) rows.push(cellsFromRow(tr, false));
+  } else {
+    allRows.forEach((tr, idx) => {
+      const hasTh = tr.querySelector(':scope > th') != null;
+      rows.push(cellsFromRow(tr, hasTh || idx === 0));
+    });
+  }
+
+  if (rows.length === 0) {
+    rows.push({ header: true, cells: [{ spans: [{ text: '' }] }] });
+  }
+
+  colCount = Math.max(colCount, ...rows.map((r) => r.cells.length), 1);
+  const columns = Array.from({ length: colCount }, (_, i) => {
+    const firstCell = table
+      .querySelectorAll('tr')
+      .item(0)
+      ?.querySelectorAll('th, td')
+      .item(i) as HTMLElement | null | undefined;
+    const align =
+      alignmentsFromAttr[i] ??
+      parseAlignAttr(firstCell?.getAttribute('data-rt-align'));
+    return { alignment: align };
+  });
+
+  // Pad short rows so structure stays rectangular.
+  for (const row of rows) {
+    while (row.cells.length < colCount) {
+      row.cells.push({ spans: [{ text: '' }] });
+    }
+  }
+
+  return {
+    type: 'table',
+    columns,
+    rows,
+    ...(id ? { id } : {}),
+  };
+}
+
 /** Best-effort HTML → rich text (from contenteditable). */
 export function htmlToRichText(
   root: HTMLElement,
@@ -340,12 +491,17 @@ export function htmlToRichText(
       continue;
     }
 
+    if (typeAttr === 'table') {
+      blocks.push(tableFromElement(el, baseFontSize, rootFontPx));
+      continue;
+    }
+
     let contentRoot: HTMLElement = el;
     if (typeAttr === 'bullet' || typeAttr === 'numbered') {
       contentRoot = (el.querySelector(':scope > div') as HTMLElement) ?? el;
     }
     const spans = spansFromNode(contentRoot, baseFontSize, rootFontPx);
-    const type: Exclude<RichTextBlock['type'], 'display_math'> =
+    const type: Exclude<RichTextBlock['type'], 'display_math' | 'table'> =
       typeAttr === 'heading' || typeAttr === 'bullet' || typeAttr === 'numbered'
         ? typeAttr
         : 'paragraph';
@@ -430,6 +586,30 @@ function estimateRichTextHeightFallback(
       const approx = Math.max(2.2, 1.2 + block.latex.length / 40);
       lines += approx;
       lines += 0.8;
+      continue;
+    }
+    if (isTableBlock(block)) {
+      const colCount = Math.max(block.columns.length, 1);
+      const cellWidth = Math.max(40, contentWidth / colCount);
+      for (const row of block.rows) {
+        let rowLines = 1;
+        for (const cell of row.cells) {
+          let textLen = 0;
+          for (const s of cell.spans) {
+            if (isInlineMathSpan(s)) {
+              textLen += Math.max(2, Math.ceil(s.latex.length * 0.7));
+            } else {
+              textLen += s.text.length;
+            }
+          }
+          const avg = defaults.fontSize * 0.52;
+          const cpl = Math.max(1, Math.floor(cellWidth / avg));
+          rowLines = Math.max(rowLines, Math.ceil(Math.max(textLen, 1) / cpl));
+        }
+        // Header / body row + cell padding ≈ 0.5 line extra.
+        lines += rowLines + 0.5;
+      }
+      lines += 1.2; // table vertical margins
       continue;
     }
     let textLen = 0;
