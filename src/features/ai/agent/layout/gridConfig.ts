@@ -5,29 +5,28 @@
 
 export const GRID_LAYOUT_CONFIG = {
   /** Horizontal gap between columns (world units). */
-  columnGap: 32,
+  columnGap: 28,
   /** Vertical gap between rows (world units). */
-  rowGap: 28,
+  rowGap: 18,
   /** Outer padding around the whole grid. */
-  outerPadding: 16,
+  outerPadding: 12,
   /** Extra margin around content for collision tests. */
-  collisionMargin: 12,
+  collisionMargin: 6,
   /** Cell inset so content is not flush against cell edges. */
   cellPadding: 0,
   /**
    * Vertical gap between stacked objects inside a multi-object cell.
    * Must exceed 2×collisionMargin so expanded collision rects do not overlap.
    */
-  cellStackGap: 28,
+  cellStackGap: 18,
 
-  minTextWidth: 200,
-  maxTextWidth: 520,
-  defaultTextWidth: 360,
+  minTextWidth: 240,
+  maxTextWidth: 560,
+  defaultTextWidth: 420,
 
-  minEquationWidth: 120,
-  minEquationHeight: 48,
+  minEquationWidth: 200,
+  minEquationHeight: 56,
   maxEquationWidth: 720,
-
   minGraphWidth: 360,
   minGraphHeight: 240,
   defaultGraphWidth: 600,

@@ -107,6 +107,13 @@ curl -X POST http://127.0.0.1:8000/api/chat -H 'Content-Type: application/json' 
 
 When `canvas_context` is set and `system_instruction` is omitted, the backend applies a default study-canvas system instruction. Plain `{ "prompt": "..." }` requests remain unchanged.
 
+`system_instruction` is capped at **8000** characters. The frontend sends either:
+
+- structured JSON-ops High prompt (`canvas_editor_system.md`), or
+- the shorter content-first Markdown author prompt (`content_first_system.md`)
+
+depending on `VITE_AI_GENERATION_MODE` / the RAG debug **Generation format** toggle. Do not concatenate both full prompts into one request.
+
 ## Tests
 
 ```bash

@@ -141,21 +141,30 @@ function measureTextItem(op: CreateTextOperation, style: StyleDefaults): Measure
     }).height;
   };
 
+  const isHeadingHeavy = (op.rich_text?.blocks ?? []).some(
+    (b) => b.type === 'heading',
+  );
+  const minHeight = isHeadingHeavy ? 64 : 56;
+  // Prefer a bit more width for short titles so heading type does not look cramped.
+  const preferredWidth = isHeadingHeavy
+    ? Math.max(initial.preferredWidth, Math.min(cfg.defaultTextWidth, cfg.maxTextWidth))
+    : initial.preferredWidth;
+
   return {
     ref: op.ref!,
     kind: 'text',
-    preferredWidth: initial.preferredWidth,
-    preferredHeight: withFeatures.height,
+    preferredWidth,
+    preferredHeight: Math.max(withFeatures.height, minHeight),
     minWidth: cfg.minTextWidth,
-    minHeight: 56,
+    minHeight,
     measureHeightAtWidth,
-    initialMeasure: { ...initial, height: withFeatures.height },
+    initialMeasure: { ...initial, width: preferredWidth, height: withFeatures.height },
     textAutoSize: {
-      preferredWidth: initial.preferredWidth,
+      preferredWidth,
       contentWidth: initial.contentWidth,
       contentHeight: withFeatures.contentHeight,
-      finalWidth: initial.width,
-      finalHeight: withFeatures.height,
+      finalWidth: Math.max(initial.width, isHeadingHeavy ? preferredWidth : initial.width),
+      finalHeight: Math.max(withFeatures.height, minHeight),
       wrappedLines: initial.wrappedLines,
       padding: initial.padding,
       autoSized: true,
@@ -173,14 +182,19 @@ function measureEquationItem(op: CreateEquationOperation): MeasuredLayoutItem {
     displayMode: true,
     maxWidth: cfg.maxEquationWidth,
   });
+  // Extra horizontal padding so short equations are not tight in their box.
+  const widthPad = 28;
+  const heightPad = 10;
+  const width = Math.max(size.width + widthPad, cfg.minEquationWidth);
+  const height = Math.max(size.height + heightPad, cfg.minEquationHeight);
   return {
     ref: op.ref!,
     kind: 'equation',
-    preferredWidth: Math.max(size.width, cfg.minEquationWidth),
-    preferredHeight: Math.max(size.height, cfg.minEquationHeight),
+    preferredWidth: width,
+    preferredHeight: height,
     minWidth: cfg.minEquationWidth,
     minHeight: cfg.minEquationHeight,
-    measureHeightAtWidth: () => Math.max(size.height, cfg.minEquationHeight),
+    measureHeightAtWidth: () => height,
   };
 }
 

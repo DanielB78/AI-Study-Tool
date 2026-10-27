@@ -96,6 +96,62 @@ describe('note structure persistence', () => {
     }
   });
 
+  it('migrates legacy fields to v4 generative/readingOrder/graph defaults', () => {
+    const json = JSON.stringify({
+      version: 3,
+      structures: [
+        {
+          id: 'structure_v3',
+          name: 'V3 Card',
+          width: 400,
+          height: 200,
+          fields: [
+            {
+              componentKind: 'field',
+              id: 'a',
+              label: 'A',
+              instruction: 'Describe A.',
+              contentType: 'text',
+              required: true,
+              relativeX: 0,
+              relativeY: 0,
+              relativeWidth: 200,
+              relativeHeight: 40,
+              zIndex: 0,
+            },
+            {
+              componentKind: 'field',
+              id: 'b',
+              label: 'B',
+              instruction: 'Plot B.',
+              contentType: 'graph',
+              required: false,
+              relativeX: 0,
+              relativeY: 50,
+              relativeWidth: 200,
+              relativeHeight: 100,
+              zIndex: 1,
+            },
+          ],
+        },
+      ],
+    });
+    const parsed = parseStructureLibrary(json);
+    const fields = parsed.structures[0]!.fields;
+    expect(parsed.structures[0]!.version).toBe(NOTE_STRUCTURE_VERSION);
+    expect(fields[0]).toMatchObject({
+      generative: true,
+      readingOrder: 0,
+      staticContent: '',
+      rotation: 0,
+    });
+    expect(fields[1]).toMatchObject({
+      contentType: 'graph',
+      generative: true,
+      readingOrder: 1,
+    });
+  });
+
   it('migrates v1 fields without componentKind', () => {
     const json = JSON.stringify({
       version: 1,

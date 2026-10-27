@@ -1,6 +1,8 @@
 /**
  * Persist note structures outside CanvasDocument (cross-board library).
- * Migrates v1 flat fields (no componentKind) → v2 StructureComponent union.
+ * Migrates v1 flat fields → v2/v3 component union → v4 visual slots
+ * (generative flag, readingOrder, graph content type, decorative staticContent).
+ * Legacy node_section components are preserved, never silently deleted.
  */
 
 import type {
@@ -63,16 +65,39 @@ function migrateStyle(raw: unknown): StructureFieldStyle {
   };
 }
 
+function migrateContentType(
+  raw: unknown,
+): NoteStructureField['contentType'] {
+  if (raw === 'equation') return 'equation';
+  if (raw === 'graph') return 'graph';
+  return 'text';
+}
+
 function migrateField(raw: Record<string, unknown>): NoteStructureField | null {
   if (typeof raw.id !== 'string' || typeof raw.label !== 'string') return null;
-  const contentType = raw.contentType === 'equation' ? 'equation' : 'text';
+  const instruction =
+    typeof raw.instruction === 'string'
+      ? raw.instruction
+      : typeof raw.contentDescription === 'string'
+        ? raw.contentDescription
+        : '';
+  const generative =
+    typeof raw.generative === 'boolean'
+      ? raw.generative
+      : Boolean(instruction.trim());
   return {
     componentKind: 'field',
     id: raw.id,
     label: raw.label,
-    instruction: typeof raw.instruction === 'string' ? raw.instruction : '',
-    contentType,
+    instruction,
+    contentType: migrateContentType(raw.contentType),
+    generative,
     required: raw.required !== false,
+    readingOrder:
+      typeof raw.readingOrder === 'number' ? raw.readingOrder : 0,
+    rotation: typeof raw.rotation === 'number' ? raw.rotation : 0,
+    staticContent:
+      typeof raw.staticContent === 'string' ? raw.staticContent : '',
     relativeX: typeof raw.relativeX === 'number' ? raw.relativeX : 24,
     relativeY: typeof raw.relativeY === 'number' ? raw.relativeY : 24,
     relativeWidth: typeof raw.relativeWidth === 'number' ? raw.relativeWidth : 280,
@@ -197,6 +222,7 @@ function migrateComponent(raw: unknown): StructureComponent | null {
     raw.componentKind === 'field' ||
     raw.contentType === 'text' ||
     raw.contentType === 'equation' ||
+    raw.contentType === 'graph' ||
     typeof raw.contentType === 'undefined'
   ) {
     // Heuristic: objects with rootTemplate are node sections even without kind
@@ -208,14 +234,38 @@ function migrateComponent(raw: unknown): StructureComponent | null {
   return null;
 }
 
+/**
+ * When every field still has readingOrder 0 (legacy), assign by visual
+ * top-to-bottom / left-to-right without reordering the fields array.
+ */
+function assignReadingOrders(fields: StructureComponent[]): StructureComponent[] {
+  const fieldSlots = fields.filter(
+    (c): c is NoteStructureField => c.componentKind === 'field',
+  );
+  if (fieldSlots.length === 0) return fields;
+  const needsAssign = fieldSlots.every((f) => f.readingOrder === 0);
+  if (!needsAssign) return fields;
+
+  const ranked = [...fieldSlots].sort(
+    (a, b) => a.relativeY - b.relativeY || a.relativeX - b.relativeX || a.id.localeCompare(b.id),
+  );
+  const orderById = new Map(ranked.map((f, i) => [f.id, i]));
+  return fields.map((f) => {
+    if (f.componentKind !== 'field') return f;
+    return { ...f, readingOrder: orderById.get(f.id) ?? 0 };
+  });
+}
+
 function migrateStructure(raw: unknown): NoteStructure | null {
   if (!isObject(raw) || typeof raw.id !== 'string' || typeof raw.name !== 'string') {
     return null;
   }
   if (!Array.isArray(raw.fields)) return null;
-  const fields = raw.fields
-    .map(migrateComponent)
-    .filter((c): c is StructureComponent => c != null);
+  const fields = assignReadingOrders(
+    raw.fields
+      .map(migrateComponent)
+      .filter((c): c is StructureComponent => c != null),
+  );
   return {
     id: raw.id,
     name: raw.name,

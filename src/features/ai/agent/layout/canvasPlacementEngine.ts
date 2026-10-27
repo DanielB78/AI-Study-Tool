@@ -4,6 +4,7 @@
  */
 
 import type { Camera, CanvasElement } from '../../../../types/canvas';
+import { getElementBounds } from '../../../../utils/coordinates';
 import type { Placement } from '../operations';
 import {
   getDefaultViewportSize,
@@ -11,30 +12,22 @@ import {
   type Rect,
   type ViewportSize,
 } from '../../canvas/placement';
-import { resolvePlacement } from '../placementService';
+import {
+  DEFAULT_ELEMENT_GAP,
+  preferredRelative,
+  resolveRelativePlacement,
+} from '../placementService';
 import { collidesAny, translateRect } from './collision';
 import { GRID_LAYOUT_CONFIG, type GridLayoutConfig } from './gridConfig';
+import { spiralOffsets } from './spiral';
 import type { CanvasPlacementResult, GridLayoutResult, ObstacleRect } from './types';
 
-/** Deterministic expanding rectangular spiral of candidate offsets. */
-export function* spiralOffsets(
-  step: number,
-  maxRings: number,
-): Generator<{ dx: number; dy: number }> {
-  yield { dx: 0, dy: 0 };
-  for (let ring = 1; ring <= maxRings; ring++) {
-    const s = step * ring;
-    // right edge (bottom→top excluding corners handled on other edges)
-    for (let i = -ring; i <= ring; i++) yield { dx: s, dy: step * i };
-    // top edge
-    for (let i = ring - 1; i >= -ring; i--) yield { dx: step * i, dy: -s };
-    // left edge
-    for (let i = -ring + 1; i <= ring; i++) yield { dx: -s, dy: step * i };
-    // bottom edge
-    for (let i = ring - 1; i >= -ring + 1; i--) yield { dx: step * i, dy: s };
-  }
-}
+export { spiralOffsets };
 
+/**
+ * Preferred group origin only — collision search is owned by placeGridOnCanvas.
+ * Absolute coords stay exact so the spiral can report collidedAtPreferred.
+ */
 function preferredGroupOrigin(input: {
   placement: Placement;
   bounds: Rect;
@@ -50,16 +43,45 @@ function preferredGroupOrigin(input: {
       input.bounds.height,
     );
   }
-  // Reuse single-element placement resolver for relative/absolute group anchors.
-  const placed = resolvePlacement({
-    placement: input.placement,
+  if (input.placement.mode === 'absolute') {
+    return { x: input.placement.x, y: input.placement.y };
+  }
+  // relative_to_element — try directed orientation first (no free-space spiral here).
+  const anchorEl = input.elements.find(
+    (el) => el.id === input.placement.anchor_element_id,
+  );
+  if (!anchorEl) {
+    return preferredAiTextOrigin(
+      input.camera,
+      input.viewport,
+      input.bounds.width,
+      input.bounds.height,
+    );
+  }
+  const preferred = preferredRelative(
+    getElementBounds(anchorEl),
+    { width: input.bounds.width, height: input.bounds.height },
+    input.placement.relation,
+    DEFAULT_ELEMENT_GAP,
+  );
+  // If the preferred side is free for the group bounds, use it; otherwise let
+  // resolveRelativePlacement pick another orientation (still no neighbour push).
+  const free = resolveRelativePlacement({
+    anchor: getElementBounds(anchorEl),
     width: input.bounds.width,
     height: input.bounds.height,
-    camera: input.camera,
+    relation: input.placement.relation,
     elements: input.elements,
-    viewport: input.viewport,
+    gap: DEFAULT_ELEMENT_GAP,
   });
-  return { x: placed.x, y: placed.y };
+  // Prefer exact directed slot when it matches; otherwise use fallback origin.
+  if (
+    Math.abs(free.x - preferred.x) < 0.5 &&
+    Math.abs(free.y - preferred.y) < 0.5
+  ) {
+    return { x: preferred.x, y: preferred.y };
+  }
+  return { x: free.x, y: free.y };
 }
 
 export function placeGridOnCanvas(input: {

@@ -35,17 +35,24 @@ export function createEmptyStructure(name: string): NoteStructure {
 export function createStructureField(
   partial: Partial<NoteStructureField> & {
     label: string;
-    instruction: string;
+    instruction?: string;
     contentType?: StructureFieldContentType;
   },
 ): NoteStructureField {
+  const instruction = partial.instruction ?? '';
+  const generative =
+    partial.generative ?? Boolean(instruction.trim());
   return {
     componentKind: 'field',
     id: partial.id ?? `field_${createId()}`,
     label: partial.label,
-    instruction: partial.instruction,
+    instruction,
     contentType: partial.contentType ?? 'text',
-    required: partial.required ?? true,
+    generative,
+    required: partial.required ?? generative,
+    readingOrder: partial.readingOrder ?? 0,
+    rotation: partial.rotation ?? 0,
+    staticContent: partial.staticContent ?? '',
     relativeX: partial.relativeX ?? 24,
     relativeY: partial.relativeY ?? 24,
     relativeWidth: partial.relativeWidth ?? 280,
@@ -162,6 +169,7 @@ export function createConceptSummaryStructure(): NoteStructure {
       instruction: 'Give a short title naming the concept.',
       contentType: 'text',
       required: true,
+      readingOrder: 0,
       relativeX: 16,
       relativeY: 16,
       relativeWidth: 688,
@@ -175,6 +183,7 @@ export function createConceptSummaryStructure(): NoteStructure {
       instruction: 'Explain the central idea clearly in 2–3 sentences.',
       contentType: 'text',
       required: true,
+      readingOrder: 1,
       relativeX: 16,
       relativeY: 96,
       relativeWidth: 688,
@@ -188,6 +197,7 @@ export function createConceptSummaryStructure(): NoteStructure {
         'Provide the most important equation associated with the concept, if one is useful.',
       contentType: 'equation',
       required: false,
+      readingOrder: 2,
       relativeX: 16,
       relativeY: 292,
       relativeWidth: 336,
@@ -200,11 +210,92 @@ export function createConceptSummaryStructure(): NoteStructure {
       instruction: 'Give one concise example demonstrating the concept.',
       contentType: 'text',
       required: false,
+      readingOrder: 3,
       relativeX: 368,
       relativeY: 292,
       relativeWidth: 336,
       relativeHeight: 200,
       zIndex: 3,
+    }),
+  ];
+  return base;
+}
+
+/**
+ * Educational physics concept card — title, equation, explanation (+ optional graph).
+ * Used as the primary demo / acceptance template.
+ */
+export function createPhysicsConceptTemplate(): NoteStructure {
+  const base = createEmptyStructure('Physics Concept Template');
+  base.description =
+    'Title, governing equation, physical meaning, and optional displacement graph.';
+  base.width = 640;
+  base.height = 420;
+  const style = (overrides: Partial<StructureFieldStyle> = {}): StructureFieldStyle => ({
+    ...DEFAULT_STRUCTURE_FIELD_STYLE,
+    ...overrides,
+  });
+  base.fields = [
+    createStructureField({
+      id: 'concept_sentence',
+      label: 'Concept',
+      instruction: 'Describe the concept in one sentence.',
+      contentType: 'text',
+      required: true,
+      readingOrder: 0,
+      relativeX: 16,
+      relativeY: 16,
+      relativeWidth: 608,
+      relativeHeight: 72,
+      zIndex: 0,
+      style: style({
+        fontSize: 20,
+        fontWeight: 'bold',
+        alignment: 'center',
+        backgroundColor: '#f1f5f9',
+      }),
+    }),
+    createStructureField({
+      id: 'governing_equation',
+      label: 'Equation',
+      instruction: 'Give the governing equation.',
+      contentType: 'equation',
+      required: true,
+      readingOrder: 1,
+      relativeX: 16,
+      relativeY: 104,
+      relativeWidth: 300,
+      relativeHeight: 140,
+      zIndex: 1,
+      style: style({ fontSize: 18, alignment: 'center', backgroundColor: '#ffffff' }),
+    }),
+    createStructureField({
+      id: 'physical_meaning',
+      label: 'Meaning',
+      instruction: 'Explain the physical meaning.',
+      contentType: 'text',
+      required: true,
+      readingOrder: 2,
+      relativeX: 332,
+      relativeY: 104,
+      relativeWidth: 292,
+      relativeHeight: 140,
+      zIndex: 2,
+      style: style({ fontSize: 15, backgroundColor: '#ffffff' }),
+    }),
+    createStructureField({
+      id: 'displacement_graph',
+      label: 'Graph',
+      instruction: 'Show the displacement graph.',
+      contentType: 'graph',
+      required: false,
+      readingOrder: 3,
+      relativeX: 16,
+      relativeY: 260,
+      relativeWidth: 608,
+      relativeHeight: 144,
+      zIndex: 3,
+      style: style({ backgroundColor: '#ffffff' }),
     }),
   ];
   return base;

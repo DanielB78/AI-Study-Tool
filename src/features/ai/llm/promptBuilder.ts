@@ -21,6 +21,11 @@ import {
   CANVAS_EDITOR_SYSTEM_PROMPT,
 } from '../agent/prompts/loadAgentPrompt';
 import { CANVAS_AGENT_OUTPUT_CONTRACT } from '../agent/operations';
+import {
+  CONTENT_FIRST_RESPONSE_INSTRUCTIONS,
+  CONTENT_FIRST_SYSTEM_PROMPT,
+  isContentFirstMode,
+} from '../contentFirst';
 
 export interface BuiltLlmPrompt {
   /** Original user request (never overwritten by system/context). */
@@ -430,17 +435,29 @@ export interface BuildLlmPromptInput {
  */
 export function buildLlmPrompt(input: BuildLlmPromptInput): BuiltLlmPrompt {
   const userPrompt = input.userPrompt.trim();
+  const contentFirst = isContentFirstMode();
   const systemInstructions = (
-    input.systemInstructions ?? CANVAS_EDITOR_SYSTEM_PROMPT
+    input.systemInstructions ??
+    (contentFirst ? CONTENT_FIRST_SYSTEM_PROMPT : CANVAS_EDITOR_SYSTEM_PROMPT)
   ).trim();
   const responseInstructions = (
-    input.responseInstructions ?? CANVAS_EDITOR_RESPONSE_INSTRUCTIONS
+    input.responseInstructions ??
+    (contentFirst
+      ? CONTENT_FIRST_RESPONSE_INSTRUCTIONS
+      : CANVAS_EDITOR_RESPONSE_INSTRUCTIONS)
   ).trim();
   const ragContextSection = formatCanvasContextSection(input.ragContext);
   const noteStructureSection = input.selectedStructure
     ? formatNoteStructureForPrompt(input.selectedStructure)
     : formatNoStructureSelected();
   const imageAttachments = [...input.ragContext.imageAttachments];
+
+  const outputContract = contentFirst
+    ? [
+        'Write Markdown educational content only (headings, paragraphs, $$ display math, :::graph markers).',
+        'Do not emit canvas-operation JSON.',
+      ].join('\n')
+    : CANVAS_AGENT_OUTPUT_CONTRACT;
 
   const finalLlmPrompt = [
     'SYSTEM INSTRUCTIONS',
@@ -451,7 +468,7 @@ export function buildLlmPrompt(input: BuildLlmPromptInput): BuiltLlmPrompt {
     '',
     'OUTPUT CONTRACT',
     '',
-    CANVAS_AGENT_OUTPUT_CONTRACT,
+    outputContract,
     '',
     '='.repeat(50),
     '',

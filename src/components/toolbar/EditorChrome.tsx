@@ -19,7 +19,8 @@ export function EditorChrome() {
       <GraphEditorPanel />
       <AiFloatingPanel />
       <StructureLibraryPanel />
-      {import.meta.env.DEV && <RagDebugPanel />}
+      {/* Always available for manual / preview testing (not DEV-gated). */}
+      <RagDebugPanel />
     </>
   );
 }

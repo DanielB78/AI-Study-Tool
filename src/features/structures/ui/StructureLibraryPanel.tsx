@@ -3,6 +3,7 @@ import { LayoutTemplate, X } from 'lucide-react';
 import {
   createConceptSummaryStructure,
   createKnowledgeTreeStructure,
+  createPhysicsConceptTemplate,
 } from '../factory';
 import { useStructureStore } from '../structureStore';
 import { StructureEditor } from './StructureEditor';
@@ -48,9 +49,9 @@ export function StructureLibraryPanel() {
     >
       <header className="structure-library-header">
         <div>
-          <strong>Note Structures</strong>
+          <strong>Structure Templates</strong>
           <span className="structure-library-sub">
-            Reusable layouts for AI-filled notes
+            Design the layout — the LLM fills the slots
           </span>
         </div>
         <button
@@ -83,6 +84,21 @@ export function StructureLibraryPanel() {
                   type="button"
                   className="structure-btn ghost"
                   onClick={() => {
+                    const seed = createPhysicsConceptTemplate();
+                    const next = [seed, ...useStructureStore.getState().structures];
+                    saveStructureLibrary({
+                      version: NOTE_STRUCTURE_VERSION,
+                      structures: next,
+                    });
+                    useStructureStore.setState({ structures: next });
+                  }}
+                >
+                  Add Physics Concept Template
+                </button>
+                <button
+                  type="button"
+                  className="structure-btn ghost"
+                  onClick={() => {
                     const seed = createConceptSummaryStructure();
                     const next = [seed, ...useStructureStore.getState().structures];
                     saveStructureLibrary({
@@ -107,7 +123,7 @@ export function StructureLibraryPanel() {
                     useStructureStore.setState({ structures: next });
                   }}
                 >
-                  Add Knowledge Tree example
+                  Add Knowledge Tree example (legacy)
                 </button>
               </>
             )}
@@ -115,7 +131,8 @@ export function StructureLibraryPanel() {
 
           {structures.length === 0 ? (
             <p className="structure-library-empty">
-              No saved structures yet. Create one, or add the Concept Summary example.
+              No saved templates yet. Design slots on the canvas, or add the Physics
+              Concept Template example.
             </p>
           ) : (
             <ul className="structure-library-list">

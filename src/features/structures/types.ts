@@ -1,6 +1,13 @@
 /**
- * User-defined note structures — reusable layouts for AI-filled notes.
- * Components: fixed TEXT/EQUATION fields + dynamic NODE_SECTION hierarchies.
+ * Visual structure templates — user-designed layouts with LLM content slots.
+ *
+ * The user designs relative geometry and styling. Generative slots carry a
+ * natural-language content description; the LLM fills them via :::structure
+ * Markdown directives. Decorative elements are copied as-is.
+ *
+ * Legacy NODE_SECTION components remain loadable (v≤3) but are not part of
+ * the active :::structure generation path.
+ *
  * Stored outside CanvasDocument (library persists across boards).
  */
 
@@ -12,9 +19,10 @@ import type {
   TextAlignment,
 } from '../../types/canvas';
 
-export const NOTE_STRUCTURE_VERSION = 3 as const;
+export const NOTE_STRUCTURE_VERSION = 4 as const;
 
-export type StructureFieldContentType = 'text' | 'equation';
+/** Generative / decorative slot content kinds. */
+export type StructureFieldContentType = 'text' | 'equation' | 'graph';
 
 /**
  * How generated children expand from their parent.
@@ -53,15 +61,35 @@ export interface StructureComponentGeometry {
   zIndex: number;
 }
 
-/** Fixed TEXT or EQUATION slot. */
+/** Fixed TEXT, EQUATION, or GRAPH slot (or decorative static element). */
 export interface NoteStructureField extends StructureComponentGeometry {
   componentKind: 'field';
   id: string;
+  /** Short UI label in the editor (not the LLM marker). */
   label: string;
-  /** AI instruction — what the model should put in this slot. */
+  /**
+   * Natural-language content description — the LLM marker after `:::`.
+   * Required when generative; ignored when decorative.
+   * @alias contentDescription
+   */
   instruction: string;
   contentType: StructureFieldContentType;
+  /**
+   * When true, the LLM must fill this slot. When false, `staticContent` is
+   * copied from the template without LLM generation.
+   */
+  generative: boolean;
+  /** Required generative slots must appear in each :::structure instance. */
   required: boolean;
+  /** Reading order for prompt listing and validation (independent of geometry). */
+  readingOrder: number;
+  /** Optional rotation in degrees (preserved from the template). */
+  rotation: number;
+  /**
+   * Fixed content for decorative elements (plain text, LaTeX, or graph body).
+   * Also used as editor placeholder preview for generative slots.
+   */
+  staticContent: string;
   style: StructureFieldStyle;
 }
 
@@ -91,8 +119,9 @@ export interface NodeSectionConnectorConfig {
 }
 
 /**
- * Dynamic hierarchical region: LLM supplies content/hierarchy only;
- * app owns layout, IDs, and connectors (real TextElements + ConnectorElements).
+ * @deprecated Legacy hierarchical region from structure v≤3.
+ * Still loadable and editable, but not filled via :::structure directives.
+ * Prefer fixed visual slots (text / equation / graph) for new templates.
  */
 export interface NoteStructureNodeSection extends StructureComponentGeometry {
   componentKind: 'node_section';
@@ -195,6 +224,21 @@ export function isNodeSection(
 
 export function isStructureField(c: StructureComponent): c is NoteStructureField {
   return c.componentKind === 'field';
+}
+
+/** Generative visual slot (participates in :::structure filling). */
+export function isGenerativeField(c: StructureComponent): c is NoteStructureField {
+  return isStructureField(c) && c.generative !== false && Boolean(c.instruction?.trim());
+}
+
+/** Decorative / static field copied from the template without LLM content. */
+export function isDecorativeField(c: StructureComponent): c is NoteStructureField {
+  return isStructureField(c) && !isGenerativeField(c);
+}
+
+/** Content description used as the LLM slot marker. */
+export function fieldContentDescription(field: NoteStructureField): string {
+  return field.instruction;
 }
 
 /** Migrate legacy layoutMode strings → NodeChildrenPlacement. */

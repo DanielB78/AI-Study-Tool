@@ -9,7 +9,8 @@ export {
 } from './collision';
 export { collectCanvasObstacles } from './obstacles';
 export { calculateGridLayout } from './gridLayoutEngine';
-export { placeGridOnCanvas, spiralOffsets } from './canvasPlacementEngine';
+export { placeGridOnCanvas } from './canvasPlacementEngine';
+export { spiralOffsets } from './spiral';
 export {
   maxColumnsForObjectCount,
   reflowGridToMaxColumns,
@@ -49,6 +50,30 @@ export {
   type ResolveGridPlanInput,
   type ResolveGridPlanResult,
 } from './resolveGridPlan';
+export {
+  packCellsChronologically,
+  type FlowCellSize,
+  type FlowPackedCell,
+  type FlowPackResult,
+} from './chronologicalFlowPacker';
+export {
+  DEFAULT_USER_LAYOUT_SETTINGS,
+  DEFAULT_LIMIT_SUGGESTIONS,
+  COLUMN_ROW_RATIO_PRESETS,
+  getUserLayoutSettings,
+  setUserLayoutSettings,
+  resetUserLayoutSettings,
+  subscribeUserLayoutSettings,
+  getUserLayoutSettingsSnapshot,
+  normalizeUserLayoutSettings,
+  normalizeColumnRowRatio,
+  formatColumnRowRatio,
+  targetColumnCountForRatio,
+  targetRowCountForRatio,
+  type UserLayoutSettings,
+  type ChronologicalDirection,
+  type ColumnRowRatio,
+} from './userLayoutSettings';
 export type {
   GridLayoutSpec,
   GridLayoutItemSpec,

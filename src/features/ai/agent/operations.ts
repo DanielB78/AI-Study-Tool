@@ -108,8 +108,8 @@ export type CreationLayoutFields = {
   /** Temporary ref for layout / chronological ordering. */
   ref?: OperationRef;
   /**
-   * Legacy cell id — accepted for backward compatibility but does not control
-   * agent geometry (always a single vertical column).
+   * Cell id — keeps associated creates together as one packer unit when shared.
+   * Does not choose rows/columns; user layout settings own packing geometry.
    */
   layout_cell?: string;
   /** Legacy column span — ignored for agent geometry. */
@@ -142,15 +142,26 @@ export type AgentRichTextInlineMathSpan = {
   style?: Pick<AgentRichTextSpanStyle, 'color' | 'highlight_color'>;
 };
 
+export type AgentRichTextInlineCodeSpan = {
+  type: 'inline_code';
+  text: string;
+  style?: Pick<AgentRichTextSpanStyle, 'color' | 'highlight_color'>;
+};
+
 export type AgentRichTextSpan =
   | AgentRichTextTextSpan
-  | AgentRichTextInlineMathSpan;
+  | AgentRichTextInlineMathSpan
+  | AgentRichTextInlineCodeSpan;
 
 export type AgentRichTextContentBlock = {
   /** Optional temporary local id for comment anchors within the same create plan. */
   id?: string;
-  type: 'paragraph' | 'heading' | 'bullet' | 'numbered';
+  type: 'paragraph' | 'heading' | 'bullet' | 'numbered' | 'blockquote';
   role?: 'heading' | 'body';
+  /** Nesting depth for lists (0 = top) and blockquotes (1 = outermost). */
+  depth?: number;
+  /** Explicit start for ordered list items. */
+  start?: number;
   spans: AgentRichTextSpan[];
 };
 
@@ -160,9 +171,30 @@ export type AgentRichTextDisplayMathBlock = {
   latex: string;
 };
 
+export type AgentRichTextTableAlignment = 'left' | 'center' | 'right';
+
+export type AgentRichTextTableBlock = {
+  id?: string;
+  type: 'table';
+  columns: Array<{ alignment: AgentRichTextTableAlignment }>;
+  rows: Array<{
+    header?: boolean;
+    cells: Array<{ spans: AgentRichTextSpan[] }>;
+  }>;
+};
+
+export type AgentRichTextCodeBlock = {
+  id?: string;
+  type: 'code_block';
+  language: string | null;
+  code: string;
+};
+
 export type AgentRichTextBlock =
   | AgentRichTextContentBlock
-  | AgentRichTextDisplayMathBlock;
+  | AgentRichTextDisplayMathBlock
+  | AgentRichTextTableBlock
+  | AgentRichTextCodeBlock;
 
 export type AgentRichTextDocument = {
   blocks: AgentRichTextBlock[];
@@ -230,23 +262,37 @@ export type UpdateTextOperation = {
   rich_text?: AgentRichTextDocument;
 };
 
-/** TEXT field payload for create_structured_note. */
+/** TEXT field payload for create_structured_note / :::structure text slots. */
 export type StructuredTextFieldPayload = {
   content: string;
+  /** Optional rich Markdown (tables, lists, inline math) — preferred over plain content. */
+  rich_text?: AgentRichTextDocument;
 };
 
-/** EQUATION field payload for create_structured_note. */
+/** EQUATION field payload for create_structured_note / :::structure equation slots. */
 export type StructuredEquationFieldPayload = {
   latex: string;
 };
 
-/** Recursive hierarchy node for NODE_SECTION fields (content only — no geometry/IDs). */
+/** GRAPH field payload for visual structure graph slots. */
+export type StructuredGraphFieldPayload = {
+  title?: string | null;
+  expressions: string[];
+  x_min?: number | null;
+  x_max?: number | null;
+  y_min?: number | null;
+  y_max?: number | null;
+  x_label?: string | null;
+  y_label?: string | null;
+};
+
+/** Recursive hierarchy node for legacy NODE_SECTION fields (content only — no geometry/IDs). */
 export type StructuredHierarchyNode = {
   content: string;
   children: StructuredHierarchyNode[];
 };
 
-/** NODE_SECTION field payload for create_structured_note. */
+/** NODE_SECTION field payload for create_structured_note (legacy). */
 export type StructuredNodeSectionFieldPayload = {
   root: StructuredHierarchyNode;
 };
@@ -254,6 +300,7 @@ export type StructuredNodeSectionFieldPayload = {
 export type StructuredFieldPayload =
   | StructuredTextFieldPayload
   | StructuredEquationFieldPayload
+  | StructuredGraphFieldPayload
   | StructuredNodeSectionFieldPayload
   | null;
 
@@ -1206,11 +1253,12 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
           {
             type: 'object',
             additionalProperties: false,
-            required: ['type', 'target_element_id', 'latex'],
+            required: ['type', 'latex'],
             properties: {
               type: { const: 'add_equation_to_text' },
               target_element_id: { type: 'string', minLength: 1 },
               target_id: { type: 'string', minLength: 1 },
+              target_ref: { type: 'string', minLength: 1 },
               latex: { type: 'string', minLength: 1 },
               ref: { type: 'string', minLength: 1 },
             },
@@ -1482,9 +1530,17 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
                   id: { type: 'string', minLength: 1 },
                   type: {
                     type: 'string',
-                    enum: ['paragraph', 'heading', 'bullet', 'numbered'],
+                    enum: [
+                      'paragraph',
+                      'heading',
+                      'bullet',
+                      'numbered',
+                      'blockquote',
+                    ],
                   },
                   role: { type: 'string', enum: ['heading', 'body'] },
+                  depth: { type: 'number' },
+                  start: { type: 'number' },
                   spans: {
                     type: 'array',
                     minItems: 1,
@@ -1543,6 +1599,23 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
                             },
                           },
                         },
+                        {
+                          type: 'object',
+                          additionalProperties: false,
+                          required: ['type', 'text'],
+                          properties: {
+                            type: { const: 'inline_code' },
+                            text: { type: 'string' },
+                            style: {
+                              type: 'object',
+                              additionalProperties: false,
+                              properties: {
+                                color: { type: 'string' },
+                                highlight_color: { type: 'string' },
+                              },
+                            },
+                          },
+                        },
                       ],
                     },
                   },
@@ -1556,6 +1629,124 @@ export const CANVAS_AGENT_JSON_SCHEMA = {
                   id: { type: 'string', minLength: 1 },
                   type: { const: 'display_math' },
                   latex: { type: 'string', minLength: 1 },
+                },
+              },
+              {
+                type: 'object',
+                additionalProperties: false,
+                required: ['type', 'code'],
+                properties: {
+                  id: { type: 'string', minLength: 1 },
+                  type: { const: 'code_block' },
+                  language: { type: ['string', 'null'] },
+                  code: { type: 'string' },
+                },
+              },
+              {
+                type: 'object',
+                additionalProperties: false,
+                required: ['type', 'columns', 'rows'],
+                properties: {
+                  id: { type: 'string', minLength: 1 },
+                  type: { const: 'table' },
+                  columns: {
+                    type: 'array',
+                    minItems: 1,
+                    items: {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: ['alignment'],
+                      properties: {
+                        alignment: {
+                          type: 'string',
+                          enum: ['left', 'center', 'right'],
+                        },
+                      },
+                    },
+                  },
+                  rows: {
+                    type: 'array',
+                    minItems: 1,
+                    items: {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: ['cells'],
+                      properties: {
+                        header: { type: 'boolean' },
+                        cells: {
+                          type: 'array',
+                          minItems: 1,
+                          items: {
+                            type: 'object',
+                            additionalProperties: false,
+                            required: ['spans'],
+                            properties: {
+                              spans: {
+                                type: 'array',
+                                items: {
+                                  oneOf: [
+                                    {
+                                      type: 'object',
+                                      additionalProperties: false,
+                                      required: ['text'],
+                                      properties: {
+                                        type: { type: 'string', enum: ['text'] },
+                                        text: { type: 'string' },
+                                        style: {
+                                          type: 'object',
+                                          additionalProperties: false,
+                                          properties: {
+                                            bold: { type: 'boolean' },
+                                            italic: { type: 'boolean' },
+                                            underline: { type: 'boolean' },
+                                            color: { type: 'string' },
+                                            highlight_color: { type: 'string' },
+                                            font_size: {
+                                              anyOf: [
+                                                { type: 'number' },
+                                                {
+                                                  type: 'string',
+                                                  enum: [
+                                                    'heading_large',
+                                                    'heading',
+                                                    'subheading',
+                                                    'body',
+                                                    'small',
+                                                  ],
+                                                },
+                                              ],
+                                            },
+                                          },
+                                        },
+                                      },
+                                    },
+                                    {
+                                      type: 'object',
+                                      additionalProperties: false,
+                                      required: ['type', 'latex'],
+                                      properties: {
+                                        type: { const: 'inline_math' },
+                                        id: { type: 'string', minLength: 1 },
+                                        latex: { type: 'string', minLength: 1 },
+                                        style: {
+                                          type: 'object',
+                                          additionalProperties: false,
+                                          properties: {
+                                            color: { type: 'string' },
+                                            highlight_color: { type: 'string' },
+                                          },
+                                        },
+                                      },
+                                    },
+                                  ],
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
                 },
               },
             ],
@@ -1700,6 +1891,7 @@ Span style (all optional): bold, italic, underline, color (default|blue|green|re
 highlight_color (same palette), font_size (heading_large|heading|subheading|body|small|number 10–48).
 Inline math span: { "type":"inline_math", "latex":"..." } — part of a sentence; do NOT invent ids.
 Display math block: { "type":"display_math", "latex":"..." } — centred equation on its own line.
+Table block (rare in JSON mode — prefer Markdown tables in content-first): { "type":"table", "columns":[{"alignment":"left"|"center"|"right"}], "rows":[{"header":true,"cells":[{"spans":[…]}]},…] } — stays inside the TextElement; never create one TextElement per cell.
 Use formatting intentionally — not every sentence needs colour/highlight.
 Prefer one textbox with headings/lists/math over many tiny textboxes for emphasis.
 
@@ -1708,7 +1900,7 @@ TEXT MATH (in-sentence expressions inside TextElement — NOT a substitute for E
 - insert_display_math / update_text_math / remove_text_math / convert_text_math — retained for editing existing TextElement math; when the agent creates NEW centred / textbook maths, use create_equation or add_equation_to_text instead.
 
 EQUATION TEXTBOOK COMPONENTS (EquationElement + associated TextElement chrome):
-- add_equation_to_text: { "type":"add_equation_to_text", "target_element_id":"<text id>", "ref":"eq1", "latex":"\\begin{aligned}F&=-kx\\\\m\\ddot{x}&=-kx\\end{aligned}" } — attach a new EquationElement to existing notes
+- add_equation_to_text: { "type":"add_equation_to_text", "target_element_id":"<text id>", "ref":"eq1", "latex":"\\begin{aligned}F&=-kx\\\\m\\ddot{x}&=-kx\\end{aligned}" } — attach a new EquationElement to existing notes (or use target_ref for a create_text plan ref)
 - add_text_to_equation: { "type":"add_text_to_equation", "target_ref":"eq1", "component":"lead_in"|"step_explanation"|"title"|"symbol_definitions"|"interpretation"|"warning", "content":"…" }
 - set_equation_title / add_equation_symbol_definitions / add_equation_interpretation / update_equation
 - create_equation — CANONICAL standalone EquationElement create (same role as create_text / create_graph)
@@ -1812,8 +2004,9 @@ Rules:
 - Prefer relative_to_element over absolute for "next to / below / above / left / right" of ONE object.
 - Prefer chronological_grid for educational multi-element plans; the app always uses one vertical column.
 - Never invent world coordinates to avoid overlaps — the application guarantees geometric validity.
-- When a structure is selected and the user asks for new structured content, use create_structured_note — do NOT recreate the layout with create_text/create_equation/create_connector.
-- Omit or null optional structure fields when there is no meaningful content.
+- Prefer content-first :::structure Markdown when that generation mode is active.
+- In operations mode, when a structure is selected and the user asks for new structured content, use create_structured_note — do NOT recreate the layout with create_text/create_equation/create_connector.
+- Omit or null optional structure fields when there is no meaningful content. GRAPH slots use { "expressions": ["…"] }.
 - Use create_graph when the user asks to create a new graph/plot.
 - Use create_equation (canonical) for centred / multiline EquationElements — never a plain TextElement or insert_display_math for new standalone maths.
 - Use create_text for ordinary prose; use insert_inline_math / rich_text inline_math for in-sentence formulas.

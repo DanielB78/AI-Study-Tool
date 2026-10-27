@@ -1,6 +1,6 @@
 /**
  * Shared LLM response handler — structured canvas operations (preferred)
- * with optional plain-text create fallback disabled for agent mode.
+ * with content-first Markdown compilation when that generation mode is active.
  */
 
 import type { CanvasAgentResponse, CanvasOperation } from '../agent/operations';
@@ -15,6 +15,15 @@ import {
   executeAgentOperationsLive,
 } from '../agent/liveExecutor';
 import type { ExecuteAgentOpsResult } from '../agent/executor';
+import {
+  handleContentFirstResponse,
+  isContentFirstMode,
+  looksLikeContentMarkdown,
+  looksLikeOperationsJson,
+  previewContentFirstPlan,
+  ContentParseError,
+  type ContentFirstHandleResult,
+} from '../contentFirst';
 
 export interface HandleAgentResponseResult {
   kind: 'operations';
@@ -22,6 +31,10 @@ export interface HandleAgentResponseResult {
   plan: string[];
   execution?: ExecuteAgentOpsResult;
 }
+
+export type HandleGenerationResult =
+  | HandleAgentResponseResult
+  | ContentFirstHandleResult;
 
 export interface ParsedAgentPlan {
   response: CanvasAgentResponse;
@@ -50,11 +63,16 @@ function planOptionsFromContext(
 
 /**
  * Parse + validate without applying. Use for AI Plan preview.
+ * Respects content-first mode (and Markdown heuristic when mode is content_first).
  */
 export function parseAgentResponsePlan(
   raw: string,
   ctx: ParseContext,
 ): ParsedAgentPlan {
+  if (shouldUseContentFirst(raw)) {
+    const preview = previewContentFirstPlan(raw, ctx);
+    return { response: preview.response, plan: preview.plan };
+  }
   const response = parseCanvasAgentResponse(raw, ctx);
   return {
     response,
@@ -63,6 +81,18 @@ export function parseAgentResponsePlan(
       planOptionsFromContext(ctx, response),
     ),
   };
+}
+
+function shouldUseContentFirst(raw: string): boolean {
+  if (isContentFirstMode()) {
+    // Content-first mode: Markdown unless the paste is clearly operations JSON
+    // (so editing/ops pastes still work while experimenting).
+    if (looksLikeOperationsJson(raw) && !looksLikeContentMarkdown(raw)) {
+      return false;
+    }
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -81,7 +111,10 @@ export function applyAgentOperations(
 export function handleAgentResponse(
   raw: string,
   ctx: ParseContext,
-): HandleAgentResponseResult {
+): HandleGenerationResult {
+  if (shouldUseContentFirst(raw)) {
+    return handleContentFirstResponse(raw, ctx);
+  }
   const response = parseCanvasAgentResponse(raw, ctx);
   const plan = describeOperationPlan(
     response.operations,
@@ -91,4 +124,4 @@ export function handleAgentResponse(
   return { kind: 'operations', response, plan, execution };
 }
 
-export { CanvasAgentParseError };
+export { CanvasAgentParseError, ContentParseError };

@@ -16,7 +16,7 @@ interface StructureFieldBoxProps {
 }
 
 /**
- * Editor placeholder for a fixed TEXT/EQUATION structure field.
+ * Editor placeholder for a fixed TEXT / EQUATION / GRAPH structure slot.
  */
 export function StructureFieldBox({
   field,
@@ -26,6 +26,7 @@ export function StructureFieldBox({
   onGeometryChange,
   readOnly,
 }: StructureFieldBoxProps) {
+  const generative = field.generative !== false && Boolean(field.instruction?.trim());
   const startDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (readOnly) return;
     e.stopPropagation();
@@ -100,6 +101,8 @@ export function StructureFieldBox({
     <div
       className={`structure-field-box${selected ? ' is-selected' : ''}${
         field.contentType === 'equation' ? ' is-equation' : ''
+      }${field.contentType === 'graph' ? ' is-graph' : ''}${
+        !generative ? ' is-decorative' : ''
       }`}
       style={{
         left: field.relativeX * scale,
@@ -114,7 +117,7 @@ export function StructureFieldBox({
       onPointerDown={startDrag}
       role="button"
       tabIndex={0}
-      aria-label={`Field ${field.label}`}
+      aria-label={`Slot ${field.label}`}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -126,10 +129,12 @@ export function StructureFieldBox({
         {field.label}
         <span className="structure-field-box-meta">
           {field.contentType.toUpperCase()}
-          {field.required ? '' : ' · optional'}
+          {generative ? (field.required ? '' : ' · optional') : ' · decorative'}
         </span>
       </div>
-      <div className="structure-field-box-instruction">{field.instruction}</div>
+      <div className="structure-field-box-instruction">
+        {generative ? field.instruction : field.staticContent || '(decorative)'}
+      </div>
       {!readOnly && selected && (
         <span
           className="structure-field-resize"

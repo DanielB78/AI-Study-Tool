@@ -84,6 +84,13 @@ import type { CanvasAgentResponse } from '../ai/agent/operations';
 import type { LayoutDebugInfo } from '../ai/agent/layout';
 import { previewGridPlan } from '../ai/agent/layout';
 import { CANVAS_EDITOR_SYSTEM_PROMPT } from '../ai/agent/prompts/loadAgentPrompt';
+import {
+  CONTENT_FIRST_SYSTEM_PROMPT,
+  getAiGenerationMode,
+  isContentFirstMode,
+  setAiGenerationModeOverride,
+  type AiGenerationMode,
+} from '../ai/contentFirst';
 import { useStructureStore } from '../structures/structureStore';
 import type { NoteStructure } from '../structures/types';
 
@@ -146,6 +153,8 @@ export interface RagDebugState {
   layoutDebug: LayoutDebugInfo | null;
   parseError: string | null;
   llmExecutionMode: LlmExecutionMode;
+  /** operations (JSON) vs content_first (Markdown). */
+  aiGenerationMode: AiGenerationMode;
   lastCopiedPrompt: string | null;
   lastBuiltPrompt: BuiltLlmPrompt | null;
   lastQueryChunks: number;
@@ -178,6 +187,7 @@ export interface RagDebugState {
   setPreviewOpen: (open: boolean) => void;
   setLlmPromptPreviewOpen: (open: boolean) => void;
   setLlmExecutionMode: (mode: LlmExecutionMode) => void;
+  setAiGenerationMode: (mode: AiGenerationMode) => void;
   toggleAnchor: (elementId: string) => void;
   selectTopN: (n: number) => void;
   clearAnchors: () => void;
@@ -619,6 +629,7 @@ export function createRagDebugStore() {
       layoutDebug: null,
       parseError: null,
       llmExecutionMode: DEFAULT_LLM_EXECUTION_MODE,
+      aiGenerationMode: getAiGenerationMode(),
       lastCopiedPrompt: null,
       lastBuiltPrompt: null,
       lastQueryChunks: 0,
@@ -746,6 +757,11 @@ export function createRagDebugStore() {
       setLlmExecutionMode: (mode) => {
         setLlmExecutionModeOverride(mode);
         set({ llmExecutionMode: mode });
+      },
+
+      setAiGenerationMode: (mode) => {
+        setAiGenerationModeOverride(mode);
+        set({ aiGenerationMode: mode });
       },
 
       toggleAnchor: (elementId) => {
@@ -948,12 +964,19 @@ export function createRagDebugStore() {
           if (state.selectedStructureId === null && state.lastBuiltPrompt == null) {
             get().captureStructureSnapshot();
           }
-          const { allowedElementIds, elementTypes, selectedStructure } =
-            buildParseContextFromState(get());
+          const {
+            allowedElementIds,
+            elementTypes,
+            selectedStructure,
+            graphExpressionIds,
+            graphPointIds,
+          } = buildParseContextFromState(get());
           const parsed = parseAgentResponsePlan(state.pastedResponse, {
             allowedElementIds,
             elementTypes,
             selectedStructure,
+            graphExpressionIds,
+            graphPointIds,
           });
           let layoutDebug: LayoutDebugInfo | null = null;
           if (parsed.response.layout) {
@@ -1272,8 +1295,11 @@ export function createRagDebugStore() {
             lastPrompt: prompt,
           });
 
+          const systemInstruction = isContentFirstMode(get().aiGenerationMode)
+            ? CONTENT_FIRST_SYSTEM_PROMPT
+            : CANVAS_EDITOR_SYSTEM_PROMPT;
           const result = await aiService.sendPrompt(prompt, undefined, {
-            systemInstruction: CANVAS_EDITOR_SYSTEM_PROMPT,
+            systemInstruction,
             canvasContext: [context.serialized, built.noteStructureSection]
               .filter(Boolean)
               .join('\n\n'),
@@ -1283,28 +1309,35 @@ export function createRagDebugStore() {
             })),
           });
 
-          const allowedElementIds = new Set(
-            context.allElements.map((e) => e.element_id),
-          );
-          const elementTypes = new Map(
-            context.allElements.map(
-              (e) => [e.element_id, e.element_type] as const,
-            ),
-          );
+          const {
+            allowedElementIds,
+            elementTypes,
+            graphExpressionIds,
+            graphPointIds,
+          } = buildParseContextFromState(get());
+          // Ensure submitted RAG context ids remain allowed even if selection changed.
+          for (const el of context.allElements) {
+            allowedElementIds.add(el.element_id);
+            if (!elementTypes.has(el.element_id)) {
+              elementTypes.set(el.element_id, el.element_type);
+            }
+          }
           let applied;
           try {
             applied = handleAgentResponse(result.text, {
               allowedElementIds,
               elementTypes,
+              graphExpressionIds,
+              graphPointIds,
               selectedStructure: resolveSnapshottedStructure(
                 submitted.selectedStructureId,
               ),
             });
           } catch (err) {
             const message =
-              err instanceof CanvasAgentParseError
+              err instanceof CanvasAgentParseError || err instanceof Error
                 ? err.message
-                : 'LLM response was not valid canvas operations JSON.';
+                : 'LLM response was not valid canvas content.';
             set({ sending: false, error: message });
             useAiStore.setState({
               status: 'error',

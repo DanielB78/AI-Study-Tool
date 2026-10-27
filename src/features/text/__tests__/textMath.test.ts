@@ -69,7 +69,10 @@ describe('text math nodes', () => {
       ],
     });
     expect(doc.blocks).toHaveLength(2);
-    const span = doc.blocks[0]!.spans[1]!;
+    const first = doc.blocks[0]!;
+    expect(first.type).toBe('paragraph');
+    if (first.type !== 'paragraph') throw new Error('expected paragraph');
+    const span = first.spans[1]!;
     expect(isInlineMathSpan(span)).toBe(true);
     if (isInlineMathSpan(span)) {
       expect(span.id).toBeTruthy();

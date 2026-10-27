@@ -11,6 +11,7 @@ import {
   duplicateStructure as duplicateStructureModel,
 } from './factory';
 import { loadStructureLibrary, saveStructureLibrary } from './storage';
+import { validateSlotDescriptions } from './slotLabels';
 import type {
   NoteStructure,
   NoteStructureField,
@@ -18,12 +19,12 @@ import type {
   NodeTemplate,
   StructureComponent,
 } from './types';
-import { NOTE_STRUCTURE_VERSION } from './types';
+import { isGenerativeField, NOTE_STRUCTURE_VERSION } from './types';
 import { now } from '../../utils/ids';
 
 export type StructureUiMode = 'closed' | 'library' | 'editor' | 'preview';
 
-export type AddComponentKind = 'text' | 'equation' | 'node_section';
+export type AddComponentKind = 'text' | 'equation' | 'graph' | 'node_section';
 
 /** Which part of a Node Section is selected in the editor. */
 export type SelectedNodeTemplatePart = 'root' | 'child' | null;
@@ -152,7 +153,16 @@ export function createStructureStore() {
       if (!draft) return false;
       if (!draft.name.trim()) return false;
       if (draft.fields.length === 0) return false;
-      const saved = touchDraft({ ...draft, name: draft.name.trim() });
+      const generativeDescriptions = draft.fields
+        .filter(isGenerativeField)
+        .map((f) => f.instruction);
+      const labelIssues = validateSlotDescriptions(generativeDescriptions);
+      if (labelIssues.length > 0) return false;
+      const saved = touchDraft({
+        ...draft,
+        name: draft.name.trim(),
+        version: NOTE_STRUCTURE_VERSION,
+      });
       const others = get().structures.filter((s) => s.id !== saved.id);
       const structures = [...others, saved].sort(
         (a, b) => b.updatedAt - a.updatedAt,
@@ -222,10 +232,19 @@ export function createStructureStore() {
           zIndex: draft.fields.length,
         });
       } else {
+        const contentType =
+          kind === 'equation' ? 'equation' : kind === 'graph' ? 'graph' : 'text';
+        const defaultInstruction =
+          contentType === 'equation'
+            ? 'Give the governing equation.'
+            : contentType === 'graph'
+              ? 'Show the relevant graph.'
+              : 'Describe what content belongs here.';
         field = createStructureField({
-          label: `Field ${draft.fields.length + 1}`,
-          instruction: 'Describe what the AI should write here.',
-          contentType: kind === 'equation' ? 'equation' : 'text',
+          label: `Slot ${draft.fields.length + 1}`,
+          instruction: defaultInstruction,
+          contentType,
+          readingOrder: draft.fields.length,
           relativeX: 24 + offset,
           relativeY: 24 + offset,
           zIndex: draft.fields.length,
