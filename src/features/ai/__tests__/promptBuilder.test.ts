@@ -149,9 +149,9 @@ describe('buildLlmPrompt (operations mode)', () => {
   it('includes No Structure section by default (separate from canvas context)', () => {
     const b = built();
     expect(b.noteStructureSection).toContain('No Structure');
-    expect(b.finalLlmPrompt).toContain('SELECTED NOTE STRUCTURE');
-    expect(b.finalLlmPrompt).toContain('Do not emit create_structured_note');
-    expect(b.ragContextSection).not.toContain('SELECTED NOTE STRUCTURE');
+    expect(b.finalLlmPrompt).toContain('SELECTED STRUCTURE TEMPLATE');
+    expect(b.finalLlmPrompt).toContain('Do not emit :::structure');
+    expect(b.ragContextSection).not.toContain('SELECTED STRUCTURE TEMPLATE');
   });
 
   it('includes selected structure schema separately from RAG', () => {
@@ -161,11 +161,11 @@ describe('buildLlmPrompt (operations mode)', () => {
       ragContext: context,
       selectedStructure: structure,
     });
-    expect(withStructure.noteStructureSection).toContain(structure.id);
     expect(withStructure.noteStructureSection).toContain('Concept Summary');
-    expect(withStructure.noteStructureSection).toContain('FIELD ID: equation');
-    expect(withStructure.finalLlmPrompt).toContain('create_structured_note');
-    expect(withStructure.ragContextSection).not.toContain(structure.id);
+    expect(withStructure.noteStructureSection).toContain(':::structure Concept Summary');
+    expect(withStructure.noteStructureSection).toContain(':::endstructure');
+    expect(withStructure.noteStructureSection).not.toContain(structure.id);
+    expect(withStructure.ragContextSection).not.toContain(':::structure');
   });
 });
 

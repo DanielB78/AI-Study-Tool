@@ -26,6 +26,7 @@ import {
   type RelativePlacement,
   type StructuredFieldPayload,
   type StructuredHierarchyNode,
+  type StructuredTextFieldPayload,
   type UpdateTextOperation,
 } from './operations';
 import { CanvasAgentParseError, type ParseErrorCode } from './parseErrors';
@@ -289,18 +290,60 @@ function parseFieldPayload(raw: unknown, fieldId: string): StructuredFieldPayloa
       `fields.${fieldId} must be an object or null.`,
     );
   }
-  if ('root' in raw && !('content' in raw) && !('latex' in raw)) {
+  if ('root' in raw && !('content' in raw) && !('latex' in raw) && !('expressions' in raw)) {
     return { root: parseHierarchyNode(raw.root, `fields.${fieldId}.root`) };
   }
-  if ('content' in raw && !('latex' in raw) && !('root' in raw)) {
-    return { content: requireNonEmptyString(raw.content, `fields.${fieldId}.content`) };
+  if ('expressions' in raw && !('content' in raw) && !('latex' in raw) && !('root' in raw)) {
+    if (!Array.isArray(raw.expressions) || raw.expressions.length === 0) {
+      throw new CanvasAgentParseError(
+        'invalid_field_payload',
+        `fields.${fieldId}.expressions must be a non-empty string array.`,
+      );
+    }
+    const expressions = raw.expressions.map((expr, i) => {
+      if (typeof expr !== 'string' || !expr.trim()) {
+        throw new CanvasAgentParseError(
+          'invalid_field_payload',
+          `fields.${fieldId}.expressions[${i}] must be a non-empty string.`,
+        );
+      }
+      return expr.trim();
+    });
+    return {
+      expressions,
+      title: typeof raw.title === 'string' ? raw.title : raw.title === null ? null : undefined,
+      x_min: optionalFiniteNumber(raw.x_min, `fields.${fieldId}.x_min`),
+      x_max: optionalFiniteNumber(raw.x_max, `fields.${fieldId}.x_max`),
+      y_min: optionalFiniteNumber(raw.y_min, `fields.${fieldId}.y_min`),
+      y_max: optionalFiniteNumber(raw.y_max, `fields.${fieldId}.y_max`),
+      x_label:
+        typeof raw.x_label === 'string'
+          ? raw.x_label
+          : raw.x_label === null
+            ? null
+            : undefined,
+      y_label:
+        typeof raw.y_label === 'string'
+          ? raw.y_label
+          : raw.y_label === null
+            ? null
+            : undefined,
+    };
   }
-  if ('latex' in raw && !('content' in raw) && !('root' in raw)) {
+  if ('content' in raw && !('latex' in raw) && !('root' in raw) && !('expressions' in raw)) {
+    const content = requireNonEmptyString(raw.content, `fields.${fieldId}.content`);
+    const rich_text =
+      raw.rich_text && isRecord(raw.rich_text)
+        ? (raw.rich_text as StructuredTextFieldPayload['rich_text'])
+        : undefined;
+    return rich_text ? { content, rich_text } : { content };
+  }
+  if ('latex' in raw && !('content' in raw) && !('root' in raw) && !('expressions' in raw)) {
     return { latex: requireNonEmptyString(raw.latex, `fields.${fieldId}.latex`) };
   }
   throw new CanvasAgentParseError(
     'invalid_field_payload',
-    `fields.${fieldId} must be {content}, {latex}, or {root:{content,children}}.`,
+    `fields.${fieldId} must be {content}, {latex}, {expressions}, or {root:{content,children}}.`,
   );
 }
 
@@ -830,7 +873,12 @@ function validateStructuredNote(
   for (const field of structure.fields) {
     const payload = op.fields[field.id];
     const missing = payload === undefined || payload === null;
-    if (field.required && missing) {
+    // Decorative visual slots are copied from the template — not LLM-required.
+    const llmRequired =
+      field.required &&
+      (isNodeSection(field) ||
+        (isStructureField(field) && field.generative !== false));
+    if (llmRequired && missing) {
       throw new CanvasAgentParseError(
         'missing_required_field',
         `Required field "${field.id}" (${field.label}) is missing.`,
@@ -905,6 +953,32 @@ function validateStructuredNote(
           `Invalid LaTeX for field "${field.id}": ${check.error}`,
           field.id,
         );
+      }
+    } else if (field.contentType === 'graph') {
+      if (!('expressions' in payload) || !Array.isArray(payload.expressions)) {
+        throw new CanvasAgentParseError(
+          'invalid_field_payload',
+          `Field "${field.id}" is GRAPH and requires { "expressions": ["..."] }.`,
+          field.id,
+        );
+      }
+      if (payload.expressions.length === 0) {
+        throw new CanvasAgentParseError(
+          'invalid_field_payload',
+          `Field "${field.id}" GRAPH payload needs at least one expression.`,
+          field.id,
+        );
+      }
+      for (let i = 0; i < payload.expressions.length; i++) {
+        const expr = payload.expressions[i]!;
+        const encoded = encodeGraphExpression(expr, 'strict');
+        if (!encoded.ok) {
+          throw new CanvasAgentParseError(
+            'invalid_graph_expression',
+            `Invalid graph expression for field "${field.id}"[${i}]: ${encoded.error}`,
+            field.id,
+          );
+        }
       }
     }
   }

@@ -959,6 +959,7 @@ export function looksLikeContentMarkdown(raw: string): boolean {
   if (/^#{1,3}\s+/m.test(t)) return true;
   if (/\$\$/.test(t) || /\\\[[\s\S]*?\\\]/.test(t)) return true;
   if (/^:::(graph|definition|example|warning|exercise)\s*$/m.test(t)) return true;
+  if (/^:::structure\s+\S+/m.test(t) || /^:::endstructure\s*$/m.test(t)) return true;
   // GFM table separator row is a strong content-first signal.
   if (/^\s*\|?[\s:]*-{3,}[\s:]*\|/m.test(t)) return true;
   // Multi-paragraph prose without JSON operation arrays

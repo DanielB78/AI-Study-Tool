@@ -1,81 +1,95 @@
 /**
- * Format a NoteStructure for inclusion in the LLM prompt (output schema, not knowledge).
+ * Format a visual structure template for the LLM prompt.
+ * Content-first mode: :::structure directives with natural-language slot markers.
+ * Legacy ops mode notes are kept brief — structure filling is Markdown-first.
  */
 
-import type { NoteStructure, NoteStructureNodeSection } from './types';
-import { isNodeSection, isStructureField } from './types';
+import type { NoteStructure, NoteStructureField } from './types';
+import { isNodeSection } from './types';
+import {
+  directiveLabelFromDescription,
+  formatSlotMarkerForPrompt,
+} from './slotLabels';
+import { generativeSlotsInReadingOrder } from './structureDirective';
 
-function formatNodeSection(section: NoteStructureNodeSection): string[] {
+function slotTypeHint(field: NoteStructureField): string {
+  switch (field.contentType) {
+    case 'equation':
+      return 'EQUATION — one $$ display-math block';
+    case 'graph':
+      return 'GRAPH — one :::graph … ::: definition';
+    default:
+      return 'TEXT — Markdown (paragraphs, lists, tables, inline $math$)';
+  }
+}
+
+function formatSlotBlock(field: NoteStructureField): string[] {
+  const label = directiveLabelFromDescription(field.instruction);
   return [
-    'NODE SECTION',
-    '',
-    `FIELD ID: ${section.id}`,
-    `LABEL: ${section.label}`,
-    `TYPE: node_section`,
-    `REQUIRED: ${section.required ? 'true' : 'false'}`,
-    `CHILDREN PLACEMENT: ${section.childrenPlacement.toUpperCase()}`,
-    `MAX DEPTH: ${section.maxDepth}`,
-    `MAX TOTAL NODES: ${section.maxTotalNodes}`,
-    ...(section.maxChildrenPerNode != null
-      ? [`MAX CHILDREN PER NODE: ${section.maxChildrenPerNode}`]
-      : []),
-    'INSTRUCTION:',
-    section.instruction.trim() || '(none)',
-    '',
-    'ROOT NODE INSTRUCTION:',
-    section.rootTemplate.instruction.trim() || '(none)',
-    '',
-    'CHILD NODE INSTRUCTION:',
-    section.childTemplate.instruction.trim() || '(none)',
-    '',
-    'OUTPUT for this field:',
-    '{ "root": { "content": "...", "children": [ { "content": "...", "children": [] } ] } }',
-    '',
-    'The application handles all geometry, node IDs, and parent-child connectors.',
-    'Do NOT return x/y coordinates. Do NOT emit create_text/create_connector for tree nodes.',
-    'GEOMETRY (application-owned — do not change): ' +
-      `x=${section.relativeX}, y=${section.relativeY}, ` +
-      `w=${section.relativeWidth}, h=${section.relativeHeight}`,
+    `SLOT: ${label}`,
+    `TYPE: ${slotTypeHint(field)}`,
+    `REQUIRED: ${field.required ? 'true' : 'false'}`,
+    `CONTENT DESCRIPTION: ${field.instruction.trim()}`,
     '--------------------------------',
   ];
 }
 
+/**
+ * Content-first structure specification — no coordinates, colours, or fonts.
+ */
 export function formatNoteStructureForPrompt(structure: NoteStructure): string {
+  const slots = generativeSlotsInReadingOrder(structure);
   const lines: string[] = [
-    'SELECTED NOTE STRUCTURE',
+    'SELECTED STRUCTURE TEMPLATE',
     '',
     'This defines HOW new content should be organised. It is NOT canvas knowledge.',
-    'Do NOT invent geometry or recreate the layout with create_text/create_equation/create_connector.',
-    'When generating a new structured note, emit create_structured_note and fill fields.',
+    'The application owns geometry, colours, fonts, and layout of repeated instances.',
+    'Fill slots with content only — never invent coordinates, sizes, colours, or fonts.',
     '',
-    `Structure ID: ${structure.id}`,
-    `Name: ${structure.name}`,
+    `Template name: ${structure.name}`,
   ];
   if (structure.description?.trim()) {
     lines.push(`Description: ${structure.description.trim()}`);
   }
   lines.push('');
-  lines.push('FIELDS');
+  lines.push('When this template is selected, wrap each instance in:');
   lines.push('');
-
-  for (const field of structure.fields) {
-    if (isNodeSection(field)) {
-      lines.push(...formatNodeSection(field));
-      continue;
+  lines.push(`:::structure ${structure.name}`);
+  lines.push('');
+  for (const field of slots) {
+    const marker = formatSlotMarkerForPrompt(field.instruction);
+    lines.push(marker);
+    if (field.contentType === 'equation') {
+      lines.push('$$');
+      lines.push('…latex…');
+      lines.push('$$');
+    } else if (field.contentType === 'graph') {
+      lines.push(':::graph');
+      lines.push('expression: …');
+      lines.push(':::');
+    } else {
+      lines.push('…markdown content…');
     }
-    if (!isStructureField(field)) continue;
-    lines.push(`FIELD ID: ${field.id}`);
-    lines.push(`LABEL: ${field.label}`);
-    lines.push(`TYPE: ${field.contentType}`);
-    lines.push(`REQUIRED: ${field.required ? 'true' : 'false'}`);
-    lines.push('INSTRUCTION:');
-    lines.push(field.instruction.trim() || '(none)');
+    lines.push(':::');
+    lines.push('');
+  }
+  lines.push(':::endstructure');
+  lines.push('');
+  lines.push('Repeat the full :::structure … :::endstructure block for each instance.');
+  lines.push('Use the exact slot descriptions above as markers — do not invent new labels.');
+  lines.push('');
+  lines.push('SLOTS (reading order)');
+  lines.push('');
+  for (const field of slots) {
+    lines.push(...formatSlotBlock(field));
+  }
+
+  const legacySections = structure.fields.filter(isNodeSection);
+  if (legacySections.length > 0) {
+    lines.push('');
     lines.push(
-      'GEOMETRY (application-owned — do not change): ' +
-        `x=${field.relativeX}, y=${field.relativeY}, ` +
-        `w=${field.relativeWidth}, h=${field.relativeHeight}`,
+      'NOTE: This template also contains legacy node-section regions that are not filled via :::structure. Prefer fixed text/equation/graph slots.',
     );
-    lines.push('--------------------------------');
   }
 
   return lines.join('\n');
@@ -83,11 +97,11 @@ export function formatNoteStructureForPrompt(structure: NoteStructure): string {
 
 export function formatNoStructureSelected(): string {
   return [
-    'SELECTED NOTE STRUCTURE',
+    'SELECTED STRUCTURE TEMPLATE',
     '',
     'No Structure',
     '',
-    'Use normal canvas operations (create_text, update_text, etc.).',
-    'Do not emit create_structured_note.',
+    'Write ordinary Markdown educational content (headings, paragraphs, $$ math, :::graph).',
+    'Do not emit :::structure blocks.',
   ].join('\n');
 }

@@ -147,7 +147,26 @@ y_label: Normalised value
 
 Do **not** use \`:::definition\`, \`:::example\`, \`:::warning\`, or \`:::exercise\`.
 Write that material as ordinary headings and paragraphs instead.
-(Only \`:::graph\` markers are used for plots.)
+(Ordinary plots use \`:::graph\`. Selected structure templates use \`:::structure\` — see SELECTED STRUCTURE TEMPLATE.)
+
+### Structure templates (only when selected)
+
+When SELECTED STRUCTURE TEMPLATE names a template, fill it with:
+
+\`\`\`
+:::structure Template Name
+
+:::Exact slot description from the prompt
+…slot content…
+:::
+
+:::endstructure
+\`\`\`
+
+- Repeat the full block for each instance
+- Use the exact slot descriptions as markers — never invent labels or geometry
+- Text slots: Markdown. Equation slots: one \`$$\` block. Graph slots: nested \`:::graph\`
+- When No Structure is selected, write ordinary Markdown and do **not** emit \`:::structure\`
 
 ## Editing existing elements (\`:::json\`)
 
@@ -204,6 +223,8 @@ export const CONTENT_FIRST_RESPONSE_INSTRUCTIONS = [
   'Display math: opening $$ on its own line, LaTeX body, closing $$ on its own line — always paired.',
   'Inline math: paired $...$ only. Prefer braces in superscripts/subscripts and \\frac{a}{b}.',
   'Do not use :::definition / :::example / :::warning / :::exercise markers.',
+  'When a structure template is selected, fill it with :::structure … :::endstructure and exact slot descriptions — never invent geometry, colours, or fonts.',
+  'When No Structure is selected, write ordinary Markdown and do not emit :::structure.',
   'Do not invent coordinates, sizes, parent IDs, or layout instructions.',
   'When editing or inserting relative to an existing element, use :::json with action edit or add_text and existing context IDs only.',
 ].join(' ');

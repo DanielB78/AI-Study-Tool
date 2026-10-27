@@ -1831,6 +1831,15 @@ textarea {
   flex: 1;
 }
 
+.structure-field-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #64748b;
+  font-weight: 400;
+}
+
 .structure-field-label {
   display: flex;
   flex-direction: column;
@@ -1907,6 +1916,14 @@ textarea {
   border-style: solid;
   border-color: var(--accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.structure-field-box.is-graph {
+  border-style: dashed;
+}
+
+.structure-field-box.is-decorative {
+  opacity: 0.85;
 }
 
 .structure-field-box.is-equation {

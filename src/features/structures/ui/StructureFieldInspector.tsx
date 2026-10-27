@@ -460,7 +460,8 @@ export function StructureFieldInspector({
     return (
       <aside className="structure-inspector">
         <p className="structure-inspector-empty">
-          Select a component to edit. Add Text, Equation, or Node Section.
+          Select a component to edit. Add Text, Equation, Graph, or a decorative
+          element. Legacy Node Sections remain editable on older templates.
         </p>
       </aside>
     );
@@ -478,9 +479,11 @@ export function StructureFieldInspector({
     );
   }
 
+  const generative = field.generative !== false;
+
   return (
     <aside className="structure-inspector">
-      <div className="structure-inspector-title">Field</div>
+      <div className="structure-inspector-title">Slot</div>
 
       <label className="structure-field-label">
         Label
@@ -491,15 +494,48 @@ export function StructureFieldInspector({
         />
       </label>
 
-      <label className="structure-field-label">
-        AI instruction
-        <textarea
-          rows={4}
-          value={field.instruction}
-          onChange={(e) => onChange({ instruction: e.target.value })}
-          placeholder="What should the AI put here?"
+      <label className="structure-field-check">
+        <input
+          type="checkbox"
+          checked={generative}
+          onChange={(e) => {
+            const next = e.target.checked;
+            onChange({
+              generative: next,
+              required: next ? field.required : false,
+              instruction: next
+                ? field.instruction || 'Describe what content belongs here.'
+                : '',
+            });
+          }}
         />
+        Generative (LLM fills this slot)
       </label>
+
+      {generative ? (
+        <label className="structure-field-label">
+          Content description
+          <textarea
+            rows={4}
+            value={field.instruction}
+            onChange={(e) => onChange({ instruction: e.target.value })}
+            placeholder="e.g. Describe the concept in one sentence."
+          />
+          <span className="structure-field-hint">
+            Used as the ::: marker. Must be unique within this template.
+          </span>
+        </label>
+      ) : (
+        <label className="structure-field-label">
+          Static content
+          <textarea
+            rows={3}
+            value={field.staticContent}
+            onChange={(e) => onChange({ staticContent: e.target.value })}
+            placeholder="Copied as-is into every instance (decorative)."
+          />
+        </label>
+      )}
 
       <label className="structure-field-label">
         Type
@@ -511,16 +547,31 @@ export function StructureFieldInspector({
         >
           <option value="text">TEXT</option>
           <option value="equation">EQUATION</option>
+          <option value="graph">GRAPH</option>
         </select>
       </label>
 
-      <label className="structure-field-check">
+      {generative && (
+        <label className="structure-field-check">
+          <input
+            type="checkbox"
+            checked={field.required}
+            onChange={(e) => onChange({ required: e.target.checked })}
+          />
+          Required
+        </label>
+      )}
+
+      <label className="structure-field-label">
+        Reading order
         <input
-          type="checkbox"
-          checked={field.required}
-          onChange={(e) => onChange({ required: e.target.checked })}
+          type="number"
+          min={0}
+          value={field.readingOrder ?? 0}
+          onChange={(e) =>
+            onChange({ readingOrder: Math.max(0, Number(e.target.value) || 0) })
+          }
         />
-        Required
       </label>
 
       <StyleControls

@@ -68,9 +68,16 @@ export function StructureEditor() {
             <button
               type="button"
               className="structure-btn"
+              onClick={() => addComponent('graph')}
+            >
+              + Graph
+            </button>
+            <button
+              type="button"
+              className="structure-btn ghost"
+              title="Legacy hierarchical region — prefer fixed slots for new templates"
               onClick={() => {
                 addComponent('node_section');
-                // Select root template of the newly added section after store updates.
                 window.requestAnimationFrame(() => {
                   const d = useStructureStore.getState().draft;
                   const id = useStructureStore.getState().selectedFieldId;
@@ -81,7 +88,7 @@ export function StructureEditor() {
                 });
               }}
             >
-              + Node Section
+              + Node Section (legacy)
             </button>
           </div>
           <button
@@ -89,7 +96,9 @@ export function StructureEditor() {
             className="structure-btn primary"
             onClick={() => {
               if (!saveDraft()) {
-                window.alert('Name the structure and add at least one field.');
+                window.alert(
+                  'Name the structure, add at least one element, and ensure generative content descriptions are unique.',
+                );
               }
             }}
           >

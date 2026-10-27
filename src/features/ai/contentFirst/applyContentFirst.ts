@@ -1,11 +1,13 @@
 /**
- * Parse Markdown (+ optional :::json directives) → compile ops → validate → execute.
+ * Parse Markdown (+ optional :::json / :::structure directives) → compile ops
+ * → validate → execute.
  *
  * Textbook feature associations / component chrome are intentionally not applied
  * in this pass (kept in codebase for later).
  *
  * Batches:
  * - Ordinary preamble → chronological_grid (viewport_default)
+ * - :::structure instances → create_structured_note ops (one layout unit each)
  * - Consecutive edit instructions → one no-layout update batch
  * - Each add_text → chronological_grid group placed relative_to_element
  *
@@ -26,6 +28,10 @@ import {
   type ExecuteAgentOpsResult,
 } from '../agent/executor';
 import { resolveCascadeCollisions } from '../agent/collisionResolver';
+import {
+  compileStructureMarkdown,
+  structureInstancesToAgentResponse,
+} from '../../structures/compileStructureInstances';
 import { parseContentDocument } from './contentParser';
 import {
   compileContentDocument,
@@ -77,11 +83,31 @@ export function compileContentFirstBatches(
   let document: ContentDocument | null = null;
   let preambleCompile: CompileContentResult | null = null;
 
-  if (envelope.preamble.trim()) {
-    document = parseContentDocument(envelope.preamble);
+  // Structure directives may appear in the preamble (or as the whole response).
+  // They compile to create_structured_note ops — each instance is one layout unit.
+  let workingPreamble = envelope.preamble;
+  if (workingPreamble.trim() && ctx.selectedStructure) {
+    const structured = compileStructureMarkdown(
+      workingPreamble,
+      ctx.selectedStructure,
+    );
+    if (structured.operations.length > 0) {
+      batches.push(structureInstancesToAgentResponse(structured.operations));
+      workingPreamble = structured.preamble;
+    }
+  } else if (
+    workingPreamble.trim() &&
+    /(?:^|\n):::structure\s+\S+/i.test(workingPreamble)
+  ) {
+    // Surface a clear error when :::structure appears without a selection.
+    compileStructureMarkdown(workingPreamble, null);
+  }
+
+  if (workingPreamble.trim()) {
+    document = parseContentDocument(workingPreamble);
     preambleCompile = compileContentDocument(document);
     batches.push(preambleCompile.response);
-  } else if (envelope.segments.length === 0) {
+  } else if (envelope.segments.length === 0 && batches.length === 0) {
     throw new ContentParseError('empty', 'Content response is empty.');
   }
 
@@ -98,6 +124,22 @@ export function compileContentFirstBatches(
       continue;
     }
     flushEdits();
+    // add_text Markdown may also contain structure blocks when a template is selected.
+    if (ctx.selectedStructure && /(?:^|\n):::structure\s+\S+/i.test(segment.markdown)) {
+      const structured = compileStructureMarkdown(
+        segment.markdown,
+        ctx.selectedStructure,
+      );
+      if (structured.operations.length > 0) {
+        batches.push(structureInstancesToAgentResponse(structured.operations));
+      }
+      if (structured.preamble.trim()) {
+        batches.push(
+          compileAddTextBatch(segment.instruction, structured.preamble, ctx),
+        );
+      }
+      continue;
+    }
     batches.push(
       compileAddTextBatch(segment.instruction, segment.markdown, ctx),
     );

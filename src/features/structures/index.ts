@@ -20,6 +20,9 @@ export {
   NODE_CHILDREN_PLACEMENTS,
   isNodeSection,
   isStructureField,
+  isGenerativeField,
+  isDecorativeField,
+  fieldContentDescription,
   normalizeChildrenPlacement,
   childrenPlacementLabel,
 } from './types';
@@ -29,6 +32,7 @@ export {
   createNodeSection,
   createConceptSummaryStructure,
   createKnowledgeTreeStructure,
+  createPhysicsConceptTemplate,
   duplicateStructure,
 } from './factory';
 export {
@@ -56,5 +60,25 @@ export {
   maxHierarchyDepth,
   formatHierarchyTreePreview,
 } from './hierarchy';
+export {
+  normalizeSlotDescription,
+  directiveLabelFromDescription,
+  validateSlotDescriptions,
+  matchSlotLabelToId,
+  formatSlotMarkerForPrompt,
+} from './slotLabels';
+export {
+  splitStructureDocument,
+  parseStructureSlots,
+  resolveStructureInstances,
+  generativeSlotsInReadingOrder,
+  hasStructureDirectives,
+} from './structureDirective';
+export {
+  compileStructureMarkdown,
+  compileResolvedInstance,
+  structureInstancesToAgentResponse,
+  shouldCompileStructureDirectives,
+} from './compileStructureInstances';
 export { useStructureStore, createStructureStore } from './structureStore';
 export { StructureLibraryPanel, StructureSelector } from './ui';

@@ -362,13 +362,35 @@ function fieldValuesForStructure(
       field.contentType === 'text' &&
       'content' in payload
     ) {
-      fieldValues.set(field.id, { kind: 'text', content: payload.content });
+      fieldValues.set(field.id, {
+        kind: 'text',
+        content: payload.content,
+        ...('rich_text' in payload && payload.rich_text
+          ? { richText: payload.rich_text }
+          : {}),
+      });
     } else if (
       isStructureField(field) &&
       field.contentType === 'equation' &&
       'latex' in payload
     ) {
       fieldValues.set(field.id, { kind: 'equation', latex: payload.latex });
+    } else if (
+      isStructureField(field) &&
+      field.contentType === 'graph' &&
+      'expressions' in payload
+    ) {
+      fieldValues.set(field.id, {
+        kind: 'graph',
+        title: payload.title ?? null,
+        expressions: payload.expressions,
+        xMin: payload.x_min ?? null,
+        xMax: payload.x_max ?? null,
+        yMin: payload.y_min ?? null,
+        yMax: payload.y_max ?? null,
+        xLabel: payload.x_label ?? null,
+        yLabel: payload.y_label ?? null,
+      });
     }
   }
   return fieldValues;

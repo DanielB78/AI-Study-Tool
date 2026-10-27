@@ -262,23 +262,37 @@ export type UpdateTextOperation = {
   rich_text?: AgentRichTextDocument;
 };
 
-/** TEXT field payload for create_structured_note. */
+/** TEXT field payload for create_structured_note / :::structure text slots. */
 export type StructuredTextFieldPayload = {
   content: string;
+  /** Optional rich Markdown (tables, lists, inline math) — preferred over plain content. */
+  rich_text?: AgentRichTextDocument;
 };
 
-/** EQUATION field payload for create_structured_note. */
+/** EQUATION field payload for create_structured_note / :::structure equation slots. */
 export type StructuredEquationFieldPayload = {
   latex: string;
 };
 
-/** Recursive hierarchy node for NODE_SECTION fields (content only — no geometry/IDs). */
+/** GRAPH field payload for visual structure graph slots. */
+export type StructuredGraphFieldPayload = {
+  title?: string | null;
+  expressions: string[];
+  x_min?: number | null;
+  x_max?: number | null;
+  y_min?: number | null;
+  y_max?: number | null;
+  x_label?: string | null;
+  y_label?: string | null;
+};
+
+/** Recursive hierarchy node for legacy NODE_SECTION fields (content only — no geometry/IDs). */
 export type StructuredHierarchyNode = {
   content: string;
   children: StructuredHierarchyNode[];
 };
 
-/** NODE_SECTION field payload for create_structured_note. */
+/** NODE_SECTION field payload for create_structured_note (legacy). */
 export type StructuredNodeSectionFieldPayload = {
   root: StructuredHierarchyNode;
 };
@@ -286,6 +300,7 @@ export type StructuredNodeSectionFieldPayload = {
 export type StructuredFieldPayload =
   | StructuredTextFieldPayload
   | StructuredEquationFieldPayload
+  | StructuredGraphFieldPayload
   | StructuredNodeSectionFieldPayload
   | null;
 
@@ -1989,8 +2004,9 @@ Rules:
 - Prefer relative_to_element over absolute for "next to / below / above / left / right" of ONE object.
 - Prefer chronological_grid for educational multi-element plans; the app always uses one vertical column.
 - Never invent world coordinates to avoid overlaps — the application guarantees geometric validity.
-- When a structure is selected and the user asks for new structured content, use create_structured_note — do NOT recreate the layout with create_text/create_equation/create_connector.
-- Omit or null optional structure fields when there is no meaningful content.
+- Prefer content-first :::structure Markdown when that generation mode is active.
+- In operations mode, when a structure is selected and the user asks for new structured content, use create_structured_note — do NOT recreate the layout with create_text/create_equation/create_connector.
+- Omit or null optional structure fields when there is no meaningful content. GRAPH slots use { "expressions": ["…"] }.
 - Use create_graph when the user asks to create a new graph/plot.
 - Use create_equation (canonical) for centred / multiline EquationElements — never a plain TextElement or insert_display_math for new standalone maths.
 - Use create_text for ordinary prose; use insert_inline_math / rich_text inline_math for in-sentence formulas.
