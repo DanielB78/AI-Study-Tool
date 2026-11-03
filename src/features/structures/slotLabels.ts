@@ -11,6 +11,7 @@ export const RESERVED_STRUCTURE_MARKERS = new Set([
   'endstructure',
   'graph',
   'json',
+  'summary',
   'definition',
   'example',
   'warning',

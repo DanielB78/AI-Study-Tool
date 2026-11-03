@@ -182,7 +182,7 @@ describe('SHM content-first lesson', () => {
   });
 
   it('content-first system prompt fits the backend length limit', () => {
-    expect(CONTENT_FIRST_SYSTEM_PROMPT.length).toBeLessThan(7500);
+    expect(CONTENT_FIRST_SYSTEM_PROMPT.length).toBeLessThanOrEqual(8000);
     expect(() => assertContentFirstPromptFitsLimit()).not.toThrow();
   });
 

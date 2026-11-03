@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     rag_min_similarity: float | None = None
     rag_similarity_metric: str = "cosine"
 
+    # AI interaction memory — top-k cosine over prompt + summary embeddings.
+    interaction_rag_top_k: int = 5
+    # Leave unset — do not invent a default threshold.
+    interaction_rag_min_similarity: float | None = None
+
     # Query / prompt processing.
     query_long_prompt_threshold_words: int = 200
     query_target_chunk_words: int = 125

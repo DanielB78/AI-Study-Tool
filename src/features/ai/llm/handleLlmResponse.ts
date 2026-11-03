@@ -24,12 +24,15 @@ import {
   ContentParseError,
   type ContentFirstHandleResult,
 } from '../contentFirst';
+import { extractActionSummary } from '../../interactions/actionSummaryFence';
 
 export interface HandleAgentResponseResult {
   kind: 'operations';
   response: CanvasAgentResponse;
   plan: string[];
   execution?: ExecuteAgentOpsResult;
+  /** LLM :::summary body when present; never applied to the canvas. */
+  actionSummary: string | null;
 }
 
 export type HandleGenerationResult =
@@ -39,6 +42,7 @@ export type HandleGenerationResult =
 export interface ParsedAgentPlan {
   response: CanvasAgentResponse;
   plan: string[];
+  actionSummary: string | null;
 }
 
 function planOptionsFromContext(
@@ -69,17 +73,23 @@ export function parseAgentResponsePlan(
   raw: string,
   ctx: ParseContext,
 ): ParsedAgentPlan {
-  if (shouldUseContentFirst(raw)) {
-    const preview = previewContentFirstPlan(raw, ctx);
-    return { response: preview.response, plan: preview.plan };
+  const { summary, body } = extractActionSummary(raw);
+  if (shouldUseContentFirst(body)) {
+    const preview = previewContentFirstPlan(body, ctx);
+    return {
+      response: preview.response,
+      plan: preview.plan,
+      actionSummary: summary ?? preview.actionSummary,
+    };
   }
-  const response = parseCanvasAgentResponse(raw, ctx);
+  const response = parseCanvasAgentResponse(body, ctx);
   return {
     response,
     plan: describeOperationPlan(
       response.operations,
       planOptionsFromContext(ctx, response),
     ),
+    actionSummary: summary,
   };
 }
 
@@ -112,16 +122,27 @@ export function handleAgentResponse(
   raw: string,
   ctx: ParseContext,
 ): HandleGenerationResult {
-  if (shouldUseContentFirst(raw)) {
-    return handleContentFirstResponse(raw, ctx);
+  const { summary, body } = extractActionSummary(raw);
+  if (shouldUseContentFirst(body)) {
+    const result = handleContentFirstResponse(body, ctx);
+    return {
+      ...result,
+      actionSummary: summary ?? result.actionSummary,
+    };
   }
-  const response = parseCanvasAgentResponse(raw, ctx);
+  const response = parseCanvasAgentResponse(body, ctx);
   const plan = describeOperationPlan(
     response.operations,
     planOptionsFromContext(ctx, response),
   );
   const execution = applyAgentOperations(response);
-  return { kind: 'operations', response, plan, execution };
+  return {
+    kind: 'operations',
+    response,
+    plan,
+    execution,
+    actionSummary: summary,
+  };
 }
 
 export { CanvasAgentParseError, ContentParseError };

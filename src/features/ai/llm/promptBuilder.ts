@@ -26,6 +26,8 @@ import {
   CONTENT_FIRST_SYSTEM_PROMPT,
   isContentFirstMode,
 } from '../contentFirst';
+import { formatInteractionMemorySection } from '../../interactions/formatInteractionMemory';
+import type { InteractionView } from '../../interactions/interactionMemoryApi';
 
 export interface BuiltLlmPrompt {
   /** Original user request (never overwritten by system/context). */
@@ -33,6 +35,8 @@ export interface BuiltLlmPrompt {
   systemInstructions: string;
   /** Canvas context section body (without outer USER REQUEST). */
   ragContextSection: string;
+  /** Interaction-memory section (prompt + action-summary matches). */
+  interactionMemorySection: string;
   /** Selected note structure section (output format — not knowledge). */
   noteStructureSection: string;
   /** Full deterministic prompt ready to paste into ChatGPT. */
@@ -417,6 +421,8 @@ export function formatCanvasContextSection(context: RagContext): string {
 export interface BuildLlmPromptInput {
   userPrompt: string;
   ragContext: RagContext;
+  /** Top-k interaction memories (prompt/summary cosine matches). */
+  interactionMemories?: readonly InteractionView[];
   /** Snapshot of the structure selected for this request (null = No Structure). */
   selectedStructure?: NoteStructure | null;
   systemInstructions?: string;
@@ -447,6 +453,9 @@ export function buildLlmPrompt(input: BuildLlmPromptInput): BuiltLlmPrompt {
       : CANVAS_EDITOR_RESPONSE_INSTRUCTIONS)
   ).trim();
   const ragContextSection = formatCanvasContextSection(input.ragContext);
+  const interactionMemorySection = formatInteractionMemorySection(
+    input.interactionMemories ?? [],
+  );
   const noteStructureSection = input.selectedStructure
     ? formatNoteStructureForPrompt(input.selectedStructure)
     : formatNoStructureSelected();
@@ -455,9 +464,17 @@ export function buildLlmPrompt(input: BuildLlmPromptInput): BuiltLlmPrompt {
   const outputContract = contentFirst
     ? [
         'Write Markdown educational content only (headings, paragraphs, $$ display math, :::graph markers).',
+        'End with :::summary … ::: (stripped by the app — not canvas content).',
         'Do not emit canvas-operation JSON.',
       ].join('\n')
-    : CANVAS_AGENT_OUTPUT_CONTRACT;
+    : [
+        CANVAS_AGENT_OUTPUT_CONTRACT,
+        '',
+        'After the JSON object, append an action summary fence (never inside the JSON):',
+        ':::summary',
+        '…1–3 past-tense sentences describing what you did…',
+        ':::',
+      ].join('\n');
 
   const finalLlmPrompt = [
     'SYSTEM INSTRUCTIONS',
@@ -473,6 +490,10 @@ export function buildLlmPrompt(input: BuildLlmPromptInput): BuiltLlmPrompt {
     '='.repeat(50),
     '',
     ragContextSection,
+    '',
+    '='.repeat(50),
+    '',
+    interactionMemorySection,
     '',
     '='.repeat(50),
     '',
@@ -496,6 +517,7 @@ export function buildLlmPrompt(input: BuildLlmPromptInput): BuiltLlmPrompt {
     userPrompt,
     systemInstructions,
     ragContextSection,
+    interactionMemorySection,
     noteStructureSection,
     finalLlmPrompt,
     imageAttachments,

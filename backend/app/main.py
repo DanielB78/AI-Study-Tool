@@ -30,8 +30,10 @@ def create_app() -> FastAPI:
     app.include_router(rag_routes.router)
     app.include_router(embedding_routes.router)
     from .rag.handwriting import routes as handwriting_routes
+    from .interactions import routes as interaction_routes
 
     app.include_router(handwriting_routes.router)
+    app.include_router(interaction_routes.router)
     return app
 
 
