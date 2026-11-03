@@ -197,6 +197,22 @@ Markdown explanation (headings, paragraphs, `$$` equations, `:::graph` as usual)
 Multiple `:::json` blocks may appear in one response; each owns the Markdown until the next `:::json`.
 Ordinary new lessons still use plain Markdown with **no** `:::json`.
 
+## Action summary (required)
+
+After all lesson / edit content, end with a short action summary in this exact fence (same style as `:::graph`). The app strips it — it is **never** added to the canvas:
+
+```
+:::summary
+Created a lesson on simple harmonic motion with a cos(x) displacement graph and the defining ODE.
+:::
+```
+
+- 1–3 sentences, past tense: what you created or changed
+- Include concrete topics, equations, or graph expressions when relevant
+- Do **not** restate the user prompt verbatim
+- Place it at the **end**, after all Markdown / `:::json` / `:::structure` / `:::graph` content (still inside the ```markdown wrapper when used)
+- Marker must open with `:::summary` and close with `:::` alone on a line
+
 ## Educational quality
 
 - Accurate mathematics and physics; define symbols; state assumptions when needed
@@ -204,4 +220,4 @@ Ordinary new lessons still use plain Markdown with **no** `:::json`.
 
 ## What the application does
 
-Creates Text / Equation / Graph elements, keeps reading order, packs them using the user's layout settings (direction and optional limits), centres equations, handles sizing, spacing, undo and persistence. Applies `:::json` edit/add_text via existing update/create operations. Do not emit rows, columns, coordinates, or sizes.
+Creates Text / Equation / Graph elements, keeps reading order, packs them using the user's layout settings (direction and optional limits), centres equations, handles sizing, spacing, undo and persistence. Applies `:::json` edit/add_text via existing update/create operations. Strips the trailing `:::summary` fence into interaction memory (not canvas content). Do not emit rows, columns, coordinates, or sizes.

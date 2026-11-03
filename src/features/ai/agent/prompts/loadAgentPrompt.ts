@@ -525,7 +525,10 @@ USER: "Explain how we move from this equation to the next." (context / prior ref
 `;
 
 export const CANVAS_EDITOR_RESPONSE_INSTRUCTIONS = [
-  'Return ONLY the JSON object described above.',
-  'Do not wrap it in Markdown code fences.',
-  'Do not include any text outside the JSON object.',
+  'Return the JSON object described above (no Markdown code fences around it).',
+  'Immediately after the JSON, append an action summary fence the app will strip (never canvas content):',
+  ':::summary',
+  '…1–3 past-tense sentences describing what you created or changed…',
+  ':::',
+  'Put no other prose outside the JSON and that summary fence.',
 ].join('\n');

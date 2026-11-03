@@ -93,6 +93,13 @@ import {
 } from '../ai/contentFirst';
 import { useStructureStore } from '../structures/structureStore';
 import type { NoteStructure } from '../structures/types';
+import {
+  INTERACTION_MEMORY_TOP_K,
+  extractActionSummary,
+  formatInteractionMemorySection,
+  interactionMemoryApi,
+  type InteractionView,
+} from '../interactions';
 
 export interface RagDebugState {
   open: boolean;
@@ -149,6 +156,8 @@ export interface RagDebugState {
   /** Parsed plan ready for Apply (null until valid JSON is previewed). */
   pendingPlan: string[] | null;
   pendingOperations: CanvasAgentResponse | null;
+  /** Summary extracted from the last previewed paste (for record-on-apply). */
+  pendingActionSummary: string | null;
   /** Grid placement debug from last preview/apply (not persisted). */
   layoutDebug: LayoutDebugInfo | null;
   parseError: string | null;
@@ -165,6 +174,8 @@ export interface RagDebugState {
   } | null;
   /** Observational prompt-intent classification from the last Retrieve. */
   promptIntent: PromptIntentClassification | null;
+  /** Top-k interaction memories from the last retrieve (prompt/summary cosine). */
+  interactionMemories: InteractionView[];
 
   openPanel: () => void;
   closePanel: () => void;
@@ -544,6 +555,36 @@ function clampMaxNeighbours(n: number): number {
   );
 }
 
+/** Fire-and-forget record of an applied AI turn into interaction memory. */
+async function recordInteractionMemory(input: {
+  userPrompt: string;
+  actionSummary: string;
+  createdIds: string[];
+  updatedIds: string[];
+  affectedIds: string[];
+}): Promise<void> {
+  const boardId = useCanvasStore.getState().document.id;
+  const affected = input.affectedIds.length
+    ? input.affectedIds
+    : [...new Set([...input.createdIds, ...input.updatedIds])];
+  try {
+    await interactionMemoryApi.record({
+      board_id: boardId,
+      user_prompt: input.userPrompt,
+      action_summary: input.actionSummary,
+      transaction_id:
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `txn_${Date.now()}`,
+      affected_element_ids: affected,
+      created_element_ids: input.createdIds,
+      updated_element_ids: input.updatedIds,
+    });
+  } catch {
+    // Non-blocking — canvas apply already succeeded.
+  }
+}
+
 export function createRagDebugStore() {
   return create<RagDebugState>((set, get) => {
     const runSemanticExpand = async () => {
@@ -626,6 +667,7 @@ export function createRagDebugStore() {
       pastedResponse: '',
       pendingPlan: null,
       pendingOperations: null,
+      pendingActionSummary: null,
       layoutDebug: null,
       parseError: null,
       llmExecutionMode: DEFAULT_LLM_EXECUTION_MODE,
@@ -635,6 +677,7 @@ export function createRagDebugStore() {
       lastQueryChunks: 0,
       lastRetrieveMeta: null,
       promptIntent: null,
+      interactionMemories: [],
 
       openPanel: () => set({ open: true }),
       closePanel: () =>
@@ -645,6 +688,7 @@ export function createRagDebugStore() {
           responseModalOpen: false,
           pendingPlan: null,
           pendingOperations: null,
+          pendingActionSummary: null,
           layoutDebug: null,
           parseError: null,
         }),
@@ -656,6 +700,7 @@ export function createRagDebugStore() {
           responseModalOpen: s.open ? false : s.responseModalOpen,
           pendingPlan: s.open ? null : s.pendingPlan,
           pendingOperations: s.open ? null : s.pendingOperations,
+          pendingActionSummary: s.open ? null : s.pendingActionSummary,
           layoutDebug: s.open ? null : s.layoutDebug,
         })),
 
@@ -890,6 +935,7 @@ export function createRagDebugStore() {
         const built = buildLlmPrompt({
           userPrompt: prompt,
           ragContext: context,
+          interactionMemories: state.interactionMemories,
           selectedStructure: resolveSnapshottedStructure(state.selectedStructureId),
         });
         set({ lastBuiltPrompt: built });
@@ -935,6 +981,7 @@ export function createRagDebugStore() {
           pastedResponse: '',
           pendingPlan: null,
           pendingOperations: null,
+          pendingActionSummary: null,
           layoutDebug: null,
           parseError: null,
           error: null,
@@ -945,6 +992,7 @@ export function createRagDebugStore() {
           pastedResponse: '',
           pendingPlan: null,
           pendingOperations: null,
+          pendingActionSummary: null,
           layoutDebug: null,
           parseError: null,
         }),
@@ -953,6 +1001,7 @@ export function createRagDebugStore() {
           pastedResponse: value,
           pendingPlan: null,
           pendingOperations: null,
+          pendingActionSummary: null,
           layoutDebug: null,
           parseError: null,
         }),
@@ -994,6 +1043,7 @@ export function createRagDebugStore() {
           set({
             pendingPlan: parsed.plan,
             pendingOperations: parsed.response,
+            pendingActionSummary: parsed.actionSummary,
             layoutDebug,
             parseError: null,
             error: null,
@@ -1009,6 +1059,7 @@ export function createRagDebugStore() {
           set({
             pendingPlan: null,
             pendingOperations: null,
+            pendingActionSummary: null,
             layoutDebug: null,
             parseError: message,
             error: message,
@@ -1024,6 +1075,7 @@ export function createRagDebugStore() {
             pastedResponse: text,
             pendingPlan: null,
             pendingOperations: null,
+            pendingActionSummary: null,
             layoutDebug: null,
             parseError: null,
           });
@@ -1037,10 +1089,12 @@ export function createRagDebugStore() {
       applyPastedResponse: () => {
         const state = get();
         let ops = state.pendingOperations;
+        let actionSummary = state.pendingActionSummary;
         if (!ops) {
           const ok = get().previewPastedPlan();
           if (!ok) return false;
           ops = get().pendingOperations;
+          actionSummary = get().pendingActionSummary;
         }
         if (!ops || ops.operations.length === 0) {
           set({ error: 'No validated operations to apply.' });
@@ -1049,11 +1103,29 @@ export function createRagDebugStore() {
 
         try {
           const result = applyAgentOperations(ops);
+          const userPrompt =
+            get().prompt.trim() || useAiStore.getState().lastPrompt || '';
+          const summary =
+            actionSummary?.trim() ||
+            extractActionSummary(get().pastedResponse).summary ||
+            (result.createdIds.length || result.updatedIds.length
+              ? `Applied ${ops.operations.length} canvas operation(s).`
+              : null);
+          if (summary && userPrompt) {
+            void recordInteractionMemory({
+              userPrompt,
+              actionSummary: summary,
+              createdIds: result.createdIds,
+              updatedIds: result.updatedIds,
+              affectedIds: result.affectedIds,
+            });
+          }
           set({
             responseModalOpen: false,
             pastedResponse: '',
             pendingPlan: null,
             pendingOperations: null,
+            pendingActionSummary: null,
             layoutDebug: result.layoutDebug ?? null,
             parseError: null,
             statusMessage: `Applied ${ops.operations.length} operation(s)`,
@@ -1092,12 +1164,14 @@ export function createRagDebugStore() {
           ? buildLlmPrompt({
               userPrompt: state.prompt.trim(),
               ragContext: context,
+              interactionMemories: state.interactionMemories,
             })
           : null;
         const payload = {
           userPrompt: state.prompt,
           llmExecutionMode: state.llmExecutionMode,
           promptIntent: state.promptIntent,
+          interactionMemories: state.interactionMemories,
           explicitSelection: context.explicitlySelectedElements.map((e) => ({
             element_id: e.element_id,
             element_type: e.element_type,
@@ -1163,10 +1237,19 @@ export function createRagDebugStore() {
         set({ retrieving: true, error: null, statusMessage: null });
         try {
           const boardId = useCanvasStore.getState().document.id;
-          const result = await ragRetrievalService.retrieve({
-            board_id: boardId,
-            prompt,
-          });
+          const [result, memoryResult] = await Promise.all([
+            ragRetrievalService.retrieve({
+              board_id: boardId,
+              prompt,
+            }),
+            interactionMemoryApi
+              .retrieve(boardId, {
+                prompt,
+                top_k: INTERACTION_MEMORY_TOP_K,
+              })
+              .catch(() => null),
+          ]);
+          const interactionMemories = memoryResult?.matches ?? [];
           const regionDebug = get().explicitRegionSelectionDebug;
           const regionNote =
             regionDebug?.imageAttachmentCreated
@@ -1176,6 +1259,10 @@ export function createRagDebugStore() {
                 : regionDebug?.kind === 'empty'
                   ? ' · empty region'
                   : '';
+          const memoryNote =
+            interactionMemories.length > 0
+              ? ` · ${interactionMemories.length} memory match(es)`
+              : '';
           set({
             candidates: result.candidates,
             selectedAnchorIds: [],
@@ -1190,8 +1277,9 @@ export function createRagDebugStore() {
               min_similarity: result.min_similarity,
             },
             promptIntent: result.prompt_intent ?? null,
+            interactionMemories,
             retrieving: false,
-            statusMessage: `${result.candidates.length} semantic candidate(s) · ${explicitSelectionIds.length} editor selection(s)${regionNote}`,
+            statusMessage: `${result.candidates.length} semantic candidate(s) · ${explicitSelectionIds.length} editor selection(s)${regionNote}${memoryNote}`,
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : 'Retrieve failed';
@@ -1204,6 +1292,7 @@ export function createRagDebugStore() {
             semanticExpandResponse: null,
             semanticIncludedIds: [],
             promptIntent: null,
+            interactionMemories: [],
           });
         }
       },
@@ -1243,9 +1332,23 @@ export function createRagDebugStore() {
         if (state.sending) return;
 
         const { context } = computeDebugContext(submitted);
+        // Refresh interaction memories for this prompt (best-effort).
+        let interactionMemories = submitted.interactionMemories;
+        try {
+          const boardId = useCanvasStore.getState().document.id;
+          const memoryResult = await interactionMemoryApi.retrieve(boardId, {
+            prompt,
+            top_k: INTERACTION_MEMORY_TOP_K,
+          });
+          interactionMemories = memoryResult.matches;
+          set({ interactionMemories });
+        } catch {
+          // Keep any memories from the last Retrieve.
+        }
         const built = buildLlmPrompt({
           userPrompt: prompt,
           ragContext: context,
+          interactionMemories,
           selectedStructure: resolveSnapshottedStructure(submitted.selectedStructureId),
         });
         set({ sending: true, error: null, statusMessage: null, lastBuiltPrompt: built });
@@ -1300,7 +1403,11 @@ export function createRagDebugStore() {
             : CANVAS_EDITOR_SYSTEM_PROMPT;
           const result = await aiService.sendPrompt(prompt, undefined, {
             systemInstruction,
-            canvasContext: [context.serialized, built.noteStructureSection]
+            canvasContext: [
+              context.serialized,
+              formatInteractionMemorySection(interactionMemories),
+              built.noteStructureSection,
+            ]
               .filter(Boolean)
               .join('\n\n'),
             imageAttachments: context.imageAttachments.map((a) => ({
@@ -1344,6 +1451,23 @@ export function createRagDebugStore() {
               errorMessage: message,
             });
             return;
+          }
+
+          const summary =
+            applied.actionSummary?.trim() ||
+            (applied.execution &&
+            (applied.execution.createdIds.length ||
+              applied.execution.updatedIds.length)
+              ? `Applied ${applied.response.operations.length} canvas operation(s).`
+              : null);
+          if (summary) {
+            void recordInteractionMemory({
+              userPrompt: prompt,
+              actionSummary: summary,
+              createdIds: applied.execution?.createdIds ?? [],
+              updatedIds: applied.execution?.updatedIds ?? [],
+              affectedIds: applied.execution?.affectedIds ?? [],
+            });
           }
 
           set({

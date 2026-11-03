@@ -44,6 +44,7 @@ import {
 import { splitContentFirstEnvelope } from './jsonDirective';
 import type { ContentDocument, ContentFirstEnvelope } from './types';
 import { ContentParseError } from './types';
+import { extractActionSummary } from '../../interactions/actionSummaryFence';
 
 export type ContentFirstHandleResult = {
   kind: 'content_first';
@@ -55,6 +56,8 @@ export type ContentFirstHandleResult = {
   batches: CanvasAgentResponse[];
   plan: string[];
   execution?: ExecuteAgentOpsResult;
+  /** LLM :::summary body when present; never applied to the canvas. */
+  actionSummary: string | null;
 };
 
 function emptyCompile(operations: CanvasOperation[]): CompileContentResult {
@@ -77,8 +80,11 @@ export function compileContentFirstBatches(
   envelope: ContentFirstEnvelope;
   batches: CanvasAgentResponse[];
   compile: CompileContentResult;
+  actionSummary: string | null;
 } {
-  const envelope = splitContentFirstEnvelope(raw);
+  // Strip :::summary before any content parse so it never becomes canvas text.
+  const extracted = extractActionSummary(raw);
+  const envelope = splitContentFirstEnvelope(extracted.body);
   const batches: CanvasAgentResponse[] = [];
   let document: ContentDocument | null = null;
   let preambleCompile: CompileContentResult | null = null;
@@ -179,7 +185,13 @@ export function compileContentFirstBatches(
     }
   }
 
-  return { document, envelope, batches: validated, compile };
+  return {
+    document,
+    envelope,
+    batches: validated,
+    compile,
+    actionSummary: extracted.summary,
+  };
 }
 
 export function parseContentFirstToAgentResponse(
@@ -192,6 +204,7 @@ export function parseContentFirstToAgentResponse(
   response: CanvasAgentResponse;
   batches: CanvasAgentResponse[];
   plan: string[];
+  actionSummary: string | null;
 } {
   const compiled = compileContentFirstBatches(raw, ctx);
   const response = compiled.compile.response;
