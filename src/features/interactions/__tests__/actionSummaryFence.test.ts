@@ -74,4 +74,23 @@ describe('extractActionSummary', () => {
     expect(fence).toBe(':::summary\nDid the thing.\n:::');
     expect(extractActionSummary(`Body\n\n${fence}`).summary).toBe('Did the thing.');
   });
+
+  it('extracts :::summary placed after the closing ```markdown fence', () => {
+    const raw = [
+      '```markdown',
+      '# Title',
+      '',
+      'Body prose.',
+      '```',
+      '',
+      ':::summary',
+      'Created a titled note.',
+      ':::',
+    ].join('\n');
+    const result = extractActionSummary(raw);
+    expect(result.found).toBe(true);
+    expect(result.summary).toBe('Created a titled note.');
+    expect(result.body.trim()).toBe('# Title\n\nBody prose.');
+    expect(result.body).not.toContain('```');
+  });
 });
